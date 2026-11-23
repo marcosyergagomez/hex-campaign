@@ -2,6 +2,7 @@
 
 import hashlib
 from datetime import timedelta
+from typing import get_args
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -158,3 +159,10 @@ def test_mail_failure_does_not_keep_the_user(client, settings) -> None:
 
     assert response.status_code == 503
     assert User.objects.filter(email="baja@example.com").count() == 0
+
+
+def test_api_sex_codes_match_the_model() -> None:
+    from api.app import RegisterPayload
+    from apps.accounts.validation import Sex
+
+    assert set(get_args(RegisterPayload.model_fields["sex"].annotation)) == set(Sex.values)

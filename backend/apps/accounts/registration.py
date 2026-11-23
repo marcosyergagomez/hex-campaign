@@ -13,11 +13,11 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
-from django.db import IntegrityError, close_old_connections, transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .models import EmailVerification, User
-from .validation import registration_errors
+from .validation import canonical_alias, canonical_email, registration_errors
 
 ACCEPTED_DETAIL = "Si el correo está libre, te enviaremos un enlace para confirmarlo."
 TOKEN_TTL = timedelta(hours=24)
@@ -74,8 +74,8 @@ def register_account(
     if errors:
         raise RegistrationError(errors)
 
-    normalized_email = email.strip().lower()
-    cleaned_alias = alias.strip()
+    normalized_email = canonical_email(email)
+    cleaned_alias = canonical_alias(alias)
     if User.objects.filter(email=normalized_email).exists():
         # Same hash cost as a new account, so the timing does not give the address away.
         User().set_password(password)
@@ -114,26 +114,22 @@ def register_account(
 def confirm_email(raw_token: str) -> None:
     if not raw_token:
         raise InvalidConfirmation
-    close_old_connections()
-    try:
-        with transaction.atomic():
-            row = (
-                EmailVerification.objects.select_for_update()
-                .select_related("user")
-                .filter(token_hash=_digest(raw_token))
-                .first()
-            )
-            if row is None or row.used_at is not None or row.expires_at <= timezone.now():
-                raise InvalidConfirmation
-            now = timezone.now()
-            row.used_at = now
-            row.save(update_fields=["used_at"])
-            user = row.user
-            if user.email_verified_at is None:
-                user.email_verified_at = now
-                user.save(update_fields=["email_verified_at"])
-    finally:
-        close_old_connections()
+    with transaction.atomic():
+        row = (
+            EmailVerification.objects.select_for_update()
+            .select_related("user")
+            .filter(token_hash=_digest(raw_token))
+            .first()
+        )
+        if row is None or row.used_at is not None or row.expires_at <= timezone.now():
+            raise InvalidConfirmation
+        now = timezone.now()
+        row.used_at = now
+        row.save(update_fields=["used_at"])
+        user = row.user
+        if user.email_verified_at is None:
+            user.email_verified_at = now
+            user.save(update_fields=["email_verified_at"])
 
 
 def _send_confirmation(email: str, raw_token: str) -> None:
