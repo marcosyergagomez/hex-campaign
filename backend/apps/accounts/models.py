@@ -10,24 +10,20 @@ from django.db import models
 from django.db.models.functions import Lower
 from django.utils import timezone
 
-from .validation import ALIAS_PATTERN, MINIMUM_AGE_YEARS, SEX_VALUES, age_on
-
-
-class Sex(models.TextChoices):
-    WOMAN = "woman", "Mujer"
-    MAN = "man", "Hombre"
-    OTHER = "other", "Otro"
-    UNDISCLOSED = "undisclosed", "Prefiero no decirlo"
+from .validation import (
+    SEX_MESSAGE,
+    Sex,
+    alias_errors,
+    birth_date_errors,
+    canonical_alias,
+    canonical_email,
+)
 
 
 class UserManager(BaseUserManager):
     def create_user(self, email: str, password: str | None = None, **extra_fields: object):
-        if not email:
+        if not email or not str(email).strip():
             raise ValueError("An email is required.")
-        email = email.strip().lower()
-        alias = extra_fields.get("alias")
-        if isinstance(alias, str):
-            extra_fields["alias"] = alias.strip()
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
@@ -53,9 +49,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         max_length=16,
         choices=Sex.choices,
         verbose_name="sexo",
-        error_messages={
-            "invalid_choice": "Elige woman, man, other o undisclosed.",
-        },
+        error_messages={"invalid_choice": SEX_MESSAGE},
     )
     email_verified_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
@@ -78,7 +72,7 @@ class User(AbstractBaseUser, PermissionsMixin):
                 violation_error_message="Ese alias ya está en uso.",
             ),
             models.CheckConstraint(
-                condition=models.Q(sex__in=SEX_VALUES),
+                condition=models.Q(sex__in=tuple(Sex.values)),
                 name="accounts_user_sex_known",
             ),
             models.CheckConstraint(
@@ -89,25 +83,25 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def clean(self) -> None:
         super().clean()
-        if isinstance(self.email, str):
-            self.email = self.email.strip().lower()
-        if isinstance(self.alias, str):
-            self.alias = self.alias.strip()
+        self._canonicalize()
         errors: dict[str, list[str]] = {}
-        if self.alias and not ALIAS_PATTERN.fullmatch(self.alias):
-            errors["alias"] = ["El alias usa de 3 a 24 letras, números o guion bajo."]
-        if self.birth_date and age_on(self.birth_date, timezone.localdate()) < MINIMUM_AGE_YEARS:
-            errors["birth_date"] = ["Hay que tener al menos 16 años."]
+        if self.alias:
+            errors.update(alias_errors(self.alias))
+        if self.birth_date:
+            errors.update(birth_date_errors(self.birth_date, timezone.localdate()))
         if errors:
             raise ValidationError(errors)
 
-    def save(self, *args, **kwargs):
-        if isinstance(self.email, str):
-            self.email = self.email.strip().lower()
-        if isinstance(self.alias, str):
-            self.alias = self.alias.strip()
+    def save(self, *args, **kwargs) -> None:
+        self._canonicalize()
         self.full_clean()
-        return super().save(*args, **kwargs)
+        super().save(*args, **kwargs)
+
+    def _canonicalize(self) -> None:
+        if isinstance(self.email, str):
+            self.email = canonical_email(self.email)
+        if isinstance(self.alias, str):
+            self.alias = canonical_alias(self.alias)
 
     def __str__(self) -> str:
         return self.alias or self.email

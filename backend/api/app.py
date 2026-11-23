@@ -22,6 +22,7 @@ from apps.accounts.registration import (
     confirm_email,
     register_account,
 )
+from apps.accounts.validation import SEX_MESSAGE
 
 api = FastAPI(title="Hex Campaign")
 
@@ -58,7 +59,7 @@ def _field_name(location: tuple[object, ...]) -> str:
 
 def _validation_message(field: str, error_type: str) -> str:
     if field == "sex":
-        return "Elige woman, man, other o undisclosed."
+        return SEX_MESSAGE
     if error_type == "missing":
         return "Este campo es obligatorio."
     return "Dato no válido."
