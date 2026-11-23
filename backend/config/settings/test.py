@@ -16,3 +16,5 @@ DATABASES = {
         )
     )
 }
+EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+API_ORIGIN = "http://testserver"
