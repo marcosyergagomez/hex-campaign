@@ -8,6 +8,7 @@ def test_confirm_page_escapes_the_token_and_posts_it() -> None:
 
     assert 'lang="es"' in page
     assert 'content="noindex"' in page
+    assert 'content="no-referrer"' in page
     assert 'action="/api/users/verify-email"' in page
     assert 'value="&quot;&gt;&lt;script&gt;"' in page
     assert "<script>" not in page

@@ -6,6 +6,7 @@ The mailbox is the only place that receives the raw token.
 
 import hashlib
 import secrets
+import threading
 from datetime import date, timedelta
 from smtplib import SMTPException
 from urllib.parse import urlencode
@@ -14,6 +15,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 from .models import EmailVerification, User
@@ -21,6 +23,10 @@ from .validation import canonical_alias, canonical_email, registration_errors
 
 ACCEPTED_DETAIL = "Si el correo está libre, te enviaremos un enlace para confirmarlo."
 TOKEN_TTL = timedelta(hours=24)
+_EMAIL_CONSTRAINT = "accounts_user_email_key"
+_ALIAS_CONSTRAINT = "accounts_user_alias_ci"
+# Argon2 holds a large memory block, so only two hashes run at once.
+_HASH_SLOTS = threading.Semaphore(2)
 
 
 class RegistrationError(Exception):
@@ -39,6 +45,16 @@ class InvalidConfirmation(Exception):
 
 def _digest(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+def _set_password(user: User, password: str) -> None:
+    with _HASH_SLOTS:
+        user.set_password(password)
+
+
+def _alias_taken(alias: str) -> bool:
+    folded = alias.lower()
+    return User.objects.alias(alias_key=Lower("alias")).filter(alias_key=folded).exists()
 
 
 def _constraint_name(exc: IntegrityError) -> str:
@@ -78,9 +94,9 @@ def register_account(
     cleaned_alias = canonical_alias(alias)
     if User.objects.filter(email=normalized_email).exists():
         # Same hash cost as a new account, so the timing does not give the address away.
-        User().set_password(password)
+        _set_password(User(), password)
         return
-    if User.objects.filter(alias__iexact=cleaned_alias).exists():
+    if _alias_taken(cleaned_alias):
         raise RegistrationError({"alias": ["Ese alias ya está en uso."]})
 
     try:
@@ -91,7 +107,7 @@ def register_account(
                 birth_date=birth_date,
                 sex=sex,
             )
-            user.set_password(password)
+            _set_password(user, password)
             user.save()
             raw_token = secrets.token_urlsafe(32)
             EmailVerification.objects.create(
@@ -104,9 +120,9 @@ def register_account(
         _raise_or_hide(exc)
     except IntegrityError as exc:
         name = _constraint_name(exc)
-        if "alias" in name:
+        if name == _ALIAS_CONSTRAINT:
             raise RegistrationError({"alias": ["Ese alias ya está en uso."]}) from exc
-        if "email" in name:
+        if name == _EMAIL_CONSTRAINT:
             return
         raise
 
@@ -116,7 +132,7 @@ def confirm_email(raw_token: str) -> None:
         raise InvalidConfirmation
     with transaction.atomic():
         row = (
-            EmailVerification.objects.select_for_update()
+            EmailVerification.objects.select_for_update(of=("self",))
             .select_related("user")
             .filter(token_hash=_digest(raw_token))
             .first()
@@ -126,10 +142,10 @@ def confirm_email(raw_token: str) -> None:
         now = timezone.now()
         row.used_at = now
         row.save(update_fields=["used_at"])
-        user = row.user
-        if user.email_verified_at is None:
-            user.email_verified_at = now
-            user.save(update_fields=["email_verified_at"])
+        if row.user.email_verified_at is None:
+            User.objects.filter(pk=row.user_id, email_verified_at__isnull=True).update(
+                email_verified_at=now
+            )
 
 
 def _send_confirmation(email: str, raw_token: str) -> None:

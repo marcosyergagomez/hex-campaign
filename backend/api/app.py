@@ -7,12 +7,14 @@ from typing import Literal
 from urllib.parse import parse_qs
 
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.db import close_old_connections
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict
 
+from api.guard import AccountGuard
 from api.pages import confirm_page, result_page
 from apps.accounts.registration import (
     ACCEPTED_DETAIL,
@@ -24,10 +26,24 @@ from apps.accounts.registration import (
 )
 from apps.accounts.validation import SEX_MESSAGE
 
-api = FastAPI(title="Hex Campaign")
+api = FastAPI(
+    title="Hex Campaign",
+    docs_url="/api/docs" if settings.DEBUG else None,
+    redoc_url=None,
+    openapi_url="/api/openapi.json" if settings.DEBUG else None,
+)
+api.add_middleware(AccountGuard)
 
 INVALID_LINK = "El enlace no es válido o ha caducado."
 CONFIRMED = "Correo confirmado."
+
+
+class Accepted(BaseModel):
+    detail: str
+
+
+class ErrorBody(BaseModel):
+    errors: dict[str, list[str]]
 
 
 class RegisterPayload(BaseModel):
@@ -77,9 +93,15 @@ async def reject_invalid_body(request: Request, exc: RequestValidationError) -> 
     return JSONResponse(status_code=422, content={"errors": errors})
 
 
-@api.post("/api/users", status_code=202, response_model=None)
+@api.post(
+    "/api/users",
+    status_code=202,
+    response_model=Accepted,
+    summary="Registrar una cuenta",
+    responses={422: {"model": ErrorBody}, 503: {"model": ErrorBody}},
+)
 @django_sync
-def register_user(payload: RegisterPayload) -> JSONResponse | dict[str, str]:
+def register_user(payload: RegisterPayload) -> JSONResponse | Accepted:
     try:
         register_account(
             email=payload.email,
@@ -95,10 +117,10 @@ def register_user(payload: RegisterPayload) -> JSONResponse | dict[str, str]:
             status_code=503,
             content={"errors": {"email": ["No se ha podido enviar el correo."]}},
         )
-    return {"detail": ACCEPTED_DETAIL}
+    return Accepted(detail=ACCEPTED_DETAIL)
 
 
-@api.get("/api/users/verify-email")
+@api.get("/api/users/verify-email", summary="Página para confirmar el correo")
 def verify_email_page(token: str = "") -> HTMLResponse:
     if not token:
         return HTMLResponse(result_page(INVALID_LINK), status_code=400)
@@ -113,8 +135,13 @@ def _confirm(raw_token: str) -> None:
         close_old_connections()
 
 
-@api.post("/api/users/verify-email", response_model=None)
-async def verify_email(request: Request) -> HTMLResponse | dict[str, str]:
+@api.post(
+    "/api/users/verify-email",
+    response_model=Accepted,
+    summary="Confirmar el correo",
+    responses={400: {"model": ErrorBody}},
+)
+async def verify_email(request: Request) -> HTMLResponse | Accepted | JSONResponse:
     token, as_html = await _posted_token(request)
     try:
         await sync_to_async(_confirm)(token)
@@ -124,7 +151,7 @@ async def verify_email(request: Request) -> HTMLResponse | dict[str, str]:
         return JSONResponse(status_code=400, content={"errors": {"token": [INVALID_LINK]}})
     if as_html:
         return HTMLResponse(result_page(CONFIRMED))
-    return {"detail": CONFIRMED}
+    return Accepted(detail=CONFIRMED)
 
 
 async def _posted_token(request: Request) -> tuple[str, bool]:

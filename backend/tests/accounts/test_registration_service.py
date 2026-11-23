@@ -225,6 +225,8 @@ def test_database_constraint_hides_email_and_reports_alias(mailoutbox) -> None:
     [
         ("accounts_user_email_key", None),
         ("accounts_user_alias_ci", {"alias": ["Ese alias ya está en uso."]}),
+        ("accounts_user_alias_shape", "raise"),
+        ("accounts_user_email_b2644a56_like", "raise"),
         ("accounts_user_pkey", "raise"),
         ("", "raise"),
     ],

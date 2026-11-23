@@ -103,6 +103,44 @@ def test_eleven_characters_is_too_short() -> None:
     assert "12" in errors["password"][0]
 
 
+def test_canonical_forms_fold_compat_characters() -> None:
+    assert canonical_email("\uff21da@example.com") == "ada@example.com"
+    assert canonical_alias("\uff41bc") == "abc"
+    assert alias_errors(canonical_alias("\uff41bc")) == {}
+
+
+def test_password_and_email_have_a_maximum_length() -> None:
+    long_password = registration_errors(
+        email="ada@example.com",
+        password="a" * 129,
+        alias="ada",
+        birth_date=date(1990, 1, 1),
+        sex=Sex.WOMAN,
+        today=TODAY,
+    )
+    assert long_password == {"password": ["La contraseña admite como máximo 128 caracteres."]}
+
+    accepted = registration_errors(
+        email="ada@example.com",
+        password="a" * 128,
+        alias="ada",
+        birth_date=date(1990, 1, 1),
+        sex=Sex.WOMAN,
+        today=TODAY,
+    )
+    assert accepted == {}
+
+    long_email = registration_errors(
+        email="a" * 250 + "@example.com",
+        password="una-clave-larga",
+        alias="ada",
+        birth_date=date(1990, 1, 1),
+        sex=Sex.WOMAN,
+        today=TODAY,
+    )
+    assert long_email["email"] == ["Introduce un correo válido."]
+
+
 def test_sex_codes_and_labels() -> None:
     assert Sex.WOMAN.label == "Mujer"
     assert Sex.MAN.label == "Hombre"
