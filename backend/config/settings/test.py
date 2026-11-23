@@ -16,3 +16,6 @@ DATABASES = {
         )
     )
 }
+EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+API_ORIGIN = "http://testserver"
+ACCOUNT_POST_LIMIT = 10_000

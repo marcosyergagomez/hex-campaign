@@ -10,11 +10,12 @@ from .models import User
 class UserAdmin(DjangoUserAdmin):
     model = User
     ordering = ("email",)
-    list_display = ("email", "email_verified_at", "is_active", "is_staff")
-    search_fields = ("email",)
+    list_display = ("email", "alias", "email_verified_at", "is_active", "is_staff")
+    search_fields = ("email", "alias")
     readonly_fields = ("created_at",)
     fieldsets = (
-        (None, {"fields": ("email", "password")}),
+        (None, {"fields": ("email", "alias", "password")}),
+        ("Perfil", {"fields": ("birth_date", "sex")}),
         ("Verificación", {"fields": ("email_verified_at", "created_at")}),
         (
             "Permisos",
@@ -22,5 +23,11 @@ class UserAdmin(DjangoUserAdmin):
         ),
     )
     add_fieldsets = (
-        (None, {"classes": ("wide",), "fields": ("email", "password1", "password2")}),
+        (
+            None,
+            {
+                "classes": ("wide",),
+                "fields": ("email", "alias", "birth_date", "sex", "password1", "password2"),
+            },
+        ),
     )
