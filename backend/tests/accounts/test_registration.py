@@ -214,6 +214,50 @@ def test_missing_token_is_rejected(client) -> None:
     assert response.status_code == 400
     assert "caducado" in response.text
     assert 'content="noindex"' in response.text
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+
+
+def test_a_very_long_password_is_rejected(client) -> None:
+    response = client.post("/api/users", json=_payload(password="a" * 129))
+
+    assert response.status_code == 422
+    assert response.json()["errors"]["password"] == [
+        "La contraseña admite como máximo 128 caracteres."
+    ]
+
+
+def test_a_huge_body_is_rejected(client) -> None:
+    response = client.post(
+        "/api/users",
+        content=b'{"password":"' + b"a" * 5000 + b'"}',
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["errors"]["email"] == ["La solicitud es demasiado grande."]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_registration_is_rate_limited(client, settings) -> None:
+    from api.guard import clear_account_limits
+
+    clear_account_limits()
+    settings.ACCOUNT_POST_LIMIT = 2
+    first = client.post("/api/users", json=_payload(email="uno@example.com", alias="uno_alias"))
+    second = client.post("/api/users", json=_payload(email="dos@example.com", alias="dos_alias"))
+    blocked = client.post("/api/users", json=_payload(email="tres@example.com", alias="tres_alias"))
+    clear_account_limits()
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert blocked.status_code == 429
+    assert blocked.json()["errors"]["email"] == [
+        "Demasiados intentos. Prueba de nuevo en unos minutos."
+    ]
+    assert User.objects.filter(email="tres@example.com").count() == 0
 
 
 @pytest.mark.django_db(transaction=True)

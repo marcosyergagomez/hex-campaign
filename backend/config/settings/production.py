@@ -31,3 +31,5 @@ if not os.environ.get("EMAIL_HOST"):
     raise ImproperlyConfigured("EMAIL_HOST is required.")
 if not os.environ.get("DEFAULT_FROM_EMAIL"):
     raise ImproperlyConfigured("DEFAULT_FROM_EMAIL is required.")
+if not os.environ.get("API_ORIGIN"):
+    raise ImproperlyConfigured("API_ORIGIN is required.")

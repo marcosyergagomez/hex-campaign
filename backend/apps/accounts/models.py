@@ -11,6 +11,7 @@ from django.db.models.functions import Lower
 from django.utils import timezone
 
 from .validation import (
+    MINIMUM_AGE_YEARS,
     SEX_MESSAGE,
     Sex,
     alias_errors,
@@ -44,7 +45,10 @@ class User(AbstractBaseUser, PermissionsMixin):
         verbose_name="alias",
         help_text="De 3 a 24 letras, números o guion bajo. No distingue mayúsculas.",
     )
-    birth_date = models.DateField(verbose_name="fecha de nacimiento")
+    birth_date = models.DateField(
+        verbose_name="fecha de nacimiento",
+        help_text=f"Hay que tener al menos {MINIMUM_AGE_YEARS} años.",
+    )
     sex = models.CharField(
         max_length=16,
         choices=Sex.choices,
@@ -93,6 +97,7 @@ class User(AbstractBaseUser, PermissionsMixin):
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs) -> None:
+        # Every write, including the admin, keeps the canonical form and the profile rules.
         self._canonicalize()
         self.full_clean()
         super().save(*args, **kwargs)

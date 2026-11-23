@@ -1,6 +1,7 @@
 """Account rules shared by the model and registration."""
 
 import re
+import unicodedata
 from datetime import date
 
 from django.contrib.auth.password_validation import validate_password
@@ -11,7 +12,10 @@ from django.utils import translation
 
 ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,24}\Z")
 MINIMUM_AGE_YEARS = 16
+MAX_EMAIL_LENGTH = 254
+MAX_PASSWORD_LENGTH = 128
 ALIAS_MESSAGE = "El alias usa de 3 a 24 letras, números o guion bajo."
+PASSWORD_TOO_LONG = f"La contraseña admite como máximo {MAX_PASSWORD_LENGTH} caracteres."
 
 
 class Sex(models.TextChoices):
@@ -27,11 +31,11 @@ _EMAIL = EmailValidator(message="Introduce un correo válido.")
 
 
 def canonical_email(value: str) -> str:
-    return value.strip().lower()
+    return unicodedata.normalize("NFKC", value).strip().lower()
 
 
 def canonical_alias(value: str) -> str:
-    return value.strip()
+    return unicodedata.normalize("NFKC", value).strip()
 
 
 def age_on(born: date, on: date) -> int:
@@ -42,7 +46,7 @@ def age_on(born: date, on: date) -> int:
 
 
 def alias_errors(alias: str) -> dict[str, list[str]]:
-    if ALIAS_PATTERN.fullmatch(alias):
+    if len(alias) <= 24 and ALIAS_PATTERN.fullmatch(alias):
         return {}
     return {"alias": [ALIAS_MESSAGE]}
 
@@ -63,19 +67,26 @@ def registration_errors(
     today: date,
 ) -> dict[str, list[str]]:
     errors: dict[str, list[str]] = {}
-    try:
-        _EMAIL(canonical_email(email))
-    except ValidationError as exc:
-        errors["email"] = list(exc.messages)
+    normalized = canonical_email(email)
+    if len(normalized) > MAX_EMAIL_LENGTH:
+        errors["email"] = ["Introduce un correo válido."]
+    else:
+        try:
+            _EMAIL(normalized)
+        except ValidationError as exc:
+            errors["email"] = list(exc.messages)
 
     errors.update(alias_errors(canonical_alias(alias)))
     errors.update(birth_date_errors(birth_date, today))
     if sex not in Sex.values:
         errors["sex"] = [SEX_MESSAGE]
 
-    try:
-        with translation.override("es"):
-            validate_password(password)
-    except ValidationError as exc:
-        errors["password"] = list(exc.messages)
+    if len(password) > MAX_PASSWORD_LENGTH:
+        errors["password"] = [PASSWORD_TOO_LONG]
+    else:
+        try:
+            with translation.override("es"):
+                validate_password(password)
+        except ValidationError as exc:
+            errors["password"] = list(exc.messages)
     return errors

@@ -118,6 +118,8 @@ EMAIL_USE_SSL = _env_flag("EMAIL_USE_SSL")
 EMAIL_TIMEOUT = 10
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@localhost")
 API_ORIGIN = os.environ.get("API_ORIGIN", "http://127.0.0.1:8000").rstrip("/")
+ACCOUNT_POST_LIMIT = int(os.environ.get("ACCOUNT_POST_LIMIT", "30"))
+ACCOUNT_POST_WINDOW_SECONDS = int(os.environ.get("ACCOUNT_POST_WINDOW_SECONDS", "60"))
 
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 30
 SESSION_COOKIE_HTTPONLY = True
