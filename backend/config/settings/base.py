@@ -119,6 +119,17 @@ EMAIL_USE_SSL = _env_flag("EMAIL_USE_SSL")
 EMAIL_TIMEOUT = 10
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@localhost")
 API_ORIGIN = os.environ.get("API_ORIGIN", "http://127.0.0.1:8000").rstrip("/")
+# HMAC key for player-session cookies. A database copy without this is not a login.
+SESSION_PEPPER = os.environ.get("SESSION_PEPPER", "")
+# The campaign can last for months. The cookie does not: 60 days idle, 180 absolute.
+SESSION_IDLE_SECONDS = 60 * 60 * 24 * 60
+SESSION_ABSOLUTE_SECONDS = 60 * 60 * 24 * 180
+SESSION_TOUCH_SECONDS = 60 * 60
+SESSION_MAX_PER_USER = 10
+LOGIN_IP_LIMIT = int(os.environ.get("LOGIN_IP_LIMIT", "10"))
+LOGIN_IP_WINDOW_SECONDS = int(os.environ.get("LOGIN_IP_WINDOW_SECONDS", "900"))
+LOGIN_EMAIL_LIMIT = int(os.environ.get("LOGIN_EMAIL_LIMIT", "10"))
+LOGIN_EMAIL_WINDOW_SECONDS = int(os.environ.get("LOGIN_EMAIL_WINDOW_SECONDS", "900"))
 ACCOUNT_POST_LIMIT = int(os.environ.get("ACCOUNT_POST_LIMIT", "30"))
 ACCOUNT_POST_WINDOW_SECONDS = int(os.environ.get("ACCOUNT_POST_WINDOW_SECONDS", "60"))
 ADMIN_LOGIN_LIMIT = int(os.environ.get("ADMIN_LOGIN_LIMIT", "20"))
