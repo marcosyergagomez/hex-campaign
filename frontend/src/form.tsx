@@ -72,3 +72,59 @@ export function Field({
     </div>
   )
 }
+
+export function SelectField({
+  label,
+  name,
+  value,
+  hint,
+  error,
+  options,
+  onChange,
+}: {
+  label: string
+  name: string
+  value: string
+  hint?: string
+  error?: string[]
+  options: readonly { value: string; label: string }[]
+  onChange: (value: string) => void
+}) {
+  const { text } = useI18n()
+  const hintId = hint ? `${name}-hint` : undefined
+  const errorId = error?.length ? `${name}-error` : undefined
+  const describedBy = [hintId, errorId].filter((id) => id).join(" ")
+  const shown = error?.map(text)
+  return (
+    <div className="field">
+      <label className="label-text" htmlFor={name}>
+        {label}
+      </label>
+      <select
+        id={name}
+        name={name}
+        value={value}
+        required
+        aria-invalid={Boolean(shown?.length)}
+        aria-describedby={describedBy || undefined}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {hint ? (
+        <p id={hintId} className="hint">
+          {hint}
+        </p>
+      ) : null}
+      {shown?.length ? (
+        <p id={errorId} className="field-error">
+          {shown.join(" ")}
+        </p>
+      ) : null}
+    </div>
+  )
+}

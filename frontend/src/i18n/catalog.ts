@@ -53,6 +53,9 @@ const fromSpanish = [
   "tooLarge",
   "mailFailed",
   "acceptedDetail",
+  "rulesInvalid",
+  "campaignNotFound",
+  "campaignRevisionConflict",
 ] as const satisfies readonly MessageKey[]
 
 const knownMessages: Record<string, MessageKey> = indexSpanish(fromSpanish)
