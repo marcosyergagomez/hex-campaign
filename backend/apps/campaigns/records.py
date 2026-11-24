@@ -39,17 +39,29 @@ class RevisionConflict(CampaignError):
 
 def create_campaign(user, name: str, rules: dict) -> tuple[Campaign, Game]:
     try:
-        game = create_game(name, rules_from(rules), str(user.pk), user.alias)
+        parsed = rules_from(rules)
     except DomainError as exc:
         raise CampaignError(exc.code) from exc
     with transaction.atomic():
+        account = _actor(user)
+        try:
+            game = create_game(name, parsed, str(account.pk), account.alias)
+        except DomainError as exc:
+            raise CampaignError(exc.code) from exc
         campaign = Campaign.objects.create(name=game.name, state=to_dict(game))
         _sync(campaign, game)
     return campaign, game
 
 
-def play(campaign_id, revision: int, command: Callable[[Game], Game]) -> tuple[Campaign, Game]:
+def play(
+    user,
+    campaign_id,
+    revision: int,
+    command: Callable[[Game], Game],
+) -> tuple[Campaign, Game]:
     with transaction.atomic():
+        # The account row is locked before the campaign, same order as User.save.
+        _actor(user)
         campaign = _locked(campaign_id)
         game = _document(campaign)
         if game.revision != revision:
@@ -64,14 +76,14 @@ def play(campaign_id, revision: int, command: Callable[[Game], Game]) -> tuple[C
 
 def invite_alias(user, campaign_id, revision: int, alias: str) -> tuple[Campaign, Game]:
     invited = _player_by_alias(alias)
-    if invited is None:
+    if invited is None or not invited.is_active or invited.email_verified_at is None:
         raise CampaignError("unknown_player")
 
     def command(game: Game) -> Game:
         return invite_player(game, str(user.pk), str(invited.pk), invited.alias)
 
     with transaction.atomic():
-        campaign, game = play(campaign_id, revision, command)
+        campaign, game = play(user, campaign_id, revision, command)
         Invitation.objects.create(
             campaign=campaign,
             token_hash=_digest(secrets.token_urlsafe(32)),
@@ -83,6 +95,7 @@ def invite_alias(user, campaign_id, revision: int, alias: str) -> tuple[Campaign
 def invite_link(user, campaign_id) -> str:
     raw = secrets.token_urlsafe(32)
     with transaction.atomic():
+        _actor(user)
         campaign = _locked(campaign_id)
         game = _document(campaign)
         try:
@@ -105,15 +118,16 @@ def accept_link(user, token: str, revision: int) -> tuple[Campaign, Game]:
 
 def accept_alias(user, campaign_id, revision: int) -> tuple[Campaign, Game]:
     with transaction.atomic():
+        account = _actor(user)
         campaign = _locked(campaign_id)
         found = (
             Invitation.objects.select_for_update()
-            .filter(campaign=campaign, invited_user=user, accepted_at__isnull=True)
+            .filter(campaign=campaign, invited_user=account, accepted_at__isnull=True)
             .first()
         )
         if found is None:
             raise CampaignError("invitation_invalid")
-        return _accept_locked(user, campaign, found, revision)
+        return _accept_locked(account, campaign, found, revision)
 
 
 def read_campaign(user, campaign_id, now) -> dict[str, object]:
@@ -125,20 +139,17 @@ def read_campaign(user, campaign_id, now) -> dict[str, object]:
 
 
 def list_campaigns(user) -> list[dict[str, object]]:
-    seats = Seat.objects.filter(user=user).select_related("campaign")
-    rows: list[dict[str, object]] = []
-    for seat in seats:
-        state = seat.campaign.state if isinstance(seat.campaign.state, dict) else {}
-        rows.append(
-            {
-                "id": str(seat.campaign_id),
-                "name": seat.campaign.name,
-                "role": seat.role,
-                "status": seat.status,
-                "phase": state.get("phase"),
-            }
-        )
-    return rows
+    seats = Seat.objects.filter(user=user).select_related("campaign").defer("campaign__state")
+    return [
+        {
+            "id": str(seat.campaign_id),
+            "name": seat.campaign.name,
+            "role": seat.role,
+            "status": seat.status,
+            "phase": seat.campaign.phase,
+        }
+        for seat in seats
+    ]
 
 
 def inbox(user) -> list[dict[str, object]]:
@@ -192,20 +203,21 @@ def deactivate_account(user_id: int) -> None:
 
 def _accept(user, invitation_id: int, revision: int) -> tuple[Campaign, Game]:
     with transaction.atomic():
-        # Lock the campaign before the invite so this cannot deadlock with a seat update.
+        # Lock the account, then the campaign, then the invite.
+        account = _actor(user)
         try:
             peek = Invitation.objects.get(pk=invitation_id)
         except Invitation.DoesNotExist:
             raise CampaignError("invitation_invalid") from None
         campaign = _locked(peek.campaign_id)
         found = Invitation.objects.select_for_update().get(pk=invitation_id)
-        if found.accepted_at is not None or found.invited_user_id not in {None, user.pk}:
+        if found.accepted_at is not None or found.invited_user_id not in {None, account.pk}:
             raise CampaignError("invitation_invalid")
-        return _accept_locked(user, campaign, found, revision)
+        return _accept_locked(account, campaign, found, revision)
 
 
 def _accept_locked(
-    user,
+    account,
     campaign: Campaign,
     found: Invitation,
     revision: int,
@@ -214,7 +226,7 @@ def _accept_locked(
     if game.revision != revision:
         raise RevisionConflict()
     try:
-        updated = accept_seat(game, str(user.pk), user.alias)
+        updated = accept_seat(game, str(account.pk), account.alias)
     except DomainError as exc:
         raise CampaignError(exc.code) from exc
     found.accepted_at = timezone.now()
@@ -235,6 +247,15 @@ def _card(campaign: Campaign, game: Game) -> dict[str, object]:
         "revision": game.revision,
         "joined": False,
     }
+
+
+def _actor(user):
+    from apps.accounts.models import User
+
+    account = User.objects.select_for_update().filter(pk=user.pk).first()
+    if account is None or not account.is_active or account.email_verified_at is None:
+        raise CampaignError("account_inactive")
+    return account
 
 
 def _player_by_alias(alias: str):

@@ -13,12 +13,23 @@ def initial_campaign_state() -> dict[str, object]:
 class Campaign(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=120)
+    # Copied from the document so a player's list does not load every order.
+    phase = models.CharField(max_length=16, default="setup")
     state = models.JSONField(default=initial_campaign_state)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ("-updated_at",)
+
+    def save(self, *args, **kwargs):
+        phase = self.state.get("phase") if isinstance(self.state, dict) else None
+        if isinstance(phase, str) and phase:
+            self.phase = phase[:16]
+            fields = kwargs.get("update_fields")
+            if fields is not None and "phase" not in fields:
+                kwargs["update_fields"] = {*fields, "phase"}
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return self.name
