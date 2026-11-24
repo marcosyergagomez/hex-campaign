@@ -152,6 +152,25 @@ def test_a_recent_visit_is_not_written_again(settings) -> None:
 
 
 @pytest.mark.django_db
+def test_an_expired_session_does_not_crowd_out_a_live_one(settings) -> None:
+    settings.SESSION_MAX_PER_USER = 2
+    _player()
+    older = login("ada@example.com", PASSWORD)
+    newer = login("ada@example.com", PASSWORD)
+    digest = session_digest(newer.token, purpose="session")
+    row = PlayerSession.objects.get(token_hash=digest)
+    row.expires_at = timezone.now() - timedelta(seconds=1)
+    row.save(update_fields=["expires_at"])
+
+    third = login("ada@example.com", PASSWORD)
+
+    assert load_session(older.token) is not None
+    assert load_session(newer.token) is None
+    assert load_session(third.token) is not None
+    assert PlayerSession.objects.count() == 2
+
+
+@pytest.mark.django_db
 def test_the_oldest_session_is_dropped_at_the_cap(settings) -> None:
     settings.SESSION_MAX_PER_USER = 2
     _player()
@@ -163,6 +182,44 @@ def test_the_oldest_session_is_dropped_at_the_cap(settings) -> None:
     assert load_session(second.token) is not None
     assert load_session(third.token) is not None
     assert PlayerSession.objects.count() == 2
+
+
+@pytest.mark.django_db
+def test_a_password_kept_in_memory_does_not_close_the_session() -> None:
+    user = _player()
+    opened = login("ada@example.com", PASSWORD)
+    user.set_password("otra-clave-larga")
+    user.alias = "otro_alias"
+    user.save(update_fields=["alias"])
+
+    user.refresh_from_db()
+    assert user.check_password(PASSWORD)
+    assert user.alias == "otro_alias"
+    assert load_session(opened.token) is not None
+
+
+@pytest.mark.django_db
+def test_an_unusable_password_still_pays_for_a_hash(monkeypatch: pytest.MonkeyPatch) -> None:
+    user = _player()
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
+    calls = {"encoded": 0, "user": 0}
+
+    def encoded(password: str, hashed: str) -> bool:
+        calls["encoded"] += 1
+        return False
+
+    def on_user(account: User, password: str) -> bool:
+        calls["user"] += 1
+        return False
+
+    monkeypatch.setattr("apps.accounts.sessions.check_encoded_password", encoded)
+    monkeypatch.setattr("apps.accounts.sessions.check_user_password", on_user)
+
+    with pytest.raises(LoginRejected):
+        login("ada@example.com", PASSWORD)
+
+    assert calls == {"encoded": 1, "user": 0}
 
 
 @pytest.mark.django_db

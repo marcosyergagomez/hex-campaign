@@ -106,7 +106,9 @@ class User(AbstractBaseUser, PermissionsMixin):
         with transaction.atomic():
             previous = self._locked_credentials()
             super().save(*args, **kwargs)
-            if previous is not None and _sessions_should_close(previous, self):
+            if previous is not None and _sessions_should_close(
+                previous, self, kwargs.get("update_fields")
+            ):
                 PlayerSession.objects.filter(user_id=self.pk).delete()
 
     def _locked_credentials(self) -> dict[str, object] | None:
@@ -150,9 +152,20 @@ class EmailVerification(models.Model):
         return f"{self.user_id} {self.expires_at:%Y-%m-%d}"
 
 
-def _sessions_should_close(previous: dict[str, object], user: User) -> bool:
-    password_changed = previous["password"] != user.password
-    deactivated = bool(previous["is_active"]) and not user.is_active
+def _sessions_should_close(
+    previous: dict[str, object],
+    user: User,
+    update_fields,
+) -> bool:
+    # A password kept only in memory was not written, so it must not log anyone out.
+    writes_all = update_fields is None
+    fields = set(update_fields or ())
+    password_changed = previous["password"] != user.password and (
+        writes_all or "password" in fields
+    )
+    deactivated = bool(previous["is_active"]) and not user.is_active and (
+        writes_all or "is_active" in fields
+    )
     return password_changed or deactivated
 
 
