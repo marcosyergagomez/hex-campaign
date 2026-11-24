@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import datetime
 
+from hexcampaign.domain.chronicle import remember
 from hexcampaign.domain.clock import stamp
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import (
@@ -32,6 +33,7 @@ def create_game(name: str, rules: Rules, owner_id: str, alias: str) -> Game:
         hexes=list(disk(rules.map_size)),
     )
     game.members.append(Member(owner_id, alias, "owner", "active"))
+    remember(game, "opened", player_id=owner_id)
     return game
 
 
@@ -43,6 +45,7 @@ def change_rules(game: Game, actor: str, name: str, rules: Rules) -> Game:
     game.name = campaign_name(name)
     game.rules = rules
     game.hexes = list(disk(rules.map_size))
+    remember(game, "rules_changed", player_id=actor)
     return bump(game)
 
 
@@ -57,6 +60,7 @@ def invite_player(game: Game, actor: str, invitee_id: str, alias: str) -> Game:
     if existing is not None:
         raise DomainError("already_joined")
     notice(game, "invited", invitee_id, alias=alias)
+    remember(game, "invited", player_id=invitee_id)
     return bump(game)
 
 
@@ -72,6 +76,7 @@ def accept_seat(game: Game, player_id: str, alias: str) -> Game:
     if len(seated(game)) >= game.rules.seats:
         raise DomainError("seat_full")
     game.members.append(Member(player_id, alias, "player", "active"))
+    remember(game, "joined", player_id=player_id)
     return bump(game)
 
 
@@ -87,8 +92,10 @@ def begin(game: Game, actor: str, admin_ids: list[str], now: datetime) -> Game:
     for member in playing:
         if member.player_id in admin_ids and member.role != "owner":
             member.role = "admin"
+    remember(game, "started", player_id=actor, placement=game.rules.placement)
     if game.rules.placement == "app":
         _deploy(game)
+        _note_deployment(game)
         game.phase = "orders"
         game.turn = 1
         game.orders_opened_at = stamp(now)
@@ -119,6 +126,8 @@ def place_armies(game: Game, actor: str, fortress: Hex, spots: dict[str, Hex]) -
     for army in own:
         army.q = spots[army.id].q
         army.r = spots[army.id].r
+    remember(game, "placed", player_id=actor, q=fortress.q, r=fortress.r)
+    _note_deployment(game, actor)
     return bump(game)
 
 
@@ -131,6 +140,7 @@ def close_placement(game: Game, actor: str, now: datetime) -> Game:
     if any(army.at() is None for army in game.armies if not army.destroyed):
         raise DomainError("phase_invalid")
     _territory(game)
+    remember(game, "placement_closed", player_id=actor)
     game.phase = "orders"
     game.turn = 1
     game.orders_opened_at = stamp(now)
@@ -154,6 +164,7 @@ def describe_army(
     found.commander = label(commander, required=False)
     found.race = label(race, required=False)
     found.roster = roster_text(roster)
+    remember(game, "named", player_id=actor, army_id=found.id, name=found.name)
     return bump(game)
 
 
@@ -209,6 +220,24 @@ def _beside(origin: Hex, taken: set[Hex], board: set[Hex]) -> Hex:
     options = [cell for cell in neighbors(origin) if cell in board and cell not in taken]
     options.sort(key=lambda cell: (distance(cell, Hex(0, 0)), cell.q, cell.r))
     return options[0]
+
+
+def _note_deployment(game: Game, player_id: str | None = None) -> None:
+    armies = [
+        army for army in game.armies if player_id is None or army.player_id == player_id
+    ]
+    for army in armies:
+        if army.q is None or army.r is None:
+            continue
+        remember(
+            game,
+            "deployed",
+            player_id=army.player_id,
+            army_id=army.id,
+            name=army.name,
+            q=army.q,
+            r=army.r,
+        )
 
 
 def _territory(game: Game) -> None:

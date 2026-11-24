@@ -535,6 +535,31 @@ button:disabled {
   align-content: start;
 }
 
+.chronicle {
+  display: grid;
+  gap: 14px;
+}
+
+.chronicle h2,
+.chronicle-turn h3 {
+  margin: 0;
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 500;
+}
+
+.chronicle-turn {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+}
+
+.chronicle-turn ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+}
+
 @media (max-width: 800px) {
   .language {
     top: 12px;

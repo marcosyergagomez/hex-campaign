@@ -48,6 +48,7 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
         ],
         "notices": list(game.notices) if staff else [],
         "events": list(game.events),
+        "chronicle": _chronicle(game, member is not None),
         "winners": list(game.winners),
         "orders_due": game.phase == "orders"
         and overdue(game.orders_opened_at, game.rules.order_days, now),
@@ -167,3 +168,10 @@ def _battle_view(game: Game, battle, viewer: str, staff: bool, now: datetime) ->
     if staff:
         shown["reports"] = dict(battle.reports)
     return shown
+
+
+def _chronicle(game: Game, member: bool) -> list[dict[str, object]]:
+    """The story stays in the document during the war and leaves it only at the end."""
+    if game.phase != "finished" or not member:
+        return []
+    return [dict(item) for item in game.chronicle]

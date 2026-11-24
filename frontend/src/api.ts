@@ -207,6 +207,30 @@ export type CampaignMember = {
   status: string
 }
 
+export type ChronicleSpot = {
+  q: number
+  r: number
+}
+
+export type ChronicleEntry = {
+  turn: number
+  code: string
+  player_id?: string
+  target_id?: string
+  holder_id?: string
+  army_id?: string
+  battle_id?: string
+  name?: string
+  result?: string
+  q?: number
+  r?: number
+  hold?: number
+  undone?: number
+  origin?: ChronicleSpot
+  destination?: ChronicleSpot
+  winners?: string[]
+}
+
 export type CampaignDetail = {
   id: string
   name: string
@@ -216,6 +240,7 @@ export type CampaignDetail = {
   rules: CampaignRules
   members: CampaignMember[]
   joined: boolean
+  chronicle: ChronicleEntry[]
 }
 
 export const DEFAULT_CAMPAIGN_RULES: CampaignRules = {
@@ -409,7 +434,100 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
     rules,
     members,
     joined: record.joined,
+    chronicle: record.phase === "finished" ? readChronicle(record.chronicle) : [],
   }
+}
+
+const CODE = /^[a-z_]{1,40}$/
+
+function readSpot(value: unknown): ChronicleSpot | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined
+  }
+  const record = value as Record<string, unknown>
+  const q = readInt(record.q, -64, 64)
+  const r = readInt(record.r, -64, 64)
+  if (q === null || r === null) {
+    return undefined
+  }
+  return { q, r }
+}
+
+function readLabel(value: unknown, max: number): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > max || CONTROL.test(value)) {
+    return undefined
+  }
+  return value
+}
+
+function readWinners(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length > 4) {
+    return undefined
+  }
+  const winners: string[] = []
+  for (const item of value) {
+    const winner = readLabel(item, 64)
+    if (!winner) {
+      return undefined
+    }
+    winners.push(winner)
+  }
+  return winners
+}
+
+function readChronicleEntry(value: unknown): ChronicleEntry | null {
+  if (!value || typeof value !== "object") {
+    return null
+  }
+  const record = value as Record<string, unknown>
+  const turn = readInt(record.turn, 0, 1_000_000)
+  if (turn === null || typeof record.code !== "string" || !CODE.test(record.code)) {
+    return null
+  }
+  const entry: ChronicleEntry = { turn, code: record.code }
+  const player_id = readLabel(record.player_id, 64)
+  const target_id = readLabel(record.target_id, 64)
+  const holder_id = readLabel(record.holder_id, 64)
+  const army_id = readLabel(record.army_id, 64)
+  const battle_id = readLabel(record.battle_id, 64)
+  const name = readLabel(record.name, 80)
+  const result = readLabel(record.result, 64)
+  const q = readInt(record.q, -64, 64)
+  const r = readInt(record.r, -64, 64)
+  const hold = readInt(record.hold, 0, 999)
+  const undone = readInt(record.undone, 0, 1_000_000)
+  const origin = readSpot(record.origin)
+  const destination = readSpot(record.destination)
+  const winners = readWinners(record.winners)
+  if (player_id) entry.player_id = player_id
+  if (target_id) entry.target_id = target_id
+  if (holder_id) entry.holder_id = holder_id
+  if (army_id) entry.army_id = army_id
+  if (battle_id) entry.battle_id = battle_id
+  if (name) entry.name = name
+  if (result) entry.result = result
+  if (q !== null) entry.q = q
+  if (r !== null) entry.r = r
+  if (hold !== null) entry.hold = hold
+  if (undone !== null) entry.undone = undone
+  if (origin) entry.origin = origin
+  if (destination) entry.destination = destination
+  if (winners) entry.winners = winners
+  return entry
+}
+
+function readChronicle(value: unknown): ChronicleEntry[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const entries: ChronicleEntry[] = []
+  for (const item of value.slice(0, 5000)) {
+    const entry = readChronicleEntry(item)
+    if (entry) {
+      entries.push(entry)
+    }
+  }
+  return entries
 }
 
 function csrfHeaders(): HeadersInit {

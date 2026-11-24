@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 
 import { getCampaign, type CampaignDetail } from "../api"
+import { Chronicle } from "./Chronicle"
 import { Banner } from "../form"
 import { clientNotice, type MessageKey } from "../i18n/catalog"
 import { useI18n } from "../i18n/language"
@@ -120,6 +121,9 @@ export function CampaignDetailPage() {
             ) : null}
           </article>
         </div>
+      ) : null}
+      {campaign?.phase === "finished" ? (
+        <Chronicle entries={campaign.chronicle} members={campaign.members} />
       ) : null}
     </section>
   )
