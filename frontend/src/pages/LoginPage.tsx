@@ -1,9 +1,13 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 
-import { ApiError, currentPlayer, login, logout, type Player } from "../api"
+import { currentPlayer, login, logout, type Player } from "../api"
 import { Banner, Field } from "../form"
+import { useI18n } from "../i18n/language"
+import { presentError } from "../presentError"
 
 export function LoginPage() {
+  const { t } = useI18n()
+  const mounted = useRef(true)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [player, setPlayer] = useState<Player | null>(null)
@@ -12,29 +16,27 @@ export function LoginPage() {
   const [errors, setErrors] = useState<Record<string, string[]>>({})
 
   useEffect(() => {
-    let alive = true
+    mounted.current = true
+    let current = true
     currentPlayer()
       .then((found) => {
-        if (alive) {
+        if (current) {
           setPlayer(found)
         }
       })
       .catch((error: unknown) => {
-        if (alive) {
-          setErrors(
-            error instanceof ApiError
-              ? error.errors
-              : { form: ["No se ha podido comprobar la sesión."] },
-          )
+        if (current) {
+          setErrors(presentError(error, "sessionCheckFailed"))
         }
       })
       .finally(() => {
-        if (alive) {
+        if (current) {
           setReady(true)
         }
       })
     return () => {
-      alive = false
+      current = false
+      mounted.current = false
     }
   }, [])
 
@@ -43,11 +45,20 @@ export function LoginPage() {
     setPending(true)
     setErrors({})
     try {
-      setPlayer(await login(email, password))
+      const signedIn = await login(email, password)
+      if (!mounted.current) {
+        return
+      }
+      setPassword("")
+      setPlayer(signedIn)
     } catch (error) {
-      setErrors(error instanceof ApiError ? error.errors : { form: ["No se ha podido entrar."] })
+      if (mounted.current) {
+        setErrors(presentError(error, "signInFailed"))
+      }
     } finally {
-      setPending(false)
+      if (mounted.current) {
+        setPending(false)
+      }
     }
   }
 
@@ -56,32 +67,35 @@ export function LoginPage() {
     setErrors({})
     try {
       await logout()
+      if (!mounted.current) {
+        return
+      }
       setPlayer(null)
       setPassword("")
     } catch (error) {
-      setErrors(
-        error instanceof ApiError ? error.errors : { form: ["No se ha podido cerrar la sesión."] },
-      )
+      if (mounted.current) {
+        setErrors(presentError(error, "logOutFailed"))
+      }
     } finally {
-      setPending(false)
+      if (mounted.current) {
+        setPending(false)
+      }
     }
   }
 
   if (!ready) {
-    return <p className="quiet">Comprobando la sesión…</p>
+    return <p className="quiet">{t("checkingSession")}</p>
   }
 
   if (player) {
     return (
       <div className="session">
-        <h2>Sesión abierta</h2>
-        <p>
-          Has entrado como <strong>{player.alias}</strong>.
-        </p>
+        <h2>{t("sessionOpen")}</h2>
+        <SignedIn alias={player.alias} />
         <p className="quiet">{player.email}</p>
         <Banner errors={errors} fields={["form", "origin", "csrf", "session"]} />
         <button type="button" onClick={onLogout} disabled={pending}>
-          {pending ? "Cerrando…" : "Cerrar sesión"}
+          {pending ? t("loggingOut") : t("logOut")}
         </button>
       </div>
     )
@@ -91,7 +105,7 @@ export function LoginPage() {
     <form onSubmit={onSubmit} noValidate>
       <Banner errors={errors} fields={["form", "credentials", "origin"]} />
       <Field
-        label="Correo"
+        label={t("email")}
         name="email"
         type="email"
         autoComplete="username"
@@ -100,7 +114,7 @@ export function LoginPage() {
         onChange={setEmail}
       />
       <Field
-        label="Contraseña"
+        label={t("password")}
         name="password"
         type="password"
         autoComplete="current-password"
@@ -109,8 +123,20 @@ export function LoginPage() {
         onChange={setPassword}
       />
       <button type="submit" disabled={pending}>
-        {pending ? "Entrando…" : "Entrar"}
+        {pending ? t("signingIn") : t("signIn")}
       </button>
     </form>
+  )
+}
+
+function SignedIn({ alias }: { alias: string }) {
+  const { t } = useI18n()
+  const [before, after = ""] = t("signedInAs").split("{alias}")
+  return (
+    <p>
+      {before}
+      <strong>{alias}</strong>
+      {after}
+    </p>
   )
 }

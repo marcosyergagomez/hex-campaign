@@ -19,6 +19,7 @@ from django.db import IntegrityError, transaction
 from django.db.models.functions import Lower
 from django.utils import timezone
 
+from .languages import confirmation_mail, normalize
 from .models import EmailVerification, User
 from .passwords import check_user_password, set_user_password
 from .validation import (
@@ -114,7 +115,9 @@ def register_account(
     alias: str,
     birth_date: date,
     sex: str,
+    language: str = "es",
 ) -> None:
+    language = normalize(language)
     errors = registration_errors(
         email=email,
         password=password,
@@ -138,6 +141,7 @@ def register_account(
             alias=cleaned_alias,
             birth_date=birth_date,
             sex=sex,
+            language=language,
         )
         return
 
@@ -151,6 +155,7 @@ def register_account(
                 alias=cleaned_alias,
                 birth_date=birth_date,
                 sex=sex,
+                language=language,
             )
         except _NoPendingAccount:
             if _alias_taken(cleaned_alias):
@@ -161,6 +166,7 @@ def register_account(
                 alias=cleaned_alias,
                 birth_date=birth_date,
                 sex=sex,
+                language=language,
             )
         return
 
@@ -177,13 +183,14 @@ def _store_new_account(
     alias: str,
     birth_date: date,
     sex: str,
+    language: str,
 ) -> None:
     try:
         with transaction.atomic():
             user = User(email=email, alias=alias, birth_date=birth_date, sex=sex)
             _set_password(user, password)
             user.save()
-            _issue_confirmation(user)
+            _issue_confirmation(user, language)
     except ValidationError as exc:
         if "email" not in set(getattr(exc, "message_dict", {})):
             _reraise(exc)
@@ -194,6 +201,7 @@ def _store_new_account(
                 alias=alias,
                 birth_date=birth_date,
                 sex=sex,
+                language=language,
             )
         except _NoPendingAccount:
             _reraise(exc)
@@ -207,6 +215,7 @@ def _store_new_account(
                     alias=alias,
                     birth_date=birth_date,
                     sex=sex,
+                    language=language,
                 )
             except _NoPendingAccount:
                 raise RegistrationError({"email": [EMAIL_TAKEN]}) from exc
@@ -221,6 +230,7 @@ def _take_pending_account(
     alias: str,
     birth_date: date,
     sex: str,
+    language: str,
 ) -> None:
     try:
         with transaction.atomic():
@@ -240,21 +250,21 @@ def _take_pending_account(
             _set_password(user, password)
             user.save()
             user.email_verifications.all().delete()
-            _issue_confirmation(user)
+            _issue_confirmation(user, language)
     except ValidationError as exc:
         _reraise(exc)
     except IntegrityError as exc:
         _raise_for_integrity(exc)
 
 
-def _issue_confirmation(user: User) -> None:
+def _issue_confirmation(user: User, language: str) -> None:
     raw_token = secrets.token_urlsafe(32)
     EmailVerification.objects.create(
         user=user,
         token_hash=_digest(raw_token),
         expires_at=timezone.now() + TOKEN_TTL,
     )
-    _send_confirmation(user.email, raw_token)
+    _send_confirmation(user.email, raw_token, language)
 
 
 def _token_is_open(row: EmailVerification | None) -> bool:
@@ -293,18 +303,12 @@ def confirm_email(raw_token: str, password: str) -> None:
             )
 
 
-def _send_confirmation(email: str, raw_token: str) -> None:
+def _send_confirmation(email: str, raw_token: str, language: str) -> None:
     link = f"{settings.API_ORIGIN}/api/users/verify-email?{urlencode({'token': raw_token})}"
-    message = (
-        "Confirma tu correo en Hex Campaign.\n\n"
-        f"{link}\n\n"
-        "El enlace caduca a las 24 horas y solo puede usarse una vez.\n"
-        "En la página tendrás que escribir la contraseña que elegiste al registrarte.\n"
-        "Si no has pedido este alta, ignora este mensaje.\n"
-    )
+    subject, message = confirmation_mail(language, link)
     try:
         send_mail(
-            subject="Confirma tu correo",
+            subject=subject,
             message=message,
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[email],
