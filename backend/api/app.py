@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
+from api.campaigns import router as campaign_router
 from api.guard import AccountGuard
 from api.pages import confirm_page, result_page
 from api.player_session import router as player_session_router
@@ -38,6 +39,7 @@ api = FastAPI(
 )
 api.add_middleware(AccountGuard)
 api.include_router(player_session_router)
+api.include_router(campaign_router)
 
 INVALID_LINK = "El enlace no es válido o ha caducado."
 CONFIRMED = "Correo confirmado."
