@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
+import { Navigate, useNavigate } from "react-router-dom"
 
-import { currentPlayer, login, logout, type Player } from "../api"
+import { currentPlayer, login } from "../api"
 import { Banner, Field } from "../form"
 import { useI18n } from "../i18n/language"
 import { presentError } from "../presentError"
 
 export function LoginPage() {
   const { t } = useI18n()
+  const navigate = useNavigate()
   const mounted = useRef(true)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [player, setPlayer] = useState<Player | null>(null)
+  const [signedIn, setSignedIn] = useState(false)
   const [ready, setReady] = useState(false)
   const [pending, setPending] = useState(false)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
@@ -21,7 +23,7 @@ export function LoginPage() {
     currentPlayer()
       .then((found) => {
         if (current) {
-          setPlayer(found)
+          setSignedIn(Boolean(found))
         }
       })
       .catch((error: unknown) => {
@@ -45,36 +47,15 @@ export function LoginPage() {
     setPending(true)
     setErrors({})
     try {
-      const signedIn = await login(email, password)
+      await login(email, password)
       if (!mounted.current) {
         return
       }
       setPassword("")
-      setPlayer(signedIn)
+      navigate("/campanas", { replace: true })
     } catch (error) {
       if (mounted.current) {
         setErrors(presentError(error, "signInFailed"))
-      }
-    } finally {
-      if (mounted.current) {
-        setPending(false)
-      }
-    }
-  }
-
-  async function onLogout() {
-    setPending(true)
-    setErrors({})
-    try {
-      await logout()
-      if (!mounted.current) {
-        return
-      }
-      setPlayer(null)
-      setPassword("")
-    } catch (error) {
-      if (mounted.current) {
-        setErrors(presentError(error, "logOutFailed"))
       }
     } finally {
       if (mounted.current) {
@@ -87,23 +68,13 @@ export function LoginPage() {
     return <p className="quiet">{t("checkingSession")}</p>
   }
 
-  if (player) {
-    return (
-      <div className="session">
-        <h2>{t("sessionOpen")}</h2>
-        <SignedIn alias={player.alias} />
-        <p className="quiet">{player.email}</p>
-        <Banner errors={errors} fields={["form", "origin", "csrf", "session"]} />
-        <button type="button" onClick={onLogout} disabled={pending}>
-          {pending ? t("loggingOut") : t("logOut")}
-        </button>
-      </div>
-    )
+  if (signedIn) {
+    return <Navigate to="/campanas" replace />
   }
 
   return (
     <form onSubmit={onSubmit} noValidate>
-      <Banner errors={errors} fields={["form", "credentials", "origin"]} />
+      <Banner errors={errors} fields={["form", "credentials", "origin", "session"]} />
       <Field
         label={t("email")}
         name="email"
@@ -126,17 +97,5 @@ export function LoginPage() {
         {pending ? t("signingIn") : t("signIn")}
       </button>
     </form>
-  )
-}
-
-function SignedIn({ alias }: { alias: string }) {
-  const { t } = useI18n()
-  const [before, after = ""] = t("signedInAs").split("{alias}")
-  return (
-    <p>
-      {before}
-      <strong>{alias}</strong>
-      {after}
-    </p>
   )
 }
