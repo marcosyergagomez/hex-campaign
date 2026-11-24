@@ -1,0 +1,219 @@
+:root {
+  color-scheme: dark;
+  --ink: #e8d7b8;
+  --muted: #b7a48a;
+  --blood: #8d2c2a;
+  --blood-hot: #a83a36;
+  --gold: #c6a15a;
+  --gold-dim: #8c7040;
+  --panel: rgba(16, 12, 9, 0.88);
+  --field: #120e0b;
+  --line: rgba(198, 161, 90, 0.45);
+  --danger: #e7b1a4;
+  font-family: "Source Sans 3", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: #0c0907;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+.gate {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 460px);
+  background:
+    linear-gradient(90deg, rgba(8, 6, 4, 0.12) 0%, rgba(8, 6, 4, 0.28) 48%, rgba(8, 6, 4, 0.86) 100%),
+    url("/login-war-table.jpg") center / cover no-repeat;
+}
+
+.gate-story {
+  padding: 48px 56px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.8);
+}
+
+.mark {
+  margin: 0;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  font-family: Cinzel, Palatino, serif;
+  font-size: 0.78rem;
+  color: var(--gold);
+}
+
+.gate-story h1 {
+  margin: 12px 0 8px;
+  max-width: 12ch;
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 700;
+  font-size: clamp(2.4rem, 5vw, 4.4rem);
+  line-height: 0.95;
+}
+
+.gate-story p {
+  max-width: 36ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.15rem;
+}
+
+.panel {
+  margin: 28px;
+  padding: 48px 28px 32px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  overflow-y: auto;
+}
+
+.tabs {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.tabs a {
+  color: var(--muted);
+  text-decoration: none;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  padding-bottom: 6px;
+  border-bottom: 1px solid transparent;
+}
+
+.tabs a[aria-current="page"] {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+form {
+  display: grid;
+  gap: 14px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.92rem;
+}
+
+.label-text {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  color: var(--gold);
+}
+
+input,
+select {
+  width: 100%;
+  padding: 12px 12px;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+
+.hint,
+.field-error,
+.banner {
+  margin: 0;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.field-error,
+.banner {
+  color: var(--danger);
+  font-size: 0.92rem;
+}
+
+.banner {
+  padding: 10px 12px;
+  border: 1px solid rgba(231, 177, 164, 0.4);
+  background: rgba(141, 44, 42, 0.18);
+}
+
+button {
+  width: 100%;
+  margin-top: 6px;
+  padding: 13px 16px;
+  border: 1px solid var(--gold-dim);
+  background: var(--blood);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--blood-hot);
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.quiet {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.session h2 {
+  margin: 0 0 8px;
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 500;
+}
+
+@media (max-width: 800px) {
+  .gate {
+    grid-template-columns: 1fr;
+    grid-template-rows: 168px auto;
+    background-position: center top;
+  }
+
+  .gate-story {
+    padding: 20px 20px 16px;
+    justify-content: flex-end;
+  }
+
+  .gate-story h1 {
+    max-width: none;
+    font-size: 1.9rem;
+  }
+
+  .panel {
+    margin: 0;
+    padding: 22px 20px 28px;
+    min-height: 0;
+  }
+}
