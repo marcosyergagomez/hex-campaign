@@ -1,6 +1,6 @@
 # Hex Campaign
 
-A browser campaign map for tabletop miniature games. Players lock secret moves on a hex map. When every player has locked an order, the server resolves the turn. Battles are played with miniatures on a real table, and the result is then recorded.
+A browser campaign map for tabletop miniature games. Players lock secret moves on a hex map. When every player has locked an order, the server resolves the turn. Battles are played with miniatures on a real table, and the result is then recorded. The first version is a table of 2 to 4 players. Those rules are in `docs/reglas-de-campana.md`.
 
 The campaign rules are original. The project does not include official artwork or copied rule text.
 
@@ -57,7 +57,7 @@ On macOS or Linux, activate the virtual environment with `source .venv/bin/activ
 
 ## Español
 
-Mapa de campaña en el navegador para partidas de miniaturas. Los jugadores cierran órdenes en secreto. El servidor las resuelve cuando todos han cerrado. La batalla se juega en la mesa y después se anota el resultado.
+Mapa de campaña en el navegador para partidas de miniaturas. Los jugadores cierran órdenes en secreto. El servidor las resuelve cuando todos han cerrado. La batalla se juega en la mesa y después se anota el resultado. La primera versión es una mesa de 2 a 4 jugadores. Esas reglas están en `docs/reglas-de-campana.md`.
 
 Las reglas de campaña son propias. No hay arte oficial ni texto de reglamento copiado.
 
