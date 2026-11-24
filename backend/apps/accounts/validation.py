@@ -15,6 +15,7 @@ MINIMUM_AGE_YEARS = 16
 MAX_EMAIL_LENGTH = 254
 MAX_PASSWORD_LENGTH = 128
 ALIAS_MESSAGE = "El alias usa de 3 a 24 letras, números o guion bajo."
+EMAIL_TAKEN = "Este correo ya está registrado."
 PASSWORD_TOO_LONG = f"La contraseña admite como máximo {MAX_PASSWORD_LENGTH} caracteres."
 
 

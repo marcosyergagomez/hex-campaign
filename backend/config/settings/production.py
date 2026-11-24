@@ -6,6 +6,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F403
 from .base import DATABASES, SECRET_KEY
+from .guards import require_https_origin, require_secret
 
 DEBUG = False
 SESSION_COOKIE_SECURE = True
@@ -17,8 +18,7 @@ SECURE_HSTS_PRELOAD = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 
-if not SECRET_KEY:
-    raise ImproperlyConfigured("DJANGO_SECRET_KEY is required.")
+require_secret(SECRET_KEY)
 if not DATABASES:
     raise ImproperlyConfigured("DATABASE_URL is required.")
 
@@ -31,5 +31,4 @@ if not os.environ.get("EMAIL_HOST"):
     raise ImproperlyConfigured("EMAIL_HOST is required.")
 if not os.environ.get("DEFAULT_FROM_EMAIL"):
     raise ImproperlyConfigured("DEFAULT_FROM_EMAIL is required.")
-if not os.environ.get("API_ORIGIN"):
-    raise ImproperlyConfigured("API_ORIGIN is required.")
+API_ORIGIN = require_https_origin(os.environ.get("API_ORIGIN"))

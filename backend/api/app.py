@@ -12,14 +12,16 @@ from django.db import close_old_connections
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from api.guard import AccountGuard
 from api.pages import confirm_page, result_page
 from apps.accounts.registration import (
     ACCEPTED_DETAIL,
+    PASSWORD_MISMATCH,
     InvalidConfirmation,
     MailDeliveryError,
+    PasswordMismatch,
     RegistrationError,
     confirm_email,
     register_account,
@@ -47,8 +49,6 @@ class ErrorBody(BaseModel):
 
 
 class RegisterPayload(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
-
     email: str
     password: str
     alias: str
@@ -98,6 +98,11 @@ async def reject_invalid_body(request: Request, exc: RequestValidationError) -> 
     status_code=202,
     response_model=Accepted,
     summary="Registrar una cuenta",
+    description=(
+        "Crea la cuenta y envía el enlace de confirmación. "
+        "Si el correo ya está confirmado, responde 422. "
+        "Si el alta anterior no se confirmó, la nueva la sustituye."
+    ),
     responses={422: {"model": ErrorBody}, 503: {"model": ErrorBody}},
 )
 @django_sync
@@ -127,10 +132,10 @@ def verify_email_page(token: str = "") -> HTMLResponse:
     return HTMLResponse(confirm_page(token))
 
 
-def _confirm(raw_token: str) -> None:
+def _confirm(raw_token: str, password: str) -> None:
     close_old_connections()
     try:
-        confirm_email(raw_token)
+        confirm_email(raw_token, password)
     finally:
         close_old_connections()
 
@@ -139,30 +144,45 @@ def _confirm(raw_token: str) -> None:
     "/api/users/verify-email",
     response_model=Accepted,
     summary="Confirmar el correo",
+    description="El enlace solo confirma la cuenta si la contraseña es la del alta.",
     responses={400: {"model": ErrorBody}},
 )
 async def verify_email(request: Request) -> HTMLResponse | Accepted | JSONResponse:
-    token, as_html = await _posted_token(request)
+    token, password, as_html = await _posted_credentials(request)
     try:
-        await sync_to_async(_confirm)(token)
+        await sync_to_async(_confirm)(token, password)
     except InvalidConfirmation:
         if as_html:
             return HTMLResponse(result_page(INVALID_LINK), status_code=400)
         return JSONResponse(status_code=400, content={"errors": {"token": [INVALID_LINK]}})
+    except PasswordMismatch:
+        if as_html:
+            return HTMLResponse(confirm_page(token, PASSWORD_MISMATCH), status_code=400)
+        return JSONResponse(
+            status_code=400,
+            content={"errors": {"password": [PASSWORD_MISMATCH]}},
+        )
     if as_html:
         return HTMLResponse(result_page(CONFIRMED))
     return Accepted(detail=CONFIRMED)
 
 
-async def _posted_token(request: Request) -> tuple[str, bool]:
+async def _posted_credentials(request: Request) -> tuple[str, str, bool]:
     raw = await request.body()
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            return "", False
-        token = data.get("token", "") if isinstance(data, dict) else ""
-        return (token if isinstance(token, str) else ""), False
+            return "", "", False
+        if not isinstance(data, dict):
+            return "", "", False
+        token = data.get("token", "")
+        password = data.get("password", "")
+        return (
+            token if isinstance(token, str) else "",
+            password if isinstance(password, str) else "",
+            False,
+        )
     parsed = parse_qs(raw.decode("utf-8", errors="replace"), keep_blank_values=True)
-    return parsed.get("token", [""])[0], True
+    return parsed.get("token", [""])[0], parsed.get("password", [""])[0], True

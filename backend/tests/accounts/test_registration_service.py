@@ -19,6 +19,7 @@ from apps.accounts.registration import (
     TOKEN_TTL,
     InvalidConfirmation,
     MailDeliveryError,
+    PasswordMismatch,
     RegistrationError,
     confirm_email,
     register_account,
@@ -113,6 +114,8 @@ def test_register_stores_the_profile_and_mails_only_the_link(mailoutbox, setting
     assert mail.to == ["ada@example.com"]
     assert "24 horas" in mail.body
     assert "una vez" in mail.body
+    assert "contraseña que elegiste" in mail.body
+    assert "ignora este mensaje" in mail.body
     assert BORN.isoformat() not in mail.body
     assert "woman" not in mail.body
     assert PASSWORD not in mail.body
@@ -142,12 +145,42 @@ def test_shape_is_checked_before_the_address_is_looked_up(mailoutbox) -> None:
     assert User.objects.get().alias == "ada_lovelace"
 
 
+def _verify(user: User | None = None) -> None:
+    account = user or User.objects.get()
+    account.email_verified_at = timezone.now()
+    account.save(update_fields=["email_verified_at"])
+
+
 @pytest.mark.django_db
-def test_known_email_does_not_change_the_account_or_send_again(mailoutbox) -> None:
+def test_pending_registration_is_replaced_and_the_old_link_dies(mailoutbox) -> None:
     _register()
+    old = _token(mailoutbox[0].body)
 
     _register(email="ADA@example.com", alias="otro_alias", password="otra-clave-larga")
 
+    user = User.objects.get()
+    assert user.alias == "otro_alias"
+    assert user.check_password("otra-clave-larga")
+    assert user.email_verified_at is None
+    assert user.is_staff is False
+    assert len(mailoutbox) == 2
+    assert EmailVerification.objects.count() == 1
+    with pytest.raises(InvalidConfirmation):
+        confirm_email(old, "otra-clave-larga")
+    confirm_email(_token(mailoutbox[1].body), "otra-clave-larga")
+    user.refresh_from_db()
+    assert user.email_verified_at is not None
+
+
+@pytest.mark.django_db
+def test_confirmed_email_does_not_change_the_account_or_send_again(mailoutbox) -> None:
+    _register()
+    _verify()
+
+    with pytest.raises(RegistrationError) as taken:
+        _register(email="ADA@example.com", alias="otro_alias", password="otra-clave-larga")
+
+    assert taken.value.errors == {"email": ["Este correo ya está registrado."]}
     user = User.objects.get()
     assert user.check_password(PASSWORD)
     assert user.alias == "ada_lovelace"
@@ -156,28 +189,87 @@ def test_known_email_does_not_change_the_account_or_send_again(mailoutbox) -> No
 
 
 @pytest.mark.django_db
-def test_alias_collision_is_reported_only_when_the_email_is_free(mailoutbox) -> None:
+def test_staff_and_inactive_accounts_are_not_replaced(mailoutbox) -> None:
     _register()
+    user = User.objects.get()
+    user.is_staff = True
+    user.save(update_fields=["is_staff"])
 
-    _register(email="ADA@example.com", alias="otro_alias")
+    with pytest.raises(RegistrationError) as staff:
+        _register(email="ADA@example.com", alias="otro_alias", password="otra-clave-larga")
+
+    assert staff.value.errors == {"email": ["Este correo ya está registrado."]}
+    user.refresh_from_db()
+    assert user.is_staff is True
+    assert user.check_password(PASSWORD)
+    assert user.alias == "ada_lovelace"
+
+    user.is_staff = False
+    user.is_active = False
+    user.save(update_fields=["is_staff", "is_active"])
+    with pytest.raises(RegistrationError) as inactive:
+        _register(email="ada@example.com", alias="otro_alias", password="otra-clave-larga")
+
+    assert inactive.value.errors == {"email": ["Este correo ya está registrado."]}
+    user.refresh_from_db()
+    assert user.check_password(PASSWORD)
+    assert len(mailoutbox) == 1
+
+
+@pytest.mark.django_db
+def test_an_account_without_a_confirmation_row_is_kept(mailoutbox) -> None:
+    User.objects.create_user(
+        "hecha@example.com",
+        PASSWORD,
+        alias="hecha_admin",
+        birth_date=BORN,
+        sex="woman",
+    )
+
     with pytest.raises(RegistrationError) as taken:
-        _register(email="otro@example.com", alias="ADA_LOVELACE")
+        _register(email="HECHA@example.com", alias="otro_alias", password="otra-clave-larga")
 
-    assert taken.value.errors == {"alias": ["Ese alias ya está en uso."]}
+    assert taken.value.errors == {"email": ["Este correo ya está registrado."]}
+    user = User.objects.get()
+    assert user.alias == "hecha_admin"
+    assert user.check_password(PASSWORD)
+    assert len(mailoutbox) == 0
+
+
+@pytest.mark.django_db
+def test_taken_email_and_taken_alias_are_reported(mailoutbox) -> None:
+    _register()
+    _verify()
+
+    with pytest.raises(RegistrationError) as email_only:
+        _register(email="ADA@example.com", alias="otro_alias")
+    with pytest.raises(RegistrationError) as alias_only:
+        _register(email="otro@example.com", alias="ADA_LOVELACE")
+    with pytest.raises(RegistrationError) as both:
+        _register(email="ADA@example.com", alias="ada_lovelace")
+
+    assert email_only.value.errors == {"email": ["Este correo ya está registrado."]}
+    assert alias_only.value.errors == {"alias": ["Ese alias ya está en uso."]}
+    assert both.value.errors == {
+        "email": ["Este correo ya está registrado."],
+        "alias": ["Ese alias ya está en uso."],
+    }
     assert User.objects.count() == 1
     assert len(mailoutbox) == 1
 
 
 @pytest.mark.django_db
-def test_full_clean_hides_a_duplicate_email(mailoutbox) -> None:
+def test_full_clean_replaces_an_unverified_duplicate(mailoutbox) -> None:
     _register()
 
     with _miss_prechecks():
-        _register(email="ADA@example.com", alias="otro_alias")
+        _register(email="ADA@example.com", alias="otro_alias", password="otra-clave-larga")
 
-    assert User.objects.count() == 1
-    assert User.objects.get().alias == "ada_lovelace"
-    assert len(mailoutbox) == 1
+    user = User.objects.get()
+    assert user.alias == "otro_alias"
+    assert user.check_password("otra-clave-larga")
+    assert user.email_verified_at is None
+    assert len(mailoutbox) == 2
 
 
 @pytest.mark.django_db
@@ -193,8 +285,9 @@ def test_full_clean_reports_an_alias_collision_on_alias(mailoutbox) -> None:
 
 
 @pytest.mark.django_db
-def test_database_constraint_hides_email_and_reports_alias(mailoutbox) -> None:
+def test_database_constraint_reports_a_confirmed_email_and_an_alias(mailoutbox) -> None:
     _register()
+    _verify()
     real_filter = User.objects.filter
 
     def hide_existing(*args, **kwargs):
@@ -210,12 +303,16 @@ def test_database_constraint_hides_email_and_reports_alias(mailoutbox) -> None:
         patch.object(User, "full_clean", _skip_clean),
         patch("apps.accounts.registration.User.objects.filter", side_effect=hide_existing),
     ):
-        _register(email="ADA@example.com", alias="otro_alias")
-        with pytest.raises(RegistrationError) as taken:
+        with pytest.raises(RegistrationError) as email_taken:
+            _register(email="ADA@example.com", alias="otro_alias", password="otra-clave-larga")
+        with pytest.raises(RegistrationError) as alias_taken:
             _register(email="libre@example.com", alias="ADA_LOVELACE")
 
-    assert taken.value.errors == {"alias": ["Ese alias ya está en uso."]}
-    assert User.objects.count() == 1
+    assert email_taken.value.errors == {"email": ["Este correo ya está registrado."]}
+    assert alias_taken.value.errors == {"alias": ["Ese alias ya está en uso."]}
+    user = User.objects.get()
+    assert user.alias == "ada_lovelace"
+    assert user.check_password(PASSWORD)
     assert len(mailoutbox) == 1
 
 
@@ -223,7 +320,7 @@ def test_database_constraint_hides_email_and_reports_alias(mailoutbox) -> None:
 @pytest.mark.parametrize(
     ("constraint_name", "expected"),
     [
-        ("accounts_user_email_key", None),
+        ("accounts_user_email_key", {"email": ["Este correo ya está registrado."]}),
         ("accounts_user_alias_ci", {"alias": ["Ese alias ya está en uso."]}),
         ("accounts_user_alias_shape", "raise"),
         ("accounts_user_email_b2644a56_like", "raise"),
@@ -233,7 +330,7 @@ def test_database_constraint_hides_email_and_reports_alias(mailoutbox) -> None:
 )
 def test_integrity_errors_follow_the_constraint_name(
     constraint_name: str,
-    expected: dict[str, list[str]] | None | str,
+    expected: dict[str, list[str]] | str,
 ) -> None:
     def explode(self, *args, **kwargs):
         raise _integrity(constraint_name)
@@ -242,8 +339,6 @@ def test_integrity_errors_follow_the_constraint_name(
         if expected == "raise":
             with pytest.raises(IntegrityError):
                 _register(email="nuevo@example.com", alias="nuevo_alias")
-        elif expected is None:
-            _register(email="nuevo@example.com", alias="nuevo_alias")
         else:
             with pytest.raises(RegistrationError) as error:
                 _register(email="nuevo@example.com", alias="nuevo_alias")
@@ -266,13 +361,17 @@ def test_validation_error_without_a_field_uses_a_generic_message() -> None:
 
 
 @pytest.mark.django_db
-def test_validation_error_on_the_email_stays_silent() -> None:
+def test_validation_error_on_the_email_is_reported() -> None:
     def explode(self, *args, **kwargs):
         raise ValidationError({"email": ["ya existe"], "alias": ["también"]})
 
-    with patch.object(User, "save", explode):
+    with patch.object(User, "save", explode), pytest.raises(RegistrationError) as error:
         _register(email="nuevo@example.com", alias="nuevo_alias")
 
+    assert error.value.errors == {
+        "email": ["Este correo ya está registrado."],
+        "alias": ["Ese alias ya está en uso."],
+    }
     assert User.objects.count() == 0
 
 
@@ -291,6 +390,56 @@ def test_validation_error_on_another_field_is_returned() -> None:
 
 
 @pytest.mark.django_db
+def test_a_pending_replacement_reports_save_errors(mailoutbox) -> None:
+    _register()
+
+    def constraint(self, *args, **kwargs):
+        raise _integrity("accounts_user_alias_ci")
+
+    with patch.object(User, "save", constraint), pytest.raises(RegistrationError) as alias:
+        _register(email="ADA@example.com", alias="otro_alias", password="otra-clave-larga")
+    assert alias.value.errors == {"alias": ["Ese alias ya está en uso."]}
+
+    def invalid(self, *args, **kwargs):
+        raise ValidationError({"birth_date": ["demasiado"]})
+
+    with patch.object(User, "save", invalid), pytest.raises(RegistrationError) as birth:
+        _register(email="ADA@example.com", alias="otro_alias", password="otra-clave-larga")
+    assert birth.value.errors == {"birth_date": ["demasiado"]}
+
+    user = User.objects.get()
+    assert user.alias == "ada_lovelace"
+    assert user.check_password(PASSWORD)
+    assert len(mailoutbox) == 1
+
+
+@pytest.mark.django_db
+def test_unknown_token_does_not_check_a_password() -> None:
+    _register()
+
+    with patch.object(User, "check_password", return_value=True) as check:
+        with pytest.raises(InvalidConfirmation):
+            confirm_email("no-existe", PASSWORD)
+
+    check.assert_not_called()
+    with pytest.raises(InvalidConfirmation):
+        confirm_email("no-existe", "a" * 200)
+
+
+@pytest.mark.django_db
+def test_a_huge_confirmation_password_is_not_hashed(mailoutbox) -> None:
+    _register()
+    raw = _token(mailoutbox[0].body)
+
+    with patch.object(User, "check_password", return_value=True) as check:
+        with pytest.raises(PasswordMismatch):
+            confirm_email(raw, "a" * 129)
+
+    check.assert_not_called()
+    assert User.objects.get().email_verified_at is None
+
+
+@pytest.mark.django_db
 def test_smtp_failure_rolls_the_account_back(settings) -> None:
     settings.EMAIL_BACKEND = "tests.accounts.test_registration_service.SmtpDownBackend"
 
@@ -302,9 +451,24 @@ def test_smtp_failure_rolls_the_account_back(settings) -> None:
 
 
 @pytest.mark.django_db
+def test_smtp_failure_keeps_the_pending_account(settings, mailoutbox) -> None:
+    _register()
+    settings.EMAIL_BACKEND = "tests.accounts.test_registration_service.SmtpDownBackend"
+
+    with pytest.raises(MailDeliveryError):
+        _register(email="ADA@example.com", alias="otro_alias", password="otra-clave-larga")
+
+    user = User.objects.get()
+    assert user.alias == "ada_lovelace"
+    assert user.check_password(PASSWORD)
+    assert EmailVerification.objects.count() == 1
+    assert len(mailoutbox) == 1
+
+
+@pytest.mark.django_db
 def test_confirmation_rejects_empty_unknown_used_and_expired_tokens() -> None:
     with pytest.raises(InvalidConfirmation):
-        confirm_email("")
+        confirm_email("", PASSWORD)
 
     _register()
     raw = "uno-token-conocido"
@@ -313,18 +477,22 @@ def test_confirmation_rejects_empty_unknown_used_and_expired_tokens() -> None:
     row.save(update_fields=["token_hash"])
 
     with pytest.raises(InvalidConfirmation):
-        confirm_email("otro-token")
+        confirm_email("otro-token", PASSWORD)
     assert User.objects.get().email_verified_at is None
 
     row.expires_at = timezone.now() - timedelta(seconds=1)
     row.save(update_fields=["expires_at"])
     with pytest.raises(InvalidConfirmation):
-        confirm_email(raw)
+        confirm_email(raw, PASSWORD)
     assert User.objects.get().email_verified_at is None
 
     row.expires_at = timezone.now() + TOKEN_TTL
     row.save(update_fields=["expires_at"])
-    confirm_email(raw)
+    with pytest.raises(PasswordMismatch):
+        confirm_email(raw, "otra-clave-larga")
+    row.refresh_from_db()
+    assert row.used_at is None
+    confirm_email(raw, PASSWORD)
     user = User.objects.get()
     verified_at = user.email_verified_at
     assert verified_at is not None
@@ -332,7 +500,7 @@ def test_confirmation_rejects_empty_unknown_used_and_expired_tokens() -> None:
     assert row.used_at == verified_at
 
     with pytest.raises(InvalidConfirmation):
-        confirm_email(raw)
+        confirm_email(raw, PASSWORD)
     user.refresh_from_db()
     assert user.email_verified_at == verified_at
 
@@ -344,7 +512,7 @@ def test_a_later_token_does_not_move_the_verification_time() -> None:
     row = EmailVerification.objects.get()
     row.token_hash = hashlib.sha256(first.encode()).hexdigest()
     row.save(update_fields=["token_hash"])
-    confirm_email(first)
+    confirm_email(first, PASSWORD)
     verified_at = User.objects.get().email_verified_at
 
     second = "segundo-token"
@@ -353,7 +521,7 @@ def test_a_later_token_does_not_move_the_verification_time() -> None:
         token_hash=hashlib.sha256(second.encode()).hexdigest(),
         expires_at=timezone.now() + TOKEN_TTL,
     )
-    confirm_email(second)
+    confirm_email(second, PASSWORD)
 
     user = User.objects.get()
     assert user.email_verified_at == verified_at
