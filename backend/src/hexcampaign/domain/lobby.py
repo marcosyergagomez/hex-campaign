@@ -232,6 +232,11 @@ def _territory(game: Game) -> None:
                 owners.append(player_id)
         if len(owners) == 1:
             game.discovered[owners[0]].add(cell)
+    for army in game.armies:
+        spot = army.at()
+        if spot is None or army.destroyed:
+            continue
+        game.discovered.setdefault(army.player_id, set()).add(spot)
 
 
 def drop_seat_count(game: Game) -> None:

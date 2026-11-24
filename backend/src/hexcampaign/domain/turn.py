@@ -29,6 +29,7 @@ def lock_orders(
     actor: str,
     paths: dict[str, list[Hex]],
     now: datetime,
+    rng: random.Random | None = None,
 ) -> Game:
     require_phase(game, "orders")
     require_player(game, actor)
@@ -36,11 +37,16 @@ def lock_orders(
     check_order(game, actor, typed)
     game.orders[actor] = typed
     if _ready(game):
-        return _resolve(game, now, set())
+        return _resolve(game, now, set(), rng or random.Random())
     return bump(game)
 
 
-def close_orders(game: Game, actor: str, now: datetime) -> Game:
+def close_orders(
+    game: Game,
+    actor: str,
+    now: datetime,
+    rng: random.Random | None = None,
+) -> Game:
     require_phase(game, "orders")
     require_staff(game, actor)
     defaulted: set[str] = set()
@@ -49,10 +55,17 @@ def close_orders(game: Game, actor: str, now: datetime) -> Game:
             continue
         defaulted.add(player_id)
         game.orders[player_id] = {army.id: () for army in living(game, player_id)}
-    return _resolve(game, now, defaulted)
+    return _resolve(game, now, defaulted, rng or random.Random())
 
 
-def report_battle(game: Game, actor: str, battle_id: str, outcome: str, now: datetime) -> Game:
+def report_battle(
+    game: Game,
+    actor: str,
+    battle_id: str,
+    outcome: str,
+    now: datetime,
+    rng: random.Random | None = None,
+) -> Game:
     battle = _pending(game, battle_id)
     if overdue(battle.opened_at, game.rules.battle_days, now):
         raise DomainError("phase_invalid")
@@ -60,18 +73,25 @@ def report_battle(game: Game, actor: str, battle_id: str, outcome: str, now: dat
         raise DomainError("forbidden")
     battle.reports[actor] = _outcome(battle, outcome)
     _agree(battle)
-    _settle(game, now)
+    _settle(game, now, rng or random.Random())
     return bump(game)
 
 
-def judge_battle(game: Game, actor: str, battle_id: str, outcome: str, now: datetime) -> Game:
+def judge_battle(
+    game: Game,
+    actor: str,
+    battle_id: str,
+    outcome: str,
+    now: datetime,
+    rng: random.Random | None = None,
+) -> Game:
     require_staff(game, actor)
     battle = _pending(game, battle_id)
     conflict = len(battle.reports) >= 2 and len(set(battle.reports.values())) > 1
     if not conflict and not overdue(battle.opened_at, game.rules.battle_days, now):
         raise DomainError("phase_invalid")
     battle.result = _outcome(battle, outcome)
-    _settle(game, now)
+    _settle(game, now, rng or random.Random())
     return bump(game)
 
 
@@ -85,7 +105,7 @@ def expel_player(game: Game, actor: str, target_id: str, rng: random.Random, now
     _remove(game, target)
     if not _active_staff(game):
         _hand_over(game, rng)
-    return _after_exit(game, target.player_id, now)
+    return _after_exit(game, target.player_id, now, rng)
 
 
 def leave_campaign(game: Game, actor: str, rng: random.Random, now: datetime) -> Game:
@@ -96,7 +116,7 @@ def leave_campaign(game: Game, actor: str, rng: random.Random, now: datetime) ->
     _remove(game, target)
     if was_owner or not _active_staff(game):
         _hand_over(game, rng)
-    return _after_exit(game, target.player_id, now)
+    return _after_exit(game, target.player_id, now, rng)
 
 
 def promote_player(game: Game, actor: str, target_id: str) -> Game:
@@ -133,7 +153,7 @@ def deactivate_player(game: Game, player_id: str, rng: random.Random) -> Game:
     return bump(game)
 
 
-def _resolve(game: Game, now: datetime, defaulted: set[str]) -> Game:
+def _resolve(game: Game, now: datetime, defaulted: set[str], rng: random.Random) -> Game:
     game.previous = capture(game)
     starts: dict[str, Hex] = {}
     paths: dict[str, tuple[Hex, ...]] = {}
@@ -151,7 +171,10 @@ def _resolve(game: Game, now: datetime, defaulted: set[str]) -> Game:
         _reveal(game, army.player_id, moved.trails.get(army.id, ()))
     for contact in moved.contacts:
         _add_battle(game, contact.army_ids, contact.hex, owners, now)
-    _mark_misses(game, defaulted)
+    _mark_misses(game, defaulted, rng)
+    if game.phase == "finished":
+        game.orders = {}
+        return bump(game)
     pending = [
         battle
         for battle in game.battles
@@ -160,11 +183,11 @@ def _resolve(game: Game, now: datetime, defaulted: set[str]) -> Game:
     if pending:
         game.phase = "battles"
         return bump(game)
-    _finish(game, now)
+    _finish(game, now, rng)
     return bump(game)
 
 
-def _settle(game: Game, now: datetime) -> None:
+def _settle(game: Game, now: datetime, rng: random.Random) -> None:
     if game.phase != "battles":
         return
     pending = [
@@ -181,10 +204,10 @@ def _settle(game: Game, now: datetime) -> None:
             found = find_army(game, army_id)
             if found is not None and not found.destroyed and found.player_id != battle.result:
                 found.destroyed = True
-    _finish(game, now)
+    _finish(game, now, rng)
 
 
-def _finish(game: Game, now: datetime) -> None:
+def _finish(game: Game, now: datetime, rng: random.Random) -> None:
     _eliminate(game)
     _holds(game)
     winners = _winners(game)
@@ -192,6 +215,10 @@ def _finish(game: Game, now: datetime) -> None:
     if winners is not None:
         game.winners = winners
         game.phase = "finished"
+        return
+    if not _active_staff(game):
+        _hand_over(game, rng)
+    if game.phase == "finished":
         return
     game.turn += 1
     game.phase = "orders"
@@ -259,18 +286,24 @@ def _holds(game: Game) -> None:
             fort.hold = 1
 
 
-def _mark_misses(game: Game, defaulted: set[str]) -> None:
-    for member in game.members:
+def _mark_misses(game: Game, defaulted: set[str], rng: random.Random) -> None:
+    hand_over = False
+    for member in list(game.members):
         if member.status != "active" or member.player_id not in _required(game) | defaulted:
             continue
         if member.player_id in defaulted:
             member.missed += 1
             if member.missed >= game.rules.missed_turns:
+                was_owner = member.role == "owner"
                 member.status = "inactive"
                 member.cause = "missed"
                 notice(game, "player_inactive", member.player_id, cause="missed")
+                if was_owner or not _active_staff(game):
+                    hand_over = True
             continue
         member.missed = 0
+    if hand_over:
+        _hand_over(game, rng)
 
 
 def _required(game: Game) -> set[str]:
@@ -361,12 +394,12 @@ def _remove(game: Game, member) -> None:
     drop_seat_count(game)
 
 
-def _after_exit(game: Game, player_id: str, now: datetime) -> Game:
+def _after_exit(game: Game, player_id: str, now: datetime, rng: random.Random) -> Game:
     _release(game, player_id)
     if game.phase == "battles":
-        _settle(game, now)
+        _settle(game, now, rng)
     elif game.phase == "orders" and _ready(game):
-        return _resolve(game, now, set())
+        return _resolve(game, now, set(), rng)
     elif _campaign_over(game):
         game.phase = "finished"
         game.winners = _winners(game) or []

@@ -9,9 +9,16 @@ import pytest
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import find_member, from_dict, to_dict
 from hexcampaign.domain.hexes import Hex, disk, distance, neighbors
-from hexcampaign.domain.lobby import accept_seat, begin, create_game
+from hexcampaign.domain.lobby import (
+    accept_seat,
+    begin,
+    close_placement,
+    create_game,
+    place_armies,
+)
 from hexcampaign.domain.march import march
-from hexcampaign.domain.rules import rules_from
+from hexcampaign.domain.rules import campaign_name, roster_text, rules_from
+from hexcampaign.domain.sight import known_hex
 from hexcampaign.domain.turn import (
     close_orders,
     deactivate_player,
@@ -284,6 +291,153 @@ def test_an_active_owner_cannot_be_expelled() -> None:
         expel_player(game, "1", "1", random.Random(0), NOW)
 
     assert caught.value.code == "cannot_expel_owner"
+
+
+def test_an_army_enters_a_hex_an_enemy_leaves_on_the_same_step() -> None:
+    moved = march(
+        {"a": Hex(0, 0), "b": Hex(1, 0)},
+        {"a": (Hex(1, 0),), "b": (Hex(2, 0),)},
+        {"a": "1", "b": "2"},
+    )
+
+    assert moved.positions["a"] == Hex(1, 0)
+    assert moved.positions["b"] == Hex(2, 0)
+    assert moved.contacts == ()
+
+
+def test_a_missed_owner_hands_the_table_over_and_revert_gives_it_back() -> None:
+    game = _opened(missed_turns=1)
+    game = lock_orders(game, "2", _stay(game, "2"), NOW)
+    game = close_orders(game, "1", NOW, random.Random(0))
+
+    former = find_member(game, "1")
+    assert former is not None
+    assert former.status == "inactive"
+    assert former.role == "player"
+    assert find_member(game, "2").role == "owner"
+
+    restored = revert_turn(game, "2")
+    assert find_member(restored, "1").status == "active"
+    assert find_member(restored, "1").role == "owner"
+    assert find_member(restored, "2").role == "player"
+
+
+def test_an_eliminated_owner_passes_the_table_when_the_war_continues() -> None:
+    game = create_game("Norte", rules_from(_rules(seats=3, victory="fortress")), "1", "ana")
+    game = accept_seat(game, "2", "boa")
+    game = accept_seat(game, "3", "cio")
+    game = begin(game, "1", [], NOW)
+    owner = _army(game, "1")
+    rival = _army(game, "2")
+    third = _army(game, "3")
+    owner.q, owner.r = 0, 0
+    rival.q, rival.r = 1, 0
+    third.q, third.r = 2, 0
+    game = lock_orders(game, "1", {owner.id: [Hex(1, 0)]}, NOW)
+    game = lock_orders(game, "2", _stay(game, "2"), NOW)
+    game = lock_orders(game, "3", _stay(game, "3"), NOW)
+    battle = game.battles[-1]
+    game = report_battle(game, "1", battle.id, "2", NOW)
+    game = report_battle(game, "2", battle.id, "2", NOW, random.Random(0))
+
+    assert find_member(game, "1").status == "eliminated"
+    assert find_member(game, "1").role == "player"
+    assert game.phase == "orders"
+    assert find_member(game, random.Random(0).choice(["2", "3"])).role == "owner"
+
+
+def test_a_hidden_battle_and_its_occupier_stay_out_of_the_other_view() -> None:
+    game = create_game("Norte", rules_from(_rules(seats=3, visibility="anonymous")), "1", "ana")
+    game = accept_seat(game, "2", "boa")
+    game = accept_seat(game, "3", "cio")
+    game = begin(game, "1", [], NOW)
+    left = _army(game, "1")
+    right = _army(game, "2")
+    bystander = _army(game, "3")
+    left.q, left.r = 0, 0
+    right.q, right.r = 1, 0
+    bystander.q, bystander.r = 2, -2
+    game = lock_orders(game, "1", {left.id: [Hex(1, 0)]}, NOW)
+    game = lock_orders(game, "2", _stay(game, "2"), NOW)
+    game = lock_orders(game, "3", _stay(game, "3"), NOW)
+    game.discovered["3"] = set()
+    occupied = next(fort for fort in game.fortresses if fort.player_id == "2")
+    occupied.holder_id = "1"
+    occupied.hold = 2
+    game.discovered["3"].add(occupied.at())
+
+    hidden = project(game, "3", NOW)
+    fighter = project(game, "1", NOW)
+
+    assert hidden["battles"] == []
+    assert all(fort["holder_id"] is None for fort in hidden["fortresses"])
+    assert fighter["battles"]
+    assert fighter["battles"][0]["players"] == ["1", "2"]
+
+
+def test_an_adjacent_holder_is_hidden_until_that_army_is_visible() -> None:
+    game = create_game("Norte", rules_from(_rules(seats=3, visibility="adjacent")), "1", "ana")
+    game = accept_seat(game, "2", "boa")
+    game = accept_seat(game, "3", "cio")
+    game = begin(game, "1", [], NOW)
+    watcher = _army(game, "3")
+    rival = _army(game, "2")
+    far = next(
+        cell
+        for cell in game.hexes
+        if cell != watcher.at() and abs(cell.q - watcher.q) + abs(cell.r - watcher.r) > 2
+    )
+    rival.q, rival.r = far.q, far.r
+    fort = next(item for item in game.fortresses if item.player_id == "2")
+    fort.q, fort.r = far.q, far.r
+    fort.holder_id = "2"
+    fort.hold = 2
+    game.discovered["3"] = set(game.hexes)
+
+    shown = project(game, "3", NOW)
+    seen = next(item for item in shown["fortresses"] if item["q"] == far.q and item["r"] == far.r)
+
+    assert seen["holder_id"] is None
+    assert seen["hold"] == 0
+
+
+def test_a_placed_army_discovers_the_hex_it_stands_on() -> None:
+    game = create_game(
+        "Norte",
+        rules_from(_rules(placement="players", visibility="adjacent")),
+        "1",
+        "ana",
+    )
+    game = accept_seat(game, "2", "boa")
+    game = begin(game, "1", [], NOW)
+    border = [
+        cell
+        for cell in game.hexes
+        if max(abs(cell.q), abs(cell.r), abs(-cell.q - cell.r)) == 2
+    ]
+    first, second = border[0], border[len(border) // 2]
+    own = _army(game, "1")
+    other = _army(game, "2")
+    game = place_armies(game, "1", first, {own.id: Hex(0, 0)})
+    game = place_armies(game, "2", second, {other.id: Hex(1, 0)})
+    game = close_placement(game, "1", NOW)
+
+    assert known_hex(game, "1", Hex(0, 0))
+    assert known_hex(game, "2", Hex(1, 0))
+
+
+def test_a_name_rejects_a_null_and_a_hidden_direction_mark() -> None:
+    with pytest.raises(DomainError) as nul:
+        campaign_name("Norte\x00")
+    with pytest.raises(DomainError) as bidi:
+        campaign_name("Norte\u202e")
+
+    assert nul.value.code == "rules_invalid"
+    assert bidi.value.code == "rules_invalid"
+    assert roster_text("a\nb") == "a\nb"
+    with pytest.raises(DomainError) as hidden:
+        roster_text("a\x00b")
+    assert hidden.value.code == "text_invalid"
 
 
 def test_orders_are_due_a_full_day_count_after_they_open(now=NOW) -> None:

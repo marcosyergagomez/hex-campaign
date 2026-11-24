@@ -37,6 +37,7 @@ def capture(game: Game) -> dict[str, object]:
         "members": [
             {
                 "player_id": member.player_id,
+                "role": member.role,
                 "status": member.status,
                 "missed": member.missed,
                 "cause": member.cause,
@@ -82,6 +83,7 @@ def restore(game: Game, board: dict) -> None:
     game.orders_opened_at = board["orders_opened_at"]
     game.winners = list(board["winners"])
     saved_members = {item["player_id"]: item for item in board["members"]}
+    restored_owner = None
     for member in game.members:
         saved = saved_members.get(member.player_id)
         if saved is None or member.status == "expelled":
@@ -89,8 +91,16 @@ def restore(game: Game, board: dict) -> None:
         member.missed = saved["missed"]
         if member.cause == "account":
             continue
+        # A later promotion stays. Ownership lost inside the reverted turn comes back.
+        if member.status != saved["status"] and saved.get("role") == "owner":
+            restored_owner = member
         member.status = saved["status"]
         member.cause = saved["cause"]
+    if restored_owner is not None:
+        for member in game.members:
+            if member is not restored_owner and member.role == "owner":
+                member.role = "player"
+        restored_owner.role = "owner"
     known = set(board["battle_ids"])
     for battle in game.battles:
         if battle.id not in known:

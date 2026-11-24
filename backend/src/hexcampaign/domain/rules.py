@@ -1,5 +1,6 @@
 """Choices the owner can still edit until the campaign starts."""
 
+import unicodedata
 from dataclasses import dataclass
 
 from hexcampaign.domain.errors import DomainError
@@ -48,29 +49,38 @@ def rules_from(data: object, *, floor: int = 2) -> Rules:
 
 
 def campaign_name(value: object) -> str:
-    if not isinstance(value, str):
-        raise DomainError("rules_invalid")
-    name = " ".join(value.split())
-    if not name or len(name) > 120:
-        raise DomainError("rules_invalid")
-    return name
+    return _line(value, limit=120, required=True, code="rules_invalid")
 
 
 def label(value: object, *, required: bool) -> str:
+    return _line(value, limit=40, required=required, code="text_invalid")
+
+
+def roster_text(value: object) -> str:
     if not isinstance(value, str):
         raise DomainError("text_invalid")
-    text = " ".join(value.split())
-    if len(text) > 40 or (required and not text):
+    text = unicodedata.normalize("NFKC", value)
+    if len(text) > 2000 or _hidden(text, allow_breaks=True):
         raise DomainError("text_invalid")
     return text
 
 
-def roster_text(value: object) -> str:
-    if not isinstance(value, str) or len(value) > 2000:
-        raise DomainError("text_invalid")
-    if any(ord(char) < 32 and char not in "\n\t" for char in value):
-        raise DomainError("text_invalid")
-    return value
+def _line(value: object, *, limit: int, required: bool, code: str) -> str:
+    if not isinstance(value, str):
+        raise DomainError(code)
+    text = " ".join(unicodedata.normalize("NFKC", value).split())
+    if len(text) > limit or (required and not text) or _hidden(text, allow_breaks=False):
+        raise DomainError(code)
+    return text
+
+
+def _hidden(text: str, *, allow_breaks: bool) -> bool:
+    for char in text:
+        if allow_breaks and char in "\n\t":
+            continue
+        if unicodedata.category(char) in {"Cc", "Cf"}:
+            return True
+    return False
 
 
 def _span(value: object, low: int, high: int) -> int:
