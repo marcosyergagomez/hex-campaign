@@ -186,6 +186,25 @@ def test_a_campaign_post_can_carry_eight_kilobytes_but_not_more(clients) -> None
 
 
 @pytest.mark.django_db(transaction=True)
+def test_a_player_stops_at_three_open_campaigns(clients) -> None:
+    ana, _boa = clients
+    user = _player("tope@example.com", "tope_one")
+    _login(ana, "tope@example.com")
+    for name in ("Uno", "Dos", "Tres"):
+        create_campaign(user, name, RULES)
+
+    refused = _write(ana, "/api/campaigns", {"name": "Cuatro", "rules": RULES})
+    assert refused.status_code == 422
+    assert refused.json()["errors"]["campaign"] == ["Ya tienes tres campañas abiertas."]
+
+    from apps.campaigns.models import Campaign
+
+    Campaign.objects.filter(created_by=user, name="Uno").update(phase="finished")
+    allowed = _write(ana, "/api/campaigns", {"name": "Cuatro", "rules": RULES})
+    assert allowed.status_code == 201, allowed.text
+
+
+@pytest.mark.django_db(transaction=True)
 def test_an_inactive_account_cannot_open_a_campaign() -> None:
     user = _player("cerrada@example.com", "cerrada")
     User.objects.filter(pk=user.pk).update(is_active=False)

@@ -80,6 +80,7 @@ class Game:
     battles: list[Battle] = field(default_factory=list)
     notices: list[dict[str, str]] = field(default_factory=list)
     events: list[dict[str, object]] = field(default_factory=list)
+    chronicle: list[dict[str, object]] = field(default_factory=list)
     winners: list[str] = field(default_factory=list)
     orders_opened_at: str | None = None
     previous: dict | None = None
@@ -181,6 +182,7 @@ def to_dict(game: Game) -> dict[str, object]:
         "battles": [_battle_dict(battle) for battle in game.battles],
         "notices": [dict(item) for item in game.notices],
         "events": [dict(item) for item in game.events],
+        "chronicle": [dict(item) for item in game.chronicle],
         "winners": list(game.winners),
         "orders_opened_at": game.orders_opened_at,
         "previous": game.previous,
@@ -229,6 +231,10 @@ def from_dict(data: object) -> Game:
     game.battles = [_battle(item) for item in _list(data["battles"])]
     game.notices = [_text_map(item) for item in _list(data["notices"])]
     game.events = [dict(_mapping(item)) for item in _list(data["events"])]
+    saved = data.get("chronicle", [])
+    if not isinstance(saved, list):
+        raise DomainError("rules_invalid")
+    game.chronicle = [dict(_mapping(item)) for item in saved]
     return game
 
 

@@ -16,11 +16,21 @@ class Campaign(models.Model):
     # Copied from the document so a player's list does not load every order.
     phase = models.CharField(max_length=16, default="setup")
     state = models.JSONField(default=initial_campaign_state)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="campaigns_created",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ("-updated_at",)
+        indexes = [
+            models.Index(fields=["created_by", "phase"], name="campaign_creator_phase"),
+        ]
 
     def save(self, *args, **kwargs):
         phase = self.state.get("phase") if isinstance(self.state, dict) else None

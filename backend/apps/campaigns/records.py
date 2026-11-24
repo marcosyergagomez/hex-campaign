@@ -37,6 +37,10 @@ class RevisionConflict(CampaignError):
         super().__init__("revision_conflict")
 
 
+OPEN_PHASES = ("recruiting", "placing", "orders", "battles")
+OPEN_CAMPAIGN_LIMIT = 3
+
+
 def create_campaign(user, name: str, rules: dict) -> tuple[Campaign, Game]:
     try:
         parsed = rules_from(rules)
@@ -44,11 +48,18 @@ def create_campaign(user, name: str, rules: dict) -> tuple[Campaign, Game]:
         raise CampaignError(exc.code) from exc
     with transaction.atomic():
         account = _actor(user)
+        open_campaigns = Campaign.objects.filter(created_by=account, phase__in=OPEN_PHASES).count()
+        if open_campaigns >= OPEN_CAMPAIGN_LIMIT:
+            raise CampaignError("campaign_limit")
         try:
             game = create_game(name, parsed, str(account.pk), account.alias)
         except DomainError as exc:
             raise CampaignError(exc.code) from exc
-        campaign = Campaign.objects.create(name=game.name, state=to_dict(game))
+        campaign = Campaign.objects.create(
+            name=game.name,
+            state=to_dict(game),
+            created_by=account,
+        )
         _sync(campaign, game)
     return campaign, game
 
