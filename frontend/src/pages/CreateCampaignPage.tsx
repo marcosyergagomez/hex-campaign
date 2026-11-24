@@ -96,16 +96,19 @@ export function CreateCampaignPage() {
 
   return (
     <section className="wizard">
-      <header className="page-header">
-        <div>
-          <p className="mark">{t("newCampaign")}</p>
-          <h1>{t("createCampaignTitle")}</h1>
-          <p className="quiet">{t("createCampaignLead")}</p>
-          <p className="quiet">{t("createLimitHint")}</p>
+      <header className="stage stage-short">
+        <img className="stage-photo" src="/campaign-seal.jpg" alt="" />
+        <div className="stage-copy">
+          <div>
+            <p className="mark">{t("newCampaign")}</p>
+            <h1>{t("createCampaignTitle")}</h1>
+            <p>{t("createCampaignLead")}</p>
+            <p>{t("createLimitHint")}</p>
+          </div>
+          <Link className="text-link" to="/campanas">
+            {t("backToCampaigns")}
+          </Link>
         </div>
-        <Link className="text-link" to="/campanas">
-          {t("backToCampaigns")}
-        </Link>
       </header>
 
       <ol className="wizard-steps" aria-label={t("wizardSteps")}>
