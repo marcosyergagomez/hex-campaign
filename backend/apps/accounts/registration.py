@@ -8,7 +8,6 @@ The mailbox is the only place that receives the raw token.
 
 import hashlib
 import secrets
-import threading
 from datetime import date, timedelta
 from smtplib import SMTPException
 from urllib.parse import urlencode
@@ -21,6 +20,7 @@ from django.db.models.functions import Lower
 from django.utils import timezone
 
 from .models import EmailVerification, User
+from .passwords import check_user_password, set_user_password
 from .validation import (
     EMAIL_TAKEN,
     MAX_PASSWORD_LENGTH,
@@ -35,8 +35,6 @@ PASSWORD_MISMATCH = "La contraseña no coincide."
 TOKEN_TTL = timedelta(hours=24)
 _EMAIL_CONSTRAINT = "accounts_user_email_key"
 _ALIAS_CONSTRAINT = "accounts_user_alias_ci"
-# Argon2 holds a large memory block, so only two hashes run at once.
-_HASH_SLOTS = threading.Semaphore(2)
 
 
 class RegistrationError(Exception):
@@ -66,8 +64,7 @@ def _digest(raw_token: str) -> str:
 
 
 def _set_password(user: User, password: str) -> None:
-    with _HASH_SLOTS:
-        user.set_password(password)
+    set_user_password(user, password)
 
 
 def _alias_taken(alias: str, *, except_user_id: int | None = None) -> bool:
@@ -274,7 +271,7 @@ def confirm_email(raw_token: str, password: str) -> None:
     )
     if not _token_is_open(row) or row is None:
         raise InvalidConfirmation
-    if len(password) > MAX_PASSWORD_LENGTH or not row.user.check_password(password):
+    if len(password) > MAX_PASSWORD_LENGTH or not check_user_password(row.user, password):
         raise PasswordMismatch
     known_hash = row.user.password
     with transaction.atomic():
@@ -285,7 +282,7 @@ def confirm_email(raw_token: str, password: str) -> None:
         locked = EmailVerification.objects.select_for_update().filter(pk=row.pk).first()
         if not _token_is_open(locked) or locked is None:
             raise InvalidConfirmation
-        if user.password != known_hash and not user.check_password(password):
+        if user.password != known_hash and not check_user_password(user, password):
             raise PasswordMismatch
         now = timezone.now()
         locked.used_at = now
