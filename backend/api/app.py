@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from api.guard import AccountGuard
 from api.pages import confirm_page, result_page
+from api.player_session import router as player_session_router
 from apps.accounts.registration import (
     ACCEPTED_DETAIL,
     PASSWORD_MISMATCH,
@@ -35,6 +36,7 @@ api = FastAPI(
     openapi_url="/api/openapi.json" if settings.DEBUG else None,
 )
 api.add_middleware(AccountGuard)
+api.include_router(player_session_router)
 
 INVALID_LINK = "El enlace no es válido o ha caducado."
 CONFIRMED = "Correo confirmado."

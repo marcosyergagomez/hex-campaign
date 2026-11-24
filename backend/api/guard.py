@@ -1,4 +1,4 @@
-"""Bounds and response headers for the account routes.
+"""Bounds and response headers for the account and session routes.
 
 The confirmation page carries a secret in the query string, so responses are
 not cached and do not send a referrer. Posts are capped so a large body never
@@ -12,10 +12,17 @@ from django.conf import settings
 from starlette.datastructures import MutableHeaders
 
 from api.pages import result_page
-from apps.accounts.throttle import account_posts
+from apps.accounts.throttle import account_posts, login_ips
 
 _MAX_BODY = 4096
-_POST_PATHS = {"/api/users", "/api/users/verify-email"}
+_BODY_LIMITED = {
+    "/api/users",
+    "/api/users/verify-email",
+    "/api/session",
+    "/api/session/logout",
+}
+_ACCOUNT_LIMITED = {"/api/users", "/api/users/verify-email"}
+_LOGIN_LIMITED = {"/api/session"}
 _TOO_MANY = "Demasiados intentos. Prueba de nuevo en unos minutos."
 _TOO_LARGE = "La solicitud es demasiado grande."
 _SECURITY_HEADERS = {
@@ -50,10 +57,13 @@ def _normalized_path(path: str) -> str:
     return path
 
 
-def _client_key(scope: Scope) -> str:
+def _client_host(scope: Scope) -> str:
     client = scope.get("client")
-    host = client[0] if client else "-"
-    return f"{host} {_normalized_path(scope.get('path', ''))}"
+    return client[0] if client else "-"
+
+
+def _client_key(scope: Scope) -> str:
+    return f"{_client_host(scope)} {_normalized_path(scope.get('path', ''))}"
 
 
 def _allow_post(key: str) -> bool:
@@ -61,6 +71,14 @@ def _allow_post(key: str) -> bool:
         key,
         settings.ACCOUNT_POST_LIMIT,
         settings.ACCOUNT_POST_WINDOW_SECONDS,
+    )
+
+
+def _allow_login(host: str) -> bool:
+    return login_ips.allow(
+        host,
+        settings.LOGIN_IP_LIMIT,
+        settings.LOGIN_IP_WINDOW_SECONDS,
     )
 
 
@@ -87,8 +105,11 @@ async def _read_body(receive: Receive, limit: int) -> bytes | None:
 
 
 def _error_field(path: str) -> str:
-    if _normalized_path(path).endswith("verify-email"):
+    normalized = _normalized_path(path)
+    if normalized.endswith("verify-email"):
         return "token"
+    if normalized.startswith("/api/session"):
+        return "credentials"
     return "email"
 
 
@@ -131,7 +152,7 @@ class AccountGuard:
                     headers[key] = value
             await send(message)
 
-        if scope.get("method") != "POST" or path not in _POST_PATHS:
+        if scope.get("method") != "POST" or path not in _BODY_LIMITED:
             await self.app(scope, receive, send_hardened)
             return
 
@@ -139,7 +160,10 @@ class AccountGuard:
         if len(length) > 8 or (length.isdigit() and int(length) > _MAX_BODY):
             await _reject(send, scope, 413, _TOO_LARGE)
             return
-        if not _allow_post(_client_key(scope)):
+        if path in _ACCOUNT_LIMITED and not _allow_post(_client_key(scope)):
+            await _reject(send, scope, 429, _TOO_MANY)
+            return
+        if path in _LOGIN_LIMITED and not _allow_login(_client_host(scope)):
             await _reject(send, scope, 429, _TOO_MANY)
             return
 
