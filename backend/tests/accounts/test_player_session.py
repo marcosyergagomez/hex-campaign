@@ -180,11 +180,30 @@ def test_logout_needs_the_csrf_token_and_leaves_other_sessions(client) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_logout_without_a_session_clears_the_cookies(client) -> None:
+def test_logout_without_a_cookie_does_not_write_one(client) -> None:
+    response = _logout(client, origin="https://evil.test")
+
+    assert response.status_code == 204
+    assert response.headers.get_list("set-cookie") == []
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_unknown_cookie_is_cleared(client) -> None:
+    client.cookies.set(SESSION_COOKIE, "no-es-una-sesion")
+
     response = _logout(client)
 
     assert response.status_code == 204
     assert SESSION_COOKIE in _cookie_headers(response)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_foreign_origin_does_not_spend_the_login_budget(client, settings) -> None:
+    settings.LOGIN_IP_LIMIT = 1
+    _player()
+
+    assert _login(client, origin="https://evil.test").status_code == 403
+    assert _login(client).status_code == 200
 
 
 @pytest.mark.django_db(transaction=True)

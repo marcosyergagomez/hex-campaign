@@ -13,13 +13,15 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from django.conf import settings
+from django.contrib.auth.hashers import is_password_usable
 from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import PlayerSession, User
 from .passwords import check_encoded_password, check_user_password, dummy_password_hash
-from .throttle import login_emails
+from .throttle import login_emails, login_ips
 from .validation import MAX_PASSWORD_LENGTH, canonical_email
 
 # token_urlsafe(32) is 43 characters. A longer cookie is never one we issued.
@@ -53,7 +55,9 @@ def session_digest(raw: str, *, purpose: str) -> str:
     ).hexdigest()
 
 
-def login(email: object, password: object) -> OpenedSession:
+def login(email: object, password: object, host: str = "-") -> OpenedSession:
+    if not _ip_attempt_allowed(host or "-"):
+        raise LoginThrottled
     if not _email_attempt_allowed(email):
         raise LoginThrottled
     user = _authenticated_user(email, password)
@@ -70,35 +74,45 @@ def open_session(user: User) -> OpenedSession:
             return _insert_session(user, authenticated_hash)
         except IntegrityError as exc:
             last_error = exc
-    assert last_error is not None
+    if last_error is None:
+        raise LoginRejected
     raise last_error
 
 
 def load_session(raw_token: str, *, touch: bool = True) -> PlayerSession | None:
     if not raw_token or len(raw_token) > MAX_SECRET_LENGTH:
         return None
-    session = (
-        PlayerSession.objects.select_related("user")
-        .filter(token_hash=session_digest(raw_token, purpose="session"))
-        .first()
-    )
-    if session is None:
-        return None
     now = timezone.now()
-    user = session.user
-    idle_deadline = session.last_seen_at + timedelta(seconds=settings.SESSION_IDLE_SECONDS)
-    if (
-        session.expires_at <= now
-        or idle_deadline <= now
-        or not user.is_active
-        or user.email_verified_at is None
-    ):
-        session.delete()
-        return None
-    if touch and session.last_seen_at + timedelta(seconds=settings.SESSION_TOUCH_SECONDS) <= now:
-        session.last_seen_at = now
-        session.save(update_fields=["last_seen_at"])
-    return session
+    # Lock only this row. Locking the user here would deadlock with User.save,
+    # which locks the user and then deletes sessions.
+    with transaction.atomic():
+        session = (
+            PlayerSession.objects.select_for_update(of=("self",))
+            .filter(token_hash=session_digest(raw_token, purpose="session"))
+            .first()
+        )
+        if session is None:
+            return None
+        try:
+            user = User.objects.get(pk=session.user_id)
+        except User.DoesNotExist:
+            session.delete()
+            return None
+        idle_deadline = session.last_seen_at + timedelta(seconds=settings.SESSION_IDLE_SECONDS)
+        if (
+            session.expires_at <= now
+            or idle_deadline <= now
+            or not user.is_active
+            or user.email_verified_at is None
+        ):
+            session.delete()
+            return None
+        touched = session.last_seen_at + timedelta(seconds=settings.SESSION_TOUCH_SECONDS)
+        if touch and touched <= now:
+            session.last_seen_at = now
+            session.save(update_fields=["last_seen_at"])
+        session.user = user
+        return session
 
 
 def csrf_matches(session: PlayerSession, header: str, cookie: str) -> bool:
@@ -113,6 +127,14 @@ def csrf_matches(session: PlayerSession, header: str, cookie: str) -> bool:
     if not hmac.compare_digest(header, cookie):
         return False
     return hmac.compare_digest(session_digest(header, purpose="csrf"), session.csrf_hash)
+
+
+def _ip_attempt_allowed(host: str) -> bool:
+    return login_ips.allow(
+        host,
+        settings.LOGIN_IP_LIMIT,
+        settings.LOGIN_IP_WINDOW_SECONDS,
+    )
 
 
 def _email_attempt_allowed(email: object) -> bool:
@@ -132,7 +154,9 @@ def _authenticated_user(email: object, password: object) -> User | None:
     if not isinstance(password, str) or len(password) > MAX_PASSWORD_LENGTH:
         return None
     user = _find_user(email)
-    if user is None:
+    # An unusable hash returns before Argon2. Pay for a real hash anyway,
+    # or a missing account and a blank one answer at different speeds.
+    if user is None or not is_password_usable(user.password):
         check_encoded_password(password, dummy_password_hash())
         return None
     if not check_user_password(user, password):
@@ -170,6 +194,12 @@ def _insert_session(user: User, authenticated_hash: str) -> OpenedSession:
         limit = settings.SESSION_MAX_PER_USER
         if limit < 1:
             raise ImproperlyConfigured("SESSION_MAX_PER_USER must be at least 1.")
+        idle_cutoff = now - timedelta(seconds=settings.SESSION_IDLE_SECONDS)
+        (
+            PlayerSession.objects.filter(user=locked)
+            .filter(Q(expires_at__lte=now) | Q(last_seen_at__lte=idle_cutoff))
+            .delete()
+        )
         existing = list(
             PlayerSession.objects.filter(user=locked)
             .order_by("-last_seen_at", "-pk")

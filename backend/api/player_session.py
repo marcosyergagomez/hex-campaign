@@ -81,6 +81,18 @@ def _same_authority(parsed: SplitResult, expected: SplitResult) -> bool:
     )
 
 
+def _client_host(request: Request) -> str:
+    client = request.client
+    if client is None:
+        return "-"
+    host = getattr(client, "host", None)
+    if isinstance(host, str) and host:
+        return host
+    if isinstance(client, tuple) and client and isinstance(client[0], str):
+        return client[0]
+    return "-"
+
+
 def _errors(status: int, field: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"errors": {field: [message]}})
 
@@ -126,7 +138,9 @@ def open_player_session(payload: LoginPayload, request: Request) -> JSONResponse
     if not same_origin(request):
         return _errors(403, "origin", ORIGIN_MESSAGE)
     try:
-        opened = login(payload.email, payload.password)
+        # Count the attempt only after the origin check, so another site
+        # cannot spend this address's login budget.
+        opened = login(payload.email, payload.password, _client_host(request))
     except LoginThrottled:
         return _errors(429, "credentials", TOO_MANY_MESSAGE)
     except LoginRejected:
@@ -159,6 +173,10 @@ def read_player_session(request: Request) -> JSONResponse:
 @django_sync
 def close_player_session(request: Request) -> Response:
     raw = request.cookies.get(SESSION_COOKIE, "")
+    # A cross-site form does not send this cookie. Clearing it in that
+    # response would still log the browser out, without a CSRF token.
+    if not raw:
+        return Response(status_code=204)
     session = load_session(raw, touch=False)
     if session is None:
         response = Response(status_code=204)

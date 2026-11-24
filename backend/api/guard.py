@@ -12,7 +12,7 @@ from django.conf import settings
 from starlette.datastructures import MutableHeaders
 
 from api.pages import result_page
-from apps.accounts.throttle import account_posts, login_ips
+from apps.accounts.throttle import account_posts
 
 _MAX_BODY = 4096
 _BODY_LIMITED = {
@@ -22,7 +22,6 @@ _BODY_LIMITED = {
     "/api/session/logout",
 }
 _ACCOUNT_LIMITED = {"/api/users", "/api/users/verify-email"}
-_LOGIN_LIMITED = {"/api/session"}
 _TOO_MANY = "Demasiados intentos. Prueba de nuevo en unos minutos."
 _TOO_LARGE = "La solicitud es demasiado grande."
 _SECURITY_HEADERS = {
@@ -71,14 +70,6 @@ def _allow_post(key: str) -> bool:
         key,
         settings.ACCOUNT_POST_LIMIT,
         settings.ACCOUNT_POST_WINDOW_SECONDS,
-    )
-
-
-def _allow_login(host: str) -> bool:
-    return login_ips.allow(
-        host,
-        settings.LOGIN_IP_LIMIT,
-        settings.LOGIN_IP_WINDOW_SECONDS,
     )
 
 
@@ -161,9 +152,6 @@ class AccountGuard:
             await _reject(send, scope, 413, _TOO_LARGE)
             return
         if path in _ACCOUNT_LIMITED and not _allow_post(_client_key(scope)):
-            await _reject(send, scope, 429, _TOO_MANY)
-            return
-        if path in _LOGIN_LIMITED and not _allow_login(_client_host(scope)):
             await _reject(send, scope, 429, _TOO_MANY)
             return
 
