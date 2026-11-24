@@ -5,8 +5,8 @@ import os
 from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F403
-from .base import DATABASES, SECRET_KEY
-from .guards import require_https_origin, require_secret
+from .base import DATABASES, SECRET_KEY, SESSION_PEPPER
+from .guards import require_https_origin, require_secret, require_session_pepper
 
 DEBUG = False
 SESSION_COOKIE_SECURE = True
@@ -19,6 +19,7 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 
 require_secret(SECRET_KEY)
+require_session_pepper(SESSION_PEPPER)
 if not DATABASES:
     raise ImproperlyConfigured("DATABASE_URL is required.")
 

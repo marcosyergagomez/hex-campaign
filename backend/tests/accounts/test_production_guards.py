@@ -3,7 +3,12 @@
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
-from config.settings.guards import require_https_origin, require_secret
+from config.settings.guards import (
+    LOCAL_SESSION_PEPPER,
+    require_https_origin,
+    require_secret,
+    require_session_pepper,
+)
 
 
 def test_production_requires_a_long_unique_secret() -> None:
@@ -36,6 +41,19 @@ def test_production_requires_a_long_unique_secret() -> None:
 def test_production_rejects_a_confirmation_origin_that_is_not_https(origin: str | None) -> None:
     with pytest.raises(ImproperlyConfigured):
         require_https_origin(origin)
+
+
+def test_production_rejects_a_shared_session_pepper() -> None:
+    with pytest.raises(ImproperlyConfigured):
+        require_session_pepper(None)
+    with pytest.raises(ImproperlyConfigured):
+        require_session_pepper("short")
+    with pytest.raises(ImproperlyConfigured):
+        require_session_pepper("change-me-before-any-shared-environment")
+    with pytest.raises(ImproperlyConfigured):
+        require_session_pepper(LOCAL_SESSION_PEPPER)
+
+    require_session_pepper("p" * 50)
 
 
 def test_production_accepts_an_https_origin() -> None:
