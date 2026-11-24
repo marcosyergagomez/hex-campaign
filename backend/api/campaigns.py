@@ -154,6 +154,8 @@ def _errors(status: int, field: str, message: str) -> JSONResponse:
 
 
 def _failure(exc: CampaignError) -> JSONResponse:
+    if exc.code == "account_inactive":
+        return _errors(401, "session", SESSION_MESSAGE)
     if exc.code == "revision_conflict":
         return _errors(409, "revision", _MESSAGES["revision_conflict"])
     status = _STATUS.get(exc.code, 422)
@@ -271,7 +273,7 @@ def post_rules(campaign_id: str, payload: RulesChange, request: Request) -> JSON
         def command(game):
             return change_rules(game, str(user.pk), payload.name, rules)
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -320,7 +322,7 @@ def post_start(campaign_id: str, payload: StartBody, request: Request) -> JSONRe
         def command(game):
             return begin(game, str(user.pk), payload.admins, timezone.now())
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -335,7 +337,7 @@ def post_placement(campaign_id: str, payload: PlaceBody, request: Request) -> JS
             fortress = Hex(payload.fortress.q, payload.fortress.r)
             return place_armies(game, str(user.pk), fortress, spots)
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -347,7 +349,7 @@ def post_close_placement(campaign_id: str, payload: RevisionBody, request: Reque
         def command(game):
             return close_placement(game, str(user.pk), timezone.now())
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -367,7 +369,7 @@ def post_army(campaign_id: str, army_id: str, payload: ArmyBody, request: Reques
                 payload.roster,
             )
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -381,7 +383,7 @@ def post_orders(campaign_id: str, payload: OrdersBody, request: Request) -> JSON
         def command(game):
             return lock_orders(game, str(user.pk), paths, timezone.now())
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -393,7 +395,7 @@ def post_close_orders(campaign_id: str, payload: RevisionBody, request: Request)
         def command(game):
             return close_orders(game, str(user.pk), timezone.now())
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -410,7 +412,7 @@ def post_battle(
         def command(game):
             return report_battle(game, str(user.pk), battle_id, payload.result, timezone.now())
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -427,7 +429,7 @@ def post_judge(
         def command(game):
             return judge_battle(game, str(user.pk), battle_id, payload.result, timezone.now())
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -445,7 +447,7 @@ def post_expel(campaign_id: str, payload: PlayerBody, request: Request) -> JSONR
                 timezone.now(),
             )
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -457,7 +459,7 @@ def post_leave(campaign_id: str, payload: RevisionBody, request: Request) -> JSO
         def command(game):
             return leave_campaign(game, str(user.pk), random.Random(), timezone.now())
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -469,7 +471,7 @@ def post_admin(campaign_id: str, payload: PlayerBody, request: Request) -> JSONR
         def command(game):
             return promote_player(game, str(user.pk), payload.player_id)
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 
@@ -481,6 +483,6 @@ def post_revert(campaign_id: str, payload: RevisionBody, request: Request) -> JS
         def command(game):
             return revert_turn(game, str(user.pk))
 
-        return _view(user, *play(campaign_id, payload.revision, command))
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)

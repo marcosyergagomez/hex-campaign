@@ -10,6 +10,7 @@ from api.player_session import CSRF_COOKIE
 from apps.accounts.models import User
 from apps.accounts.throttle import clear_login_limits
 from apps.campaigns.models import Seat
+from apps.campaigns.records import CampaignError, create_campaign, list_campaigns
 from config.asgi import application
 from hexcampaign.domain.hexes import Hex, neighbors
 
@@ -182,3 +183,38 @@ def test_a_campaign_post_can_carry_eight_kilobytes_but_not_more(clients) -> None
     )
     assert rejected.status_code == 413
     assert rejected.json()["errors"]["campaign"] == ["La solicitud es demasiado grande."]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_inactive_account_cannot_open_a_campaign() -> None:
+    user = _player("cerrada@example.com", "cerrada")
+    User.objects.filter(pk=user.pk).update(is_active=False)
+
+    with pytest.raises(CampaignError) as caught:
+        create_campaign(user, "Norte", RULES)
+
+    assert caught.value.code == "account_inactive"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_list_reads_the_phase_column() -> None:
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    user = _player("lista@example.com", "lista")
+    campaign, _game = create_campaign(user, "Norte", RULES)
+
+    with CaptureQueriesContext(connection) as captured:
+        rows = list_campaigns(user)
+
+    assert rows == [
+        {
+            "id": str(campaign.id),
+            "name": "Norte",
+            "role": "owner",
+            "status": "active",
+            "phase": "recruiting",
+        }
+    ]
+    sql = " ".join(query["sql"] for query in captured.captured_queries)
+    assert "state" not in sql
