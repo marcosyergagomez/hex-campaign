@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from api.guard import AccountGuard
 from api.pages import confirm_page, result_page
 from api.player_session import router as player_session_router
+from apps.accounts.languages import normalize
 from apps.accounts.registration import (
     ACCEPTED_DETAIL,
     PASSWORD_MISMATCH,
@@ -108,7 +109,7 @@ async def reject_invalid_body(request: Request, exc: RequestValidationError) -> 
     responses={422: {"model": ErrorBody}, 503: {"model": ErrorBody}},
 )
 @django_sync
-def register_user(payload: RegisterPayload) -> JSONResponse | Accepted:
+def register_user(payload: RegisterPayload, request: Request) -> JSONResponse | Accepted:
     try:
         register_account(
             email=payload.email,
@@ -116,6 +117,7 @@ def register_user(payload: RegisterPayload) -> JSONResponse | Accepted:
             alias=payload.alias,
             birth_date=payload.birth_date,
             sex=payload.sex,
+            language=normalize(request.cookies.get("hex_lang")),
         )
     except RegistrationError as exc:
         return JSONResponse(status_code=422, content={"errors": exc.errors})
@@ -128,10 +130,22 @@ def register_user(payload: RegisterPayload) -> JSONResponse | Accepted:
 
 
 @api.get("/api/users/verify-email", summary="Página para confirmar el correo")
-def verify_email_page(token: str = "") -> HTMLResponse:
+def verify_email_page(request: Request, token: str = "", lang: str = "") -> HTMLResponse:
+    language = normalize(lang or request.cookies.get("hex_lang"))
     if not token:
-        return HTMLResponse(result_page(INVALID_LINK), status_code=400)
-    return HTMLResponse(confirm_page(token))
+        response = HTMLResponse(result_page(INVALID_LINK, language), status_code=400)
+    else:
+        response = HTMLResponse(confirm_page(token, language=language))
+    if lang in {"en", "es", "fr", "it", "de"}:
+        response.set_cookie(
+            "hex_lang",
+            language,
+            max_age=60 * 60 * 24 * 365,
+            path="/",
+            samesite="lax",
+            secure=request.url.scheme == "https",
+        )
+    return response
 
 
 def _confirm(raw_token: str, password: str) -> None:
@@ -150,41 +164,47 @@ def _confirm(raw_token: str, password: str) -> None:
     responses={400: {"model": ErrorBody}},
 )
 async def verify_email(request: Request) -> HTMLResponse | Accepted | JSONResponse:
-    token, password, as_html = await _posted_credentials(request)
+    token, password, as_html, language = await _posted_credentials(request)
     try:
         await sync_to_async(_confirm)(token, password)
     except InvalidConfirmation:
         if as_html:
-            return HTMLResponse(result_page(INVALID_LINK), status_code=400)
+            return HTMLResponse(result_page(INVALID_LINK, language), status_code=400)
         return JSONResponse(status_code=400, content={"errors": {"token": [INVALID_LINK]}})
     except PasswordMismatch:
         if as_html:
-            return HTMLResponse(confirm_page(token, PASSWORD_MISMATCH), status_code=400)
+            return HTMLResponse(confirm_page(token, PASSWORD_MISMATCH, language), status_code=400)
         return JSONResponse(
             status_code=400,
             content={"errors": {"password": [PASSWORD_MISMATCH]}},
         )
     if as_html:
-        return HTMLResponse(result_page(CONFIRMED))
+        return HTMLResponse(result_page(CONFIRMED, language))
     return Accepted(detail=CONFIRMED)
 
 
-async def _posted_credentials(request: Request) -> tuple[str, str, bool]:
+async def _posted_credentials(request: Request) -> tuple[str, str, bool, str]:
     raw = await request.body()
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            return "", "", False
+            return "", "", False, "es"
         if not isinstance(data, dict):
-            return "", "", False
+            return "", "", False, "es"
         token = data.get("token", "")
         password = data.get("password", "")
         return (
             token if isinstance(token, str) else "",
             password if isinstance(password, str) else "",
             False,
+            "es",
         )
     parsed = parse_qs(raw.decode("utf-8", errors="replace"), keep_blank_values=True)
-    return parsed.get("token", [""])[0], parsed.get("password", [""])[0], True
+    return (
+        parsed.get("token", [""])[0],
+        parsed.get("password", [""])[0],
+        True,
+        normalize(parsed.get("lang", [""])[0]),
+    )

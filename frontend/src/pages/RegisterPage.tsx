@@ -1,16 +1,20 @@
-import { useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 
-import { ApiError, register, type Sex } from "../api"
+import { register, type Sex } from "../api"
 import { Banner, Field } from "../form"
+import { clientNotice } from "../i18n/catalog"
+import { useI18n } from "../i18n/language"
+import { presentError } from "../presentError"
 
-const SEXES: { value: Sex; label: string }[] = [
-  { value: "woman", label: "Mujer" },
-  { value: "man", label: "Hombre" },
-  { value: "other", label: "Otro" },
-  { value: "undisclosed", label: "Prefiero no decirlo" },
-]
+const SEXES: readonly Sex[] = ["woman", "man", "other", "undisclosed"]
+
+function isSex(value: string): value is Sex {
+  return (SEXES as readonly string[]).includes(value)
+}
 
 export function RegisterPage() {
+  const { t, text } = useI18n()
+  const alive = useRef(true)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [alias, setAlias] = useState("")
@@ -20,10 +24,17 @@ export function RegisterPage() {
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const [detail, setDetail] = useState("")
 
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
+
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
-    if (!sex) {
-      setErrors({ sex: ["Elige una opción."] })
+    if (!isSex(sex)) {
+      setErrors({ sex: [clientNotice("chooseOption")] })
       return
     }
     setPending(true)
@@ -37,30 +48,37 @@ export function RegisterPage() {
         birth_date: birthDate,
         sex,
       })
+      if (!alive.current) {
+        return
+      }
+      setPassword("")
       setDetail(accepted.detail)
     } catch (error) {
-      setErrors(
-        error instanceof ApiError ? error.errors : { form: ["No se ha podido crear la cuenta."] },
-      )
+      if (alive.current) {
+        setErrors(presentError(error, "registerFailed"))
+      }
     } finally {
-      setPending(false)
+      if (alive.current) {
+        setPending(false)
+      }
     }
   }
 
   if (detail) {
     return (
       <div className="session">
-        <h2>Revisa el correo</h2>
-        <p>{detail}</p>
+        <h2>{t("checkEmail")}</h2>
+        <p>{text(detail)}</p>
       </div>
     )
   }
 
+  const sexErrorId = errors.sex?.length ? "sex-error" : undefined
   return (
     <form onSubmit={onSubmit} noValidate>
       <Banner errors={errors} fields={["form"]} />
       <Field
-        label="Correo"
+        label={t("email")}
         name="email"
         type="email"
         autoComplete="email"
@@ -69,63 +87,73 @@ export function RegisterPage() {
         onChange={setEmail}
       />
       <Field
-        label="Contraseña"
+        label={t("password")}
         name="password"
         type="password"
         autoComplete="new-password"
         value={password}
-        hint="De 12 a 128 caracteres. Los espacios cuentan."
+        hint={t("passwordHint")}
         error={errors.password}
         onChange={setPassword}
       />
       <Field
-        label="Alias"
+        label={t("alias")}
         name="alias"
         autoComplete="nickname"
         value={alias}
-        hint="De 3 a 24 letras, números o guion bajo."
+        hint={t("aliasHint")}
         error={errors.alias}
         onChange={setAlias}
       />
       <Field
-        label="Fecha de nacimiento"
+        label={t("birthDate")}
         name="birth_date"
         type="date"
         autoComplete="bday"
         value={birthDate}
-        hint="Hay que tener al menos 16 años."
+        hint={t("ageHint")}
         error={errors.birth_date}
         onChange={setBirthDate}
       />
-      <label>
-        <span className="label-text">Sexo</span>
+      <div className="field">
+        <label className="label-text" htmlFor="sex">
+          {t("sex")}
+        </label>
         <select
+          id="sex"
           name="sex"
           value={sex}
           required
+          aria-invalid={Boolean(sexErrorId)}
+          aria-describedby={sexErrorId}
           onChange={(event) => {
-            setSex(event.target.value as Sex | "")
+            const next = event.target.value
+            setSex(isSex(next) ? next : "")
             setErrors((current) => {
               if (!current.sex) {
                 return current
               }
-              const next = { ...current }
-              delete next.sex
-              return next
+              const rest = { ...current }
+              delete rest.sex
+              return rest
             })
           }}
         >
-          <option value="">Elige una opción</option>
+          <option value="">{t("choose")}</option>
           {SEXES.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
+            <option key={option} value={option}>
+              {t(option)}
             </option>
           ))}
         </select>
-        {errors.sex ? <p className="field-error">{errors.sex.join(" ")}</p> : null}
-      </label>
+        {sexErrorId ? (
+          <p id={sexErrorId} className="field-error">
+            {errors.sex?.map(text).join(" ")}
+          </p>
+        ) : null}
+      </div>
       <button type="submit" disabled={pending}>
-        {pending ? "Creando…" : "Crear cuenta"}
+        {pending ? t("creating") : t("createAccount")}
       </button>
     </form>
   )
