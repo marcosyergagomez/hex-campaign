@@ -43,6 +43,14 @@ uvicorn config.asgi:application --reload
 
 Swagger is at http://127.0.0.1:8000/api/docs while `DEBUG` is on. It is absent when debug is off.
 
+The login and registration screens are in `frontend/`. Vite serves them at http://localhost:5173 and proxies `/api` to uvicorn, so the session cookie is first-party. `API_ORIGIN` in `.env` has to be `http://localhost:5173`. Open that host: `127.0.0.1` is another origin and login rejects it.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
 On macOS or Linux, activate the virtual environment with `source .venv/bin/activate`.
 
 `migrate` creates the tables on an empty database and applies later changes without deleting campaigns. The Docker volume keeps the data between restarts. Mailpit accepts the confirmation message on port 1025 and shows it at http://localhost:8025. The link uses `API_ORIGIN`. `config.settings.production` refuses to start unless that origin is `https`, `DJANGO_SECRET_KEY` is a unique secret of at least 50 characters, and `SESSION_PEPPER` is a different secret of that length. The sample pepper in `.env.example` is refused in production.
@@ -54,5 +62,7 @@ Mapa de campaña en el navegador para partidas de miniaturas. Los jugadores cier
 Las reglas de campaña son propias. No hay arte oficial ni texto de reglamento copiado.
 
 El alta pide correo, contraseña de 12 a 128 caracteres, alias de 3 a 24 letras, números o guion bajo, fecha de nacimiento con un mínimo de 16 años, y sexo (`woman`, `man`, `other` o `undisclosed`). Si el correo ya está confirmado, sin distinguir mayúsculas ni espacios alrededor, la respuesta es 422 con «Este correo ya está registrado» y la cuenta no cambia. Un alta sin confirmar se puede repetir: el enlace anterior deja de valer y se envía otro. Para confirmar hay que escribir la contraseña del alta. Las cuentas de administración, las inactivas y las creadas en el admin no se sustituyen. Si el alias pertenece a otra persona, se avisa. La fecha y el sexo solo se ven en el admin.
+
+El alta y el acceso están en `frontend/`. Vite los sirve en http://localhost:5173 y reenvía `/api` a uvicorn, así la cookie de sesión queda en el mismo origen que la página. En `.env`, `API_ORIGIN` tiene que ser `http://localhost:5173`. Hay que abrir ese host: `127.0.0.1` es otro origen y el acceso lo rechaza.
 
 Quien ya confirmó el correo y tiene la cuenta activa entra con `POST /api/session`. La respuesta deja `__Host-session` (HttpOnly) y `__Host-csrf`. Para cerrar sesión hay que devolver ese segundo valor en la cabecera `X-CSRF-Token`. En la base solo se guarda un HMAC-SHA256 de cada secreto, con la clave `SESSION_PEPPER`: una copia de la base no sirve para entrar. La cookie dura como mucho 180 días y se cierra sola si pasan 60 días sin visita. La campaña sigue guardada. Una cuenta puede tener 10 sesiones y cualquiera de ellas sirve para todas las campañas. Cerrar sesión solo cierra ese navegador. Cambiar la contraseña o desactivar la cuenta cierra todas. Si el correo no existe, no está confirmado o la contraseña no coincide, la respuesta es el mismo 401. El `Origin` o el `Referer` tienen que ser `API_ORIGIN`, y el mapa tiene que servirse en ese origen. Esta cookie no es la del admin de Django.
