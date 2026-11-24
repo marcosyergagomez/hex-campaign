@@ -6,7 +6,7 @@ permission tables against whatever AUTH_USER_MODEL is at that moment.
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models.functions import Lower
 from django.utils import timezone
 
@@ -100,7 +100,24 @@ class User(AbstractBaseUser, PermissionsMixin):
         # Every write, including the admin, keeps the canonical form and the profile rules.
         self._canonicalize()
         self.full_clean()
-        super().save(*args, **kwargs)
+        # The user row stays locked until the password write and the session
+        # delete commit together. A login then sees the new hash and cannot
+        # keep a cookie that was checked against the old one.
+        with transaction.atomic():
+            previous = self._locked_credentials()
+            super().save(*args, **kwargs)
+            if previous is not None and _sessions_should_close(previous, self):
+                PlayerSession.objects.filter(user_id=self.pk).delete()
+
+    def _locked_credentials(self) -> dict[str, object] | None:
+        if not self.pk:
+            return None
+        return (
+            User.objects.select_for_update()
+            .filter(pk=self.pk)
+            .values("password", "is_active")
+            .first()
+        )
 
     def _canonicalize(self) -> None:
         if isinstance(self.email, str):
@@ -128,6 +145,42 @@ class EmailVerification(models.Model):
     class Meta:
         verbose_name = "confirmación de correo"
         verbose_name_plural = "confirmaciones de correo"
+
+    def __str__(self) -> str:
+        return f"{self.user_id} {self.expires_at:%Y-%m-%d}"
+
+
+def _sessions_should_close(previous: dict[str, object], user: User) -> bool:
+    password_changed = previous["password"] != user.password
+    deactivated = bool(previous["is_active"]) and not user.is_active
+    return password_changed or deactivated
+
+
+class PlayerSession(models.Model):
+    """One browser login. Only HMAC digests are stored, never the cookie.
+
+    The row is not a campaign. One session can play every campaign, and the
+    campaign remains after the session expires or is revoked.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="player_sessions",
+        verbose_name="usuario",
+    )
+    token_hash = models.CharField(max_length=64, unique=True)
+    csrf_hash = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "sesión"
+        verbose_name_plural = "sesiones"
+        indexes = [
+            models.Index(fields=["user", "last_seen_at"], name="accounts_ps_user_seen"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.user_id} {self.expires_at:%Y-%m-%d}"
