@@ -22,3 +22,14 @@ def test_result_page_escapes_the_message() -> None:
 
     assert "&lt;b&gt;listo&lt;/b&gt;" in page
     assert "<b>" not in page
+
+
+def test_confirm_page_can_be_shown_in_german() -> None:
+    page = confirm_page("token", language="de")
+
+    assert 'lang="de"' in page
+    assert "E-Mail bestätigen" in page
+    assert "Confirmar correo" not in page
+    assert "lang=de" in page
+    assert "English" in page
+    assert "<script>" not in page
