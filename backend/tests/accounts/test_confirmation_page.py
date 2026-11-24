@@ -13,6 +13,8 @@ def test_confirm_page_escapes_the_token_and_posts_it() -> None:
     assert 'value="&quot;&gt;&lt;script&gt;"' in page
     assert "<script>" not in page
     assert "Confirmar correo" in page
+    assert 'type="password"' in page
+    assert 'name="password"' in page
 
 
 def test_result_page_escapes_the_message() -> None:

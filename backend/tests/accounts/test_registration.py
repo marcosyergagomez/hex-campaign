@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from apps.accounts.models import EmailVerification, User
 from config.asgi import application
 
-ACCEPTED = {"detail": "Si el correo está libre, te enviaremos un enlace para confirmarlo."}
+ACCEPTED = {"detail": "Te enviaremos un enlace para confirmar el correo."}
 
 
 class BrokenBackend(BaseEmailBackend):
@@ -90,18 +90,67 @@ def test_register_sends_a_hashed_link_and_hides_the_profile(client, mailoutbox) 
 
 
 @pytest.mark.django_db(transaction=True)
-def test_existing_email_gets_the_same_response(client, mailoutbox) -> None:
+def test_unconfirmed_email_can_be_registered_again(client, mailoutbox) -> None:
     assert client.post("/api/users", json=_payload()).status_code == 202
+    old = _token(mailoutbox[0].body)
+
     again = client.post(
         "/api/users",
-        json=_payload(email="ADA@example.com", alias="otra_persona"),
+        json=_payload(email="ADA@example.com", alias="otra_persona", password="otra-clave-larga"),
     )
 
     assert again.status_code == 202
     assert again.json() == ACCEPTED
+    user = User.objects.get()
+    assert user.alias == "otra_persona"
+    assert user.check_password("otra-clave-larga")
+    assert user.email_verified_at is None
+    assert len(mailoutbox) == 2
+    stale = client.post(
+        "/api/users/verify-email",
+        json={"token": old, "password": "otra-clave-larga"},
+    )
+    assert stale.status_code == 400
+    fresh = client.post(
+        "/api/users/verify-email",
+        json={"token": _token(mailoutbox[1].body), "password": "otra-clave-larga"},
+    )
+    assert fresh.status_code == 200
+    user.refresh_from_db()
+    assert user.email_verified_at is not None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_confirmed_email_is_rejected(client, mailoutbox) -> None:
+    assert client.post("/api/users", json=_payload()).status_code == 202
+    confirmed = client.post(
+        "/api/users/verify-email",
+        json={"token": _token(mailoutbox[0].body), "password": "una-clave-larga"},
+    )
+    assert confirmed.status_code == 200
+
+    again = client.post(
+        "/api/users",
+        json=_payload(email="ADA@example.com", alias="otra_persona", password="otra-clave-larga"),
+    )
+
+    assert again.status_code == 422
+    assert again.json() == {"errors": {"email": ["Este correo ya está registrado."]}}
+
+    both = client.post(
+        "/api/users",
+        json=_payload(email="ADA@example.com", alias="ada_lovelace"),
+    )
+    assert both.status_code == 422
+    assert both.json()["errors"] == {
+        "email": ["Este correo ya está registrado."],
+        "alias": ["Ese alias ya está en uso."],
+    }
     assert User.objects.count() == 1
     assert len(mailoutbox) == 1
-    assert User.objects.get().alias == "ada_lovelace"
+    user = User.objects.get()
+    assert user.alias == "ada_lovelace"
+    assert user.check_password("una-clave-larga")
 
 
 @pytest.mark.django_db(transaction=True)
@@ -147,19 +196,35 @@ def test_confirmation_link_is_single_use(client, mailoutbox) -> None:
     preview = client.get("/api/users/verify-email", params={"token": token})
     assert preview.status_code == 200
     assert "Confirmar correo" in preview.text
+    assert 'type="password"' in preview.text
     assert 'content="noindex"' in preview.text
     assert f'value="{token}"' in preview.text
     user.refresh_from_db()
     assert user.email_verified_at is None
     assert EmailVerification.objects.get().used_at is None
 
-    confirmed = client.post("/api/users/verify-email", json={"token": token})
+    wrong = client.post(
+        "/api/users/verify-email",
+        json={"token": token, "password": "no-es-la-clave"},
+    )
+    assert wrong.status_code == 400
+    assert wrong.json()["errors"]["password"] == ["La contraseña no coincide."]
+    user.refresh_from_db()
+    assert user.email_verified_at is None
+
+    confirmed = client.post(
+        "/api/users/verify-email",
+        json={"token": token, "password": "una-clave-larga"},
+    )
     assert confirmed.status_code == 200
     assert confirmed.json()["detail"] == "Correo confirmado."
     user.refresh_from_db()
     assert user.email_verified_at is not None
 
-    again = client.post("/api/users/verify-email", json={"token": token})
+    again = client.post(
+        "/api/users/verify-email",
+        json={"token": token, "password": "una-clave-larga"},
+    )
     assert again.status_code == 400
     assert again.json()["errors"]["token"] == ["El enlace no es válido o ha caducado."]
 
@@ -172,7 +237,10 @@ def test_expired_link_does_not_confirm(client, mailoutbox) -> None:
     row.expires_at = timezone.now() - timedelta(minutes=1)
     row.save(update_fields=["expires_at"])
 
-    response = client.post("/api/users/verify-email", data={"token": token})
+    response = client.post(
+        "/api/users/verify-email",
+        data={"token": token, "password": "una-clave-larga"},
+    )
 
     assert response.status_code == 400
     assert "caducado" in response.text
@@ -220,6 +288,28 @@ def test_missing_token_is_rejected(client) -> None:
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
 
 
+@pytest.mark.django_db(transaction=True)
+def test_password_spaces_are_part_of_the_secret(client, mailoutbox) -> None:
+    password = "  clave con espacios  "
+    created = client.post("/api/users", json=_payload(password=password))
+    assert created.status_code == 202
+    assert User.objects.get().check_password(password)
+    assert not User.objects.get().check_password(password.strip())
+
+    token = _token(mailoutbox[0].body)
+    stripped = client.post(
+        "/api/users/verify-email",
+        json={"token": token, "password": password.strip()},
+    )
+    assert stripped.status_code == 400
+    confirmed = client.post(
+        "/api/users/verify-email",
+        json={"token": token, "password": password},
+    )
+    assert confirmed.status_code == 200
+    assert User.objects.get().email_verified_at is not None
+
+
 def test_a_very_long_password_is_rejected(client) -> None:
     response = client.post("/api/users", json=_payload(password="a" * 129))
 
@@ -227,6 +317,52 @@ def test_a_very_long_password_is_rejected(client) -> None:
     assert response.json()["errors"]["password"] == [
         "La contraseña admite como máximo 128 caracteres."
     ]
+
+
+def test_a_slashed_path_rejects_a_huge_body(client) -> None:
+    response = client.post(
+        "/api/users/",
+        content=b'{"password":"' + b"a" * 5000 + b'"}',
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["errors"]["email"] == ["La solicitud es demasiado grande."]
+
+
+def test_a_disconnected_registration_does_not_run(client) -> None:
+    import asyncio
+
+    from api.guard import AccountGuard, clear_account_limits
+
+    clear_account_limits()
+    called = False
+    incoming = [
+        {"type": "http.request", "body": b'{"email":', "more_body": True},
+        {"type": "http.disconnect"},
+    ]
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    async def receive():
+        return incoming.pop(0)
+
+    async def send(message):
+        raise AssertionError(message)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/users/",
+        "headers": [],
+        "client": ("203.0.113.5", 9),
+    }
+    asyncio.run(AccountGuard(app)(scope, receive, send))
+    clear_account_limits()
+
+    assert called is False
 
 
 def test_a_huge_body_is_rejected(client) -> None:
@@ -380,12 +516,27 @@ def test_form_post_confirms_and_bad_tokens_do_not(client, mailoutbox) -> None:
     assert "caducado" in blank.text
     assert User.objects.get().email_verified_at is None
 
-    confirmed = client.post("/api/users/verify-email", data={"token": token})
+    mismatch = client.post(
+        "/api/users/verify-email",
+        data={"token": token, "password": "no-es-la-clave"},
+    )
+    assert mismatch.status_code == 400
+    assert "La contraseña no coincide." in mismatch.text
+    assert 'type="password"' in mismatch.text
+    assert User.objects.get().email_verified_at is None
+
+    confirmed = client.post(
+        "/api/users/verify-email",
+        data={"token": token, "password": "una-clave-larga"},
+    )
     assert confirmed.status_code == 200
     assert "Correo confirmado." in confirmed.text
     assert "text/html" in confirmed.headers["content-type"]
     assert User.objects.get().email_verified_at is not None
 
-    repeated = client.post("/api/users/verify-email", data={"token": token})
+    repeated = client.post(
+        "/api/users/verify-email",
+        data={"token": token, "password": "una-clave-larga"},
+    )
     assert repeated.status_code == 400
     assert "caducado" in repeated.text

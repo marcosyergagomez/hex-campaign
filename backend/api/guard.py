@@ -6,18 +6,15 @@ reaches the hasher.
 """
 
 import json
-import threading
-import time
-from collections import deque
 from collections.abc import Awaitable, Callable
 
 from django.conf import settings
 from starlette.datastructures import MutableHeaders
 
 from api.pages import result_page
+from apps.accounts.throttle import account_posts
 
 _MAX_BODY = 4096
-_MAX_TRACKED_CLIENTS = 4096
 _POST_PATHS = {"/api/users", "/api/users/verify-email"}
 _TOO_MANY = "Demasiados intentos. Prueba de nuevo en unos minutos."
 _TOO_LARGE = "La solicitud es demasiado grande."
@@ -30,8 +27,6 @@ _SECURITY_HEADERS = {
         "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
     ),
 }
-_LIMIT_LOCK = threading.Lock()
-_HITS: dict[str, deque[float]] = {}
 
 Scope = dict
 Receive = Callable[[], Awaitable[dict]]
@@ -39,8 +34,7 @@ Send = Callable[[dict], Awaitable[None]]
 
 
 def clear_account_limits() -> None:
-    with _LIMIT_LOCK:
-        _HITS.clear()
+    account_posts.clear()
 
 
 def _header(scope: Scope, name: bytes) -> str:
@@ -50,29 +44,28 @@ def _header(scope: Scope, name: bytes) -> str:
     return ""
 
 
+def _normalized_path(path: str) -> str:
+    if len(path) > 1 and path.endswith("/"):
+        return path.rstrip("/")
+    return path
+
+
 def _client_key(scope: Scope) -> str:
     client = scope.get("client")
     host = client[0] if client else "-"
-    return f"{host} {scope.get('path', '')}"
+    return f"{host} {_normalized_path(scope.get('path', ''))}"
 
 
 def _allow_post(key: str) -> bool:
-    limit = settings.ACCOUNT_POST_LIMIT
-    window = settings.ACCOUNT_POST_WINDOW_SECONDS
-    if limit <= 0:
-        return True
-    now = time.monotonic()
-    with _LIMIT_LOCK:
-        if key not in _HITS and len(_HITS) >= _MAX_TRACKED_CLIENTS:
-            _HITS.pop(next(iter(_HITS)))
-        hits = _HITS.setdefault(key, deque())
-        cutoff = now - window
-        while hits and hits[0] < cutoff:
-            hits.popleft()
-        if len(hits) >= limit:
-            return False
-        hits.append(now)
-        return True
+    return account_posts.allow(
+        key,
+        settings.ACCOUNT_POST_LIMIT,
+        settings.ACCOUNT_POST_WINDOW_SECONDS,
+    )
+
+
+class _ClientGone(Exception):
+    pass
 
 
 async def _read_body(receive: Receive, limit: int) -> bytes | None:
@@ -81,7 +74,7 @@ async def _read_body(receive: Receive, limit: int) -> bytes | None:
     while True:
         message = await receive()
         if message["type"] == "http.disconnect":
-            return b"".join(chunks)
+            raise _ClientGone
         if message["type"] != "http.request":
             continue
         piece = message.get("body", b"")
@@ -94,7 +87,7 @@ async def _read_body(receive: Receive, limit: int) -> bytes | None:
 
 
 def _error_field(path: str) -> str:
-    if path.endswith("verify-email"):
+    if _normalized_path(path).endswith("verify-email"):
         return "token"
     return "email"
 
@@ -126,7 +119,7 @@ class AccountGuard:
             await self.app(scope, receive, send)
             return
 
-        path = scope.get("path", "")
+        path = _normalized_path(scope.get("path", ""))
         if path == "/api/docs" or path.startswith("/api/docs/"):
             await self.app(scope, receive, send)
             return
@@ -150,7 +143,10 @@ class AccountGuard:
             await _reject(send, scope, 429, _TOO_MANY)
             return
 
-        body = await _read_body(receive, _MAX_BODY)
+        try:
+            body = await _read_body(receive, _MAX_BODY)
+        except _ClientGone:
+            return
         if body is None:
             await _reject(send, scope, 413, _TOO_LARGE)
             return

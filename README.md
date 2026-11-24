@@ -16,7 +16,7 @@ The campaign rules are original. The project does not include official artwork o
 
 PostgreSQL runs in Docker. Django migrations create the tables, including the campaign row that stores the living state.
 
-A person registers with email and a password of 12 to 128 characters, plus a unique alias of 3 to 24 letters, digits, or underscore. The date of birth must make them at least 16. Sex is one of woman, man, other, or undisclosed. The account stays unverified until the one-time link in the mailbox is confirmed. Birth date and sex are shown in the Django admin only.
+A person registers with email and a password of 12 to 128 characters, plus a unique alias of 3 to 24 letters, digits, or underscore. The date of birth must make them at least 16. Sex is one of woman, man, other, or undisclosed. If that email belongs to a confirmed account, ignoring case and surrounding spaces, the API responds with 422 and “Este correo ya está registrado.” and leaves the account unchanged. An unconfirmed signup can be replaced by a later registration for the same email: the previous link stops working and a new message is sent. Confirming the link requires the password from that signup. Staff, inactive, and admin-created accounts are left untouched. A taken alias is reported when it belongs to someone else. Birth date and sex are shown in the Django admin only.
 
 ## Architecture
 
@@ -43,7 +43,7 @@ Swagger is at http://127.0.0.1:8000/api/docs while `DEBUG` is on. It is absent w
 
 On macOS or Linux, activate the virtual environment with `source .venv/bin/activate`.
 
-`migrate` creates the tables on an empty database and applies later changes without deleting campaigns. The Docker volume keeps the data between restarts. Mailpit accepts the confirmation message on port 1025 and shows it at http://localhost:8025. The link uses `API_ORIGIN`. `config.settings.production` refuses to start without that origin.
+`migrate` creates the tables on an empty database and applies later changes without deleting campaigns. The Docker volume keeps the data between restarts. Mailpit accepts the confirmation message on port 1025 and shows it at http://localhost:8025. The link uses `API_ORIGIN`. `config.settings.production` refuses to start unless that origin is `https` and `DJANGO_SECRET_KEY` is a unique secret of at least 50 characters.
 
 ## Español
 
@@ -51,4 +51,4 @@ Mapa de campaña en el navegador para partidas de miniaturas. Los jugadores cier
 
 Las reglas de campaña son propias. No hay arte oficial ni texto de reglamento copiado.
 
-El alta pide correo, contraseña de 12 a 128 caracteres, alias de 3 a 24 letras, números o guion bajo, fecha de nacimiento con un mínimo de 16 años, y sexo (`woman`, `man`, `other` o `undisclosed`). El correo se confirma con un enlace de un solo uso. La fecha y el sexo solo se ven en el admin.
+El alta pide correo, contraseña de 12 a 128 caracteres, alias de 3 a 24 letras, números o guion bajo, fecha de nacimiento con un mínimo de 16 años, y sexo (`woman`, `man`, `other` o `undisclosed`). Si el correo ya está confirmado, sin distinguir mayúsculas ni espacios alrededor, la respuesta es 422 con «Este correo ya está registrado» y la cuenta no cambia. Un alta sin confirmar se puede repetir: el enlace anterior deja de valer y se envía otro. Para confirmar hay que escribir la contraseña del alta. Las cuentas de administración, las inactivas y las creadas en el admin no se sustituyen. Si el alias pertenece a otra persona, se avisa. La fecha y el sexo solo se ven en el admin.

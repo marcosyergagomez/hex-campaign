@@ -56,6 +56,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "apps.accounts.middleware.AdminLoginThrottleMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -120,6 +121,8 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@localhost")
 API_ORIGIN = os.environ.get("API_ORIGIN", "http://127.0.0.1:8000").rstrip("/")
 ACCOUNT_POST_LIMIT = int(os.environ.get("ACCOUNT_POST_LIMIT", "30"))
 ACCOUNT_POST_WINDOW_SECONDS = int(os.environ.get("ACCOUNT_POST_WINDOW_SECONDS", "60"))
+ADMIN_LOGIN_LIMIT = int(os.environ.get("ADMIN_LOGIN_LIMIT", "20"))
+ADMIN_LOGIN_WINDOW_SECONDS = int(os.environ.get("ADMIN_LOGIN_WINDOW_SECONDS", "900"))
 
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 30
 SESSION_COOKIE_HTTPONLY = True

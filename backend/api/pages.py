@@ -15,12 +15,16 @@ def _document(title: str, body: str) -> str:
     )
 
 
-def confirm_page(token: str) -> str:
+def confirm_page(token: str, error: str = "") -> str:
     hidden = escape(token, quote=True)
+    notice = f"<p>{escape(error)}</p>" if error else ""
     body = (
-        "<p>Pulsa el botón para confirmar tu correo.</p>"
+        f"{notice}"
+        "<p>Escribe la contraseña del alta y pulsa el botón para confirmar tu correo.</p>"
         '<form method="post" action="/api/users/verify-email">'
         f'<input type="hidden" name="token" value="{hidden}">'
+        '<label>Contraseña <input type="password" name="password" '
+        'autocomplete="current-password" maxlength="128" required></label>'
         '<button type="submit">Confirmar correo</button>'
         "</form>"
     )
