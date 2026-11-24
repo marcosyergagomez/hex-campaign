@@ -53,15 +53,18 @@ export function CampaignDetailPage() {
 
   return (
     <section className="campaign-detail">
-      <header className="page-header">
-        <div>
-          <p className="mark">{t("campaignDetail")}</p>
-          <h1>{campaign?.name ?? t("campaignDetail")}</h1>
-          {campaign ? <p className="quiet">{t(PHASE_KEYS[campaign.phase])}</p> : null}
+      <header className="stage">
+        <img className="stage-photo" src="/campaign-fortress.jpg" alt="" />
+        <div className="stage-copy">
+          <div>
+            <p className="mark">{t("campaignDetail")}</p>
+            <h1>{campaign?.name ?? t("campaignDetail")}</h1>
+            {campaign ? <p>{t(PHASE_KEYS[campaign.phase])}</p> : null}
+          </div>
+          <Link className="text-link" to="/campanas">
+            {t("backToCampaigns")}
+          </Link>
         </div>
-        <Link className="text-link" to="/campanas">
-          {t("backToCampaigns")}
-        </Link>
       </header>
 
       <Banner errors={errors} fields={["form", "session", "campaign"]} />
