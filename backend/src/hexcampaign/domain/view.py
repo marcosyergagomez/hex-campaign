@@ -3,15 +3,15 @@
 from datetime import datetime
 
 from hexcampaign.domain.clock import overdue
-from hexcampaign.domain.game import Game, find_member
-from hexcampaign.domain.hexes import Hex
+from hexcampaign.domain.game import Game, find_member, living
+from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.sight import known_hex, sees_army
 
 
 def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
     member = find_member(game, viewer)
     staff = member is not None and member.role in {"owner", "admin"} and member.status == "active"
-    return {
+    body = {
         "revision": game.revision,
         "name": game.name,
         "phase": game.phase,
@@ -41,13 +41,18 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
             army_id: [{"q": cell.q, "r": cell.r} for cell in path]
             for army_id, path in game.orders.get(viewer, {}).items()
         },
-        "battles": [_battle_view(game, battle, viewer, staff, now) for battle in game.battles],
+        "battles": [
+            _battle_view(game, battle, viewer, staff, now)
+            for battle in game.battles
+            if _show_battle(game, battle, viewer, staff)
+        ],
         "notices": list(game.notices) if staff else [],
         "events": list(game.events),
         "winners": list(game.winners),
         "orders_due": game.phase == "orders"
         and overdue(game.orders_opened_at, game.rules.order_days, now),
     }
+    return body
 
 
 def _you(member) -> dict[str, object]:
@@ -103,16 +108,45 @@ def _fortresses(game: Game, viewer: str) -> list[dict[str, object]]:
         cell = Hex(fort.q, fort.r)
         if fort.player_id != viewer and not known_hex(game, viewer, cell):
             continue
+        visible = _hold_visible(game, viewer, fort)
         shown.append(
             {
                 "player_id": fort.player_id,
                 "q": fort.q,
                 "r": fort.r,
-                "holder_id": fort.holder_id,
-                "hold": fort.hold,
+                "holder_id": fort.holder_id if visible else None,
+                "hold": fort.hold if visible else 0,
             }
         )
     return shown
+
+
+def _show_battle(game: Game, battle, viewer: str, staff: bool) -> bool:
+    if staff or viewer in battle.players or game.rules.visibility == "full":
+        return True
+    # An anonymous token has no name. A battle list would put the name back.
+    if game.rules.visibility == "anonymous":
+        return False
+    cell = Hex(battle.q, battle.r)
+    if not known_hex(game, viewer, cell):
+        return False
+    involved = [army for army in game.armies if army.id in set(battle.army_ids)]
+    if any(sees_army(game, viewer, army) for army in involved):
+        return True
+    spots = [army.at() for army in living(game, viewer)]
+    return any(spot is not None and distance(cell, spot) <= 1 for spot in spots)
+
+
+def _hold_visible(game: Game, viewer: str, fort) -> bool:
+    if not fort.holder_id or fort.holder_id == viewer or game.rules.visibility == "full":
+        return bool(fort.holder_id)
+    if game.rules.visibility == "anonymous":
+        return False
+    cell = fort.at()
+    return any(
+        sees_army(game, viewer, army) and army.player_id == fort.holder_id and army.at() == cell
+        for army in game.armies
+    )
 
 
 def _battle_view(game: Game, battle, viewer: str, staff: bool, now: datetime) -> dict[str, object]:

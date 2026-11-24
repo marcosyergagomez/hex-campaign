@@ -68,19 +68,17 @@ def march(
     remaining = {army_id: list(paths.get(army_id, ())) for army_id in starts}
     trails: dict[str, list[Hex]] = {army_id: [] for army_id in starts}
     stopped: set[str] = set()
-    defenders = {army_id for army_id in starts if not paths.get(army_id)}
     contacts: list[Contact] = []
 
     for _ in range(max((len(path) for path in paths.values()), default=0)):
-        movers = {
+        intended = {
             army_id: steps[0]
             for army_id, steps in remaining.items()
             if steps and army_id not in stopped
         }
-        if not movers:
+        if not intended:
             break
-        handled = _exchange(movers, position, remaining, trails, owners, stopped, contacts)
-        _advance(movers, handled, position, remaining, trails, owners, defenders, stopped, contacts)
+        _step_all(intended, position, remaining, trails, owners, stopped, contacts)
 
     return March(
         positions=position,
@@ -89,114 +87,95 @@ def march(
     )
 
 
-def _exchange(movers, position, remaining, trails, owners, stopped, contacts) -> set[str]:
-    handled: set[str] = set()
-    for army_id, dest in list(movers.items()):
-        if army_id in handled:
-            continue
-        partner = _partner(army_id, dest, position, movers)
-        if partner is None:
-            continue
-        handled.update((army_id, partner))
-        _step(position, trails, remaining, army_id, dest)
-        _step(position, trails, remaining, partner, movers[partner])
-        if owners[army_id] == owners[partner]:
-            continue
-        contacts.append(_contact((army_id, partner), dest))
-        stopped.update((army_id, partner))
-        remaining[army_id] = []
-        remaining[partner] = []
-    return handled
-
-
-def _advance(movers, handled, position, remaining, trails, owners, defenders, stopped, contacts):
-    groups: dict[Hex, list[str]] = {}
-    for army_id, dest in movers.items():
-        if army_id not in handled:
-            groups.setdefault(dest, []).append(army_id)
-    for dest, group in groups.items():
-        staying = [
-            army_id
-            for army_id, cell in position.items()
-            if cell == dest and army_id not in group and army_id not in handled
-        ]
-        blocked, entering = _split(group, staying, owners, defenders)
-        for army_id in blocked:
+def _step_all(intended, position, remaining, trails, owners, stopped, contacts) -> None:
+    """One simultaneous step. Someone who leaves a hex does not block it."""
+    moving = _who_can_leave(intended, position, owners, stopped)
+    for army_id in intended:
+        if army_id not in moving:
             stopped.add(army_id)
             remaining[army_id] = []
-        entering = _without_stack(entering, owners)
-        if not entering:
-            continue
-        held = [
-            army_id
-            for army_id in staying
-            if army_id in defenders and any(owners[army_id] != owners[mover] for mover in entering)
-        ]
-        players = {owners[army_id] for army_id in entering}
-        held_players = {owners[army_id] for army_id in held}
-        if len(entering) == 1 and not held_players:
-            _step(position, trails, remaining, entering[0], dest)
-            continue
-        if len(players | held_players) < 2:
-            for army_id in entering:
+    origin = {army_id: position[army_id] for army_id in moving}
+    groups: dict[Hex, list[str]] = {}
+    for army_id in moving:
+        groups.setdefault(intended[army_id], []).append(army_id)
+    for dest, group in groups.items():
+        entering = _without_own_stack(group, owners)
+        for army_id in group:
+            if army_id not in entering:
                 stopped.add(army_id)
                 remaining[army_id] = []
+        if not entering:
             continue
-        for army_id in entering:
-            _step(position, trails, remaining, army_id, dest)
-            stopped.add(army_id)
-            remaining[army_id] = []
-        contacts.append(_contact((*entering, *held), dest))
-
-
-def _split(group, staying, owners, defenders) -> tuple[list[str], list[str]]:
-    blocked: list[str] = []
-    entering: list[str] = []
-    for mover in group:
-        arrived = [
-            army_id
-            for army_id in staying
-            if owners[army_id] != owners[mover] and army_id not in defenders
+        holders = [
+            other
+            for other, cell in position.items()
+            if cell == dest and other not in moving
         ]
-        friend = [army_id for army_id in staying if owners[army_id] == owners[mover]]
-        if arrived or friend:
-            blocked.append(mover)
-        else:
-            entering.append(mover)
-    return blocked, entering
+        players = {owners[army_id] for army_id in entering} | {owners[other] for other in holders}
+        fight = len(players) > 1
+        for army_id in entering:
+            _arrive(position, trails, remaining, stopped, army_id, dest, fight=fight)
+        if fight:
+            contacts.append(_contact((*entering, *holders), dest))
+    _fights_on_a_swap(origin, position, owners, remaining, stopped, contacts)
 
 
-def _without_stack(entering: list[str], owners: dict[str, str]) -> list[str]:
+def _who_can_leave(intended, position, owners, stopped) -> set[str]:
+    active = set(intended)
+    while True:
+        blocked = {
+            army_id
+            for army_id, dest in intended.items()
+            if army_id in active
+            and _hex_stays_blocked(army_id, dest, active, position, owners, stopped)
+        }
+        if not blocked:
+            return active
+        active -= blocked
+
+
+def _hex_stays_blocked(army_id, dest, active, position, owners, stopped) -> bool:
+    for other, cell in position.items():
+        if other == army_id or cell != dest or other in active:
+            continue
+        if owners[other] == owners[army_id] or other in stopped:
+            return True
+    return False
+
+
+def _without_own_stack(group: list[str], owners: dict[str, str]) -> list[str]:
     crowded = {
         army_id
-        for army_id in entering
-        if sum(owners[other] == owners[army_id] for other in entering) > 1
+        for army_id in group
+        if sum(owners[other] == owners[army_id] for other in group) > 1
     }
-    return [army_id for army_id in entering if army_id not in crowded]
+    return [army_id for army_id in group if army_id not in crowded]
 
 
-def _partner(
-    army_id: str,
-    dest: Hex,
-    position: dict[str, Hex],
-    movers: dict[str, Hex],
-) -> str | None:
-    here = position[army_id]
-    partners = [
-        other
-        for other, other_dest in movers.items()
-        if other != army_id and position[other] == dest and other_dest == here
-    ]
-    if len(partners) == 1:
-        return partners[0]
-    return None
-
-
-def _step(position, trails, remaining, army_id: str, dest: Hex) -> None:
+def _arrive(position, trails, remaining, stopped, army_id, dest, *, fight: bool) -> None:
     position[army_id] = dest
     trails[army_id].append(dest)
     if remaining[army_id]:
         remaining[army_id] = remaining[army_id][1:]
+    if fight:
+        remaining[army_id] = []
+    if not remaining[army_id]:
+        stopped.add(army_id)
+
+
+def _fights_on_a_swap(origin, position, owners, remaining, stopped, contacts) -> None:
+    seen: list[tuple[str, str]] = []
+    for left, start in origin.items():
+        for right, other_start in origin.items():
+            if left >= right or owners[left] == owners[right]:
+                continue
+            if position[left] == other_start and position[right] == start:
+                seen.append((left, right))
+    for left, right in seen:
+        for army_id in (left, right):
+            remaining[army_id] = []
+            stopped.add(army_id)
+        contacts.append(_contact((left, right), position[left]))
 
 
 def _contact(army_ids: tuple[str, ...], dest: Hex) -> Contact:
