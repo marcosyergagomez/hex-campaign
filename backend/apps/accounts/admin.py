@@ -3,7 +3,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import User
+from .models import PlayerSession, User
 
 
 @admin.register(User)
@@ -31,3 +31,13 @@ class UserAdmin(DjangoUserAdmin):
             },
         ),
     )
+
+
+@admin.register(PlayerSession)
+class PlayerSessionAdmin(admin.ModelAdmin):
+    list_display = ("user", "created_at", "last_seen_at", "expires_at")
+    fields = ("user", "created_at", "last_seen_at", "expires_at")
+    readonly_fields = ("user", "created_at", "last_seen_at", "expires_at")
+
+    def has_add_permission(self, request) -> bool:
+        return False

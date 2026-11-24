@@ -5,13 +5,23 @@ from urllib.parse import urlsplit
 from django.core.exceptions import ImproperlyConfigured
 
 _PLACEHOLDER_SECRET = "change-me-before-any-shared-environment"
+# The value shipped in .env.example. Production must not keep it.
+LOCAL_SESSION_PEPPER = "local-only-session-pepper-0123456789abcdef0123456789abcdef"
 
 
-def require_secret(secret: str | None) -> None:
+def require_secret(secret: str | None, *, name: str = "DJANGO_SECRET_KEY") -> None:
     if not secret or secret == _PLACEHOLDER_SECRET or len(secret) < 50:
         raise ImproperlyConfigured(
-            "DJANGO_SECRET_KEY must be a unique secret of at least 50 characters."
+            f"{name} must be a unique secret of at least 50 characters."
         )
+
+
+def require_session_pepper(secret: str | None) -> None:
+    if secret == LOCAL_SESSION_PEPPER:
+        raise ImproperlyConfigured(
+            "SESSION_PEPPER must be a unique secret of at least 50 characters."
+        )
+    require_secret(secret, name="SESSION_PEPPER")
 
 
 def require_https_origin(origin: str | None) -> str:
