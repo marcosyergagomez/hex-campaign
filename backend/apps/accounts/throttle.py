@@ -1,4 +1,4 @@
-"""In-memory sliding windows for account posts and the admin login."""
+"""In-memory sliding windows for account posts, player login, and the admin login."""
 
 import threading
 import time
@@ -44,3 +44,10 @@ class SlidingWindow:
 
 account_posts = SlidingWindow()
 admin_logins = SlidingWindow()
+login_ips = SlidingWindow()
+login_emails = SlidingWindow()
+
+
+def clear_login_limits() -> None:
+    login_ips.clear()
+    login_emails.clear()
