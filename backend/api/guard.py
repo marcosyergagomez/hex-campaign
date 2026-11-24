@@ -1,8 +1,9 @@
-"""Bounds and response headers for the account and session routes.
+"""Bounds and response headers for the public API.
 
 The confirmation page carries a secret in the query string, so responses are
-not cached and do not send a referrer. Posts are capped so a large body never
-reaches the hasher.
+not cached and do not send a referrer. Account posts stay small. A campaign
+post may carry an army list, so its cap is higher, and it never reaches the
+password hasher.
 """
 
 import json
@@ -14,7 +15,8 @@ from starlette.datastructures import MutableHeaders
 from api.pages import result_page
 from apps.accounts.throttle import account_posts
 
-_MAX_BODY = 4096
+_ACCOUNT_BODY = 4096
+_CAMPAIGN_BODY = 8192
 _BODY_LIMITED = {
     "/api/users",
     "/api/users/verify-email",
@@ -101,6 +103,8 @@ def _error_field(path: str) -> str:
         return "token"
     if normalized.startswith("/api/session"):
         return "credentials"
+    if normalized.startswith("/api/campaigns") or normalized.startswith("/api/invitations"):
+        return "campaign"
     return "email"
 
 
@@ -120,8 +124,16 @@ async def _reject(send: Send, scope: Scope, status: int, message: str) -> None:
     await send({"type": "http.response.body", "body": body})
 
 
+def _body_limit(path: str) -> int | None:
+    if path in _BODY_LIMITED:
+        return _ACCOUNT_BODY
+    if path.startswith("/api/campaigns") or path.startswith("/api/invitations"):
+        return _CAMPAIGN_BODY
+    return None
+
+
 class AccountGuard:
-    """Limits account posts and keeps confirmation pages out of caches and referrers."""
+    """Limits posts and keeps confirmation pages out of caches and referrers."""
 
     def __init__(self, app) -> None:
         self.app = app
@@ -143,12 +155,13 @@ class AccountGuard:
                     headers[key] = value
             await send(message)
 
-        if scope.get("method") != "POST" or path not in _BODY_LIMITED:
+        limit = _body_limit(path)
+        if scope.get("method") != "POST" or limit is None:
             await self.app(scope, receive, send_hardened)
             return
 
         length = _header(scope, b"content-length")
-        if len(length) > 8 or (length.isdigit() and int(length) > _MAX_BODY):
+        if len(length) > 8 or (length.isdigit() and int(length) > limit):
             await _reject(send, scope, 413, _TOO_LARGE)
             return
         if path in _ACCOUNT_LIMITED and not _allow_post(_client_key(scope)):
@@ -156,7 +169,7 @@ class AccountGuard:
             return
 
         try:
-            body = await _read_body(receive, _MAX_BODY)
+            body = await _read_body(receive, limit)
         except _ClientGone:
             return
         if body is None:

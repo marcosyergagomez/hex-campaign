@@ -1,0 +1,488 @@
+"""Campaign HTTP API. The rules live in the domain; this module only adapts them."""
+
+import random
+
+from django.utils import timezone
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+from api.player_session import (
+    CSRF_COOKIE,
+    CSRF_HEADER,
+    CSRF_MESSAGE,
+    ORIGIN_MESSAGE,
+    SESSION_COOKIE,
+    SESSION_MESSAGE,
+    django_sync,
+    same_origin,
+)
+from apps.accounts.sessions import csrf_matches, load_session
+from apps.campaigns.records import (
+    CampaignError,
+    RevisionConflict,
+    accept_alias,
+    accept_link,
+    create_campaign,
+    inbox,
+    invite_alias,
+    invite_link,
+    list_campaigns,
+    play,
+    present,
+    preview_link,
+    read_campaign,
+)
+from hexcampaign.domain.errors import DomainError
+from hexcampaign.domain.hexes import Hex
+from hexcampaign.domain.lobby import (
+    begin,
+    change_rules,
+    close_placement,
+    describe_army,
+    place_armies,
+)
+from hexcampaign.domain.rules import Rules, rules_from
+from hexcampaign.domain.turn import (
+    close_orders,
+    expel_player,
+    judge_battle,
+    leave_campaign,
+    lock_orders,
+    promote_player,
+    report_battle,
+    revert_turn,
+)
+
+router = APIRouter()
+
+_MESSAGES = {
+    "rules_invalid": "Las reglas no son válidas.",
+    "phase_invalid": "Esa acción no corresponde a esta fase.",
+    "forbidden": "No puedes hacer eso en esta campaña.",
+    "seat_full": "La campaña ya no tiene plazas.",
+    "already_joined": "Ya estás en esta campaña.",
+    "expelled": "No puedes volver a esta campaña.",
+    "order_illegal": "Esa orden no es legal.",
+    "text_invalid": "Ese texto no es válido.",
+    "battle_closed": "Esa batalla ya está cerrada.",
+    "battle_unknown": "Esa batalla no existe.",
+    "cannot_expel_owner": "El propietario activo no se puede expulsar.",
+    "not_found": "No hay ninguna campaña con ese identificador.",
+    "unknown_player": "No hay ningún jugador con ese alias.",
+    "invitation_invalid": "La invitación no es válida.",
+    "revision_conflict": "La campaña ha cambiado. Vuelve a leerla.",
+}
+_STATUS = {"not_found": 404, "invitation_invalid": 404, "forbidden": 403}
+
+
+class RulesBody(BaseModel):
+    seats: int
+    armies: int
+    movement: int
+    map_size: int
+    visibility: str
+    victory: str
+    hold_turns: int
+    placement: str
+    order_days: int
+    battle_days: int
+    missed_turns: int
+
+
+class CreateBody(BaseModel):
+    name: str
+    rules: RulesBody
+
+
+class RevisionBody(BaseModel):
+    revision: int
+
+
+class RulesChange(BaseModel):
+    revision: int
+    name: str
+    rules: RulesBody
+
+
+class AliasBody(BaseModel):
+    revision: int
+    alias: str
+
+
+class StartBody(BaseModel):
+    revision: int
+    admins: list[str] = Field(default_factory=list)
+
+
+class HexBody(BaseModel):
+    q: int
+    r: int
+
+
+class PlaceBody(BaseModel):
+    revision: int
+    fortress: HexBody
+    armies: dict[str, HexBody]
+
+
+class ArmyBody(BaseModel):
+    revision: int
+    name: str
+    commander: str = ""
+    race: str = ""
+    roster: str = ""
+
+
+class OrdersBody(BaseModel):
+    revision: int
+    orders: dict[str, list[HexBody]]
+
+
+class BattleBody(BaseModel):
+    revision: int
+    result: str
+
+
+class PlayerBody(BaseModel):
+    revision: int
+    player_id: str
+
+
+def _errors(status: int, field: str, message: str) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"errors": {field: [message]}})
+
+
+def _failure(exc: CampaignError) -> JSONResponse:
+    if exc.code == "account_inactive":
+        return _errors(401, "session", SESSION_MESSAGE)
+    if exc.code == "revision_conflict":
+        return _errors(409, "revision", _MESSAGES["revision_conflict"])
+    status = _STATUS.get(exc.code, 422)
+    message = _MESSAGES.get(exc.code, _MESSAGES["rules_invalid"])
+    return _errors(status, "campaign", message)
+
+
+def _reader(request: Request):
+    session = load_session(request.cookies.get(SESSION_COOKIE, ""))
+    if session is None:
+        return _errors(401, "session", SESSION_MESSAGE)
+    return session.user
+
+
+def _writer(request: Request):
+    if not same_origin(request):
+        return _errors(403, "origin", ORIGIN_MESSAGE)
+    session = load_session(request.cookies.get(SESSION_COOKIE, ""))
+    if session is None:
+        return _errors(401, "session", SESSION_MESSAGE)
+    if not csrf_matches(
+        session,
+        request.headers.get(CSRF_HEADER, ""),
+        request.cookies.get(CSRF_COOKIE, ""),
+    ):
+        return _errors(403, "csrf", CSRF_MESSAGE)
+    return session.user
+
+
+def _run(request: Request, action):
+    user = _writer(request)
+    if isinstance(user, JSONResponse):
+        return user
+    try:
+        return action(user)
+    except RevisionConflict as exc:
+        return _failure(exc)
+    except CampaignError as exc:
+        return _failure(exc)
+
+
+def _view(user, campaign, game, status: int = 200) -> JSONResponse:
+    return JSONResponse(present(campaign, game, user, timezone.now()), status_code=status)
+
+
+def _hexes(steps: list[HexBody]) -> list[Hex]:
+    return [Hex(step.q, step.r) for step in steps]
+
+
+def _rules(body: RulesBody) -> Rules:
+    try:
+        return rules_from(body.model_dump())
+    except DomainError as exc:
+        raise CampaignError(exc.code) from exc
+
+
+@router.get("/api/campaigns")
+@django_sync
+def get_campaigns(request: Request) -> JSONResponse:
+    user = _reader(request)
+    if isinstance(user, JSONResponse):
+        return user
+    return JSONResponse(list_campaigns(user))
+
+
+@router.post("/api/campaigns", status_code=201)
+@django_sync
+def post_campaign(payload: CreateBody, request: Request) -> JSONResponse:
+    def action(user):
+        campaign, game = create_campaign(user, payload.name, payload.rules.model_dump())
+        return _view(user, campaign, game, 201)
+
+    return _run(request, action)
+
+
+@router.get("/api/campaigns/{campaign_id}")
+@django_sync
+def get_campaign(campaign_id: str, request: Request) -> JSONResponse:
+    user = _reader(request)
+    if isinstance(user, JSONResponse):
+        return user
+    try:
+        return JSONResponse(read_campaign(user, campaign_id, timezone.now()))
+    except CampaignError as exc:
+        return _failure(exc)
+
+
+@router.get("/api/invitations")
+@django_sync
+def get_invitations(request: Request) -> JSONResponse:
+    user = _reader(request)
+    if isinstance(user, JSONResponse):
+        return user
+    return JSONResponse(inbox(user))
+
+
+@router.get("/api/invitations/{token}")
+@django_sync
+def get_invitation(token: str, request: Request) -> JSONResponse:
+    user = _reader(request)
+    if isinstance(user, JSONResponse):
+        return user
+    try:
+        return JSONResponse(preview_link(user, token))
+    except CampaignError as exc:
+        return _failure(exc)
+
+
+@router.post("/api/campaigns/{campaign_id}/rules")
+@django_sync
+def post_rules(campaign_id: str, payload: RulesChange, request: Request) -> JSONResponse:
+    def action(user):
+        rules = _rules(payload.rules)
+
+        def command(game):
+            return change_rules(game, str(user.pk), payload.name, rules)
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/invitations")
+@django_sync
+def post_invitation(campaign_id: str, payload: AliasBody, request: Request) -> JSONResponse:
+    def action(user):
+        saved = invite_alias(user, campaign_id, payload.revision, payload.alias)
+        return _view(user, *saved)
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/links", status_code=201)
+@django_sync
+def post_link(campaign_id: str, request: Request) -> JSONResponse:
+    def action(user):
+        return JSONResponse({"token": invite_link(user, campaign_id)}, status_code=201)
+
+    return _run(request, action)
+
+
+@router.post("/api/invitations/{token}/accept")
+@django_sync
+def post_accept(token: str, payload: RevisionBody, request: Request) -> JSONResponse:
+    def action(user):
+        return _view(user, *accept_link(user, token, payload.revision))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/join")
+@django_sync
+def post_join(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
+    def action(user):
+        return _view(user, *accept_alias(user, campaign_id, payload.revision))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/start")
+@django_sync
+def post_start(campaign_id: str, payload: StartBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return begin(game, str(user.pk), payload.admins, timezone.now())
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/placement")
+@django_sync
+def post_placement(campaign_id: str, payload: PlaceBody, request: Request) -> JSONResponse:
+    def action(user):
+        spots = {army_id: Hex(spot.q, spot.r) for army_id, spot in payload.armies.items()}
+
+        def command(game):
+            fortress = Hex(payload.fortress.q, payload.fortress.r)
+            return place_armies(game, str(user.pk), fortress, spots)
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/placement/close")
+@django_sync
+def post_close_placement(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return close_placement(game, str(user.pk), timezone.now())
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/armies/{army_id}")
+@django_sync
+def post_army(campaign_id: str, army_id: str, payload: ArmyBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return describe_army(
+                game,
+                str(user.pk),
+                army_id,
+                payload.name,
+                payload.commander,
+                payload.race,
+                payload.roster,
+            )
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/orders")
+@django_sync
+def post_orders(campaign_id: str, payload: OrdersBody, request: Request) -> JSONResponse:
+    def action(user):
+        paths = {army_id: _hexes(steps) for army_id, steps in payload.orders.items()}
+
+        def command(game):
+            return lock_orders(game, str(user.pk), paths, timezone.now())
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/orders/close")
+@django_sync
+def post_close_orders(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return close_orders(game, str(user.pk), timezone.now())
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/battles/{battle_id}")
+@django_sync
+def post_battle(
+    campaign_id: str,
+    battle_id: str,
+    payload: BattleBody,
+    request: Request,
+) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return report_battle(game, str(user.pk), battle_id, payload.result, timezone.now())
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/battles/{battle_id}/judge")
+@django_sync
+def post_judge(
+    campaign_id: str,
+    battle_id: str,
+    payload: BattleBody,
+    request: Request,
+) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return judge_battle(game, str(user.pk), battle_id, payload.result, timezone.now())
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/expel")
+@django_sync
+def post_expel(campaign_id: str, payload: PlayerBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return expel_player(
+                game,
+                str(user.pk),
+                payload.player_id,
+                random.Random(),
+                timezone.now(),
+            )
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/leave")
+@django_sync
+def post_leave(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return leave_campaign(game, str(user.pk), random.Random(), timezone.now())
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/admins")
+@django_sync
+def post_admin(campaign_id: str, payload: PlayerBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return promote_player(game, str(user.pk), payload.player_id)
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/revert")
+@django_sync
+def post_revert(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return revert_turn(game, str(user.pk))
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)

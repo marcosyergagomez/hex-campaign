@@ -110,6 +110,13 @@ class User(AbstractBaseUser, PermissionsMixin):
                 previous, self, kwargs.get("update_fields")
             ):
                 PlayerSession.objects.filter(user_id=self.pk).delete()
+            if previous is not None and _became_inactive(
+                previous, self, kwargs.get("update_fields")
+            ):
+                # Same transaction as the account. Every current seat becomes inactive.
+                from apps.campaigns.records import deactivate_account
+
+                deactivate_account(self.pk)
 
     def _locked_credentials(self) -> dict[str, object] | None:
         if not self.pk:
@@ -150,6 +157,14 @@ class EmailVerification(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user_id} {self.expires_at:%Y-%m-%d}"
+
+
+def _became_inactive(previous: dict[str, object], user: User, update_fields) -> bool:
+    writes_all = update_fields is None
+    fields = set(update_fields or ())
+    return bool(previous["is_active"]) and not user.is_active and (
+        writes_all or "is_active" in fields
+    )
 
 
 def _sessions_should_close(
