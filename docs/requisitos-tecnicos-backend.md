@@ -10,6 +10,8 @@ El reglamento y la partida van en el JSON de la campaña. Una tabla de plazas pe
 
 El buscador acepta el id exacto. El nombre puede repetirse y no busca.
 
+Crear cuenta las campañas abiertas de esa cuenta: reclutamiento, colocación, órdenes o batallas. A la cuarta la API responde 422 con «Ya tienes tres campañas abiertas.» y no crea nada. Una fase terminada no cuenta. El creador queda en la fila, así que ceder el puesto no abre otra plaza.
+
 Invitar es otra cosa. El propietario busca por alias y envía un aviso dentro de la aplicación, o genera un enlace. El enlace lleva un token distinto del id. En la base solo se guarda su resumen, igual que el enlace de confirmación del correo. Quien tiene el enlace ocupa una plaza libre antes de empezar.
 
 ## Fases y arranque
@@ -24,7 +26,7 @@ El mapa de esta versión mide 19, 37 o 61 hexágonos, en coordenadas axiales. No
 
 Una orden es el camino: hexágonos adyacentes, como máximo el movimiento. Vacía es quedarse quieto. Al cerrarla se rechaza lo que ese jugador ya puede ver como ilegal, y que dos ejércitos suyos terminen en la misma casilla. Un choque con un ejército que no ve no impide cerrar. Sale cuando todos han cerrado y el dominio simula el turno.
 
-El navegador recibe la vista de ese jugador, calculada en el dominio. Las órdenes ajenas no salen, tampoco para el propietario. Con la visibilidad de ficha anónima se ocultan nombre, comandante, raza y lista. El admin de Django sí puede abrir el documento entero.
+El navegador recibe la vista de ese jugador, calculada en el dominio. Las órdenes ajenas no salen, tampoco para el propietario. Con la visibilidad de ficha anónima se ocultan nombre, comandante, raza y lista. La crónica de movimientos y acciones vive en el mismo documento y no se recorta. La vista la incluye solo cuando la fase es terminada y quien mira tiene plaza. El admin de Django sí puede abrir el documento entero.
 
 Cada respuesta de juego lleva un número de versión. La escritura lo repite. Si la campaña cambió, la API responde 409 y no aplica nada. La fila se bloquea durante el comando.
 

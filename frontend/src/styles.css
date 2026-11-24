@@ -210,6 +210,356 @@ button:disabled {
   cursor: pointer;
 }
 
+.app-shell {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse at top, rgba(141, 44, 42, 0.18), transparent 55%),
+    linear-gradient(180deg, #120e0b 0%, #0c0907 100%);
+}
+
+.app-loading {
+  padding: 48px 24px;
+}
+
+.app-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 28px;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 28px 40px 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(16, 12, 9, 0.72);
+}
+
+.app-brand {
+  display: grid;
+  gap: 12px;
+}
+
+.app-nav {
+  display: flex;
+  gap: 18px;
+}
+
+.app-nav a {
+  color: var(--muted);
+  text-decoration: none;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  padding-bottom: 6px;
+  border-bottom: 1px solid transparent;
+}
+
+.app-nav a[aria-current="page"] {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+.app-user {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.app-user .language {
+  position: static;
+}
+
+.app-user .quiet {
+  margin: 0;
+}
+
+.app-body {
+  width: min(960px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 28px 0 56px;
+  display: grid;
+  gap: 18px;
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.page-header h1 {
+  margin: 8px 0 6px;
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 600;
+  font-size: clamp(1.7rem, 3vw, 2.4rem);
+}
+
+.text-link {
+  color: var(--gold);
+  text-decoration: none;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+}
+
+.text-link:hover {
+  color: var(--ink);
+}
+
+.button-link,
+.button-secondary,
+.button-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  margin-top: 0;
+  padding: 11px 16px;
+  text-decoration: none;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  border: 1px solid var(--gold-dim);
+  cursor: pointer;
+}
+
+.button-link {
+  background: var(--blood);
+  color: var(--ink);
+}
+
+.button-link:hover {
+  background: var(--blood-hot);
+}
+
+.button-secondary,
+.button-quiet {
+  background: transparent;
+  color: var(--gold);
+}
+
+.button-secondary:hover:not(:disabled),
+.button-quiet:hover:not(:disabled) {
+  background: rgba(198, 161, 90, 0.12);
+}
+
+.empty-panel,
+.wizard-panel,
+.detail-panel,
+.summary-panel {
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+.empty-panel {
+  display: grid;
+  gap: 16px;
+  justify-items: start;
+}
+
+.campaign-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.campaign-card {
+  display: grid;
+  gap: 6px;
+  padding: 18px 20px;
+  text-decoration: none;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.campaign-card:hover {
+  border-color: var(--gold);
+}
+
+.campaign-card-name {
+  font-family: Cinzel, Palatino, serif;
+  font-size: 1.15rem;
+}
+
+.campaign-card-meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.wizard {
+  display: grid;
+  gap: 18px;
+}
+
+.wizard-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.wizard-steps li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(198, 161, 90, 0.22);
+  color: var(--muted);
+  background: rgba(16, 12, 9, 0.55);
+}
+
+.wizard-steps li.is-current {
+  border-color: var(--gold);
+  color: var(--ink);
+}
+
+.wizard-steps li.is-done {
+  border-color: rgba(198, 161, 90, 0.55);
+  color: var(--gold);
+}
+
+.wizard-step-index {
+  display: inline-grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid currentColor;
+  font-family: Cinzel, Palatino, serif;
+  font-size: 0.85rem;
+}
+
+.wizard-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.wizard-fields {
+  display: grid;
+  gap: 14px;
+}
+
+.wizard-fields h2,
+.detail-panel h2,
+.summary-panel h3 {
+  margin: 0;
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 500;
+  font-size: 1.2rem;
+}
+
+.choice-set {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.choice-grid-wide {
+  grid-template-columns: 1fr;
+}
+
+.choice {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 14px 12px;
+  background: var(--field);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  text-align: left;
+}
+
+.choice strong {
+  font-family: Cinzel, Palatino, serif;
+  font-size: 1.2rem;
+}
+
+.choice span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.choice.is-selected,
+.choice:hover {
+  border-color: var(--gold);
+}
+
+.wizard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.wizard-actions button {
+  width: auto;
+  min-width: 10rem;
+}
+
+.summary-panel ul,
+.detail-list {
+  margin: 8px 0 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.detail-panel {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.chronicle {
+  display: grid;
+  gap: 14px;
+}
+
+.chronicle h2,
+.chronicle-turn h3 {
+  margin: 0;
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 500;
+}
+
+.chronicle-turn {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+}
+
+.chronicle-turn ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+}
+
 @media (max-width: 800px) {
   .language {
     top: 12px;
@@ -236,5 +586,27 @@ button:disabled {
     margin: 0;
     padding: 22px 20px 28px;
     min-height: 0;
+  }
+
+  .app-bar {
+    padding: 20px 16px 16px;
+  }
+
+  .app-body {
+    width: min(960px, calc(100% - 24px));
+  }
+
+  .app-user {
+    justify-items: start;
+  }
+
+  .wizard-steps,
+  .choice-grid,
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wizard-actions button {
+    width: 100%;
   }
 }
