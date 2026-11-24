@@ -47,19 +47,23 @@ export function CampaignListPage() {
 
   return (
     <section className="campaign-list">
-      <header className="page-header">
-        <div>
-          <p className="mark">{t("campaignsNav")}</p>
-          <h1>{t("yourCampaigns")}</h1>
-          <p className="quiet">{t("campaignsLead")}</p>
+      <header className="stage">
+        <img className="stage-photo" src="/campaign-hall.jpg" alt="" />
+        <div className="stage-copy">
+          <div>
+            <p className="mark">{t("campaignsNav")}</p>
+            <h1>{t("yourCampaigns")}</h1>
+            <p>{t("campaignsLead")}</p>
+          </div>
+          <Link className="button-link" to="/campanas/nueva">
+            {t("newCampaign")}
+          </Link>
         </div>
-        <Link className="button-link" to="/campanas/nueva">
-          {t("newCampaign")}
-        </Link>
       </header>
       <Banner errors={errors} fields={["form", "session", "campaign"]} />
       {rows && rows.length === 0 ? (
         <div className="empty-panel">
+          <img className="empty-photo" src="/campaign-seal.jpg" alt="" />
           <p>{t("noCampaigns")}</p>
           <Link className="button-link" to="/campanas/nueva">
             {t("createFirstCampaign")}
@@ -68,12 +72,15 @@ export function CampaignListPage() {
       ) : null}
       {rows && rows.length > 0 ? (
         <ul className="campaign-cards">
-          {rows.map((row) => (
+          {rows.map((row, index) => (
             <li key={row.id}>
-              <Link className="campaign-card" to={`/campanas/${row.id}`}>
-                <span className="campaign-card-name">{row.name}</span>
-                <span className="campaign-card-meta">
-                  {t(PHASE_KEYS[row.phase])} · {row.role}
+              <Link className={`campaign-card crop-${index % 3}`} to={`/campanas/${row.id}`}>
+                <img src="/campaign-hall.jpg" alt="" />
+                <span className="campaign-card-body">
+                  <span className="campaign-card-name">{row.name}</span>
+                  <span className="campaign-card-meta">
+                    {t(PHASE_KEYS[row.phase])} · {row.role}
+                  </span>
                 </span>
               </Link>
             </li>
