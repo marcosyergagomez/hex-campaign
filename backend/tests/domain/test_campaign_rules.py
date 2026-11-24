@@ -68,6 +68,36 @@ def _stay(game, player_id: str) -> dict[str, list]:
     }
 
 
+def test_the_chronicle_hides_a_march_until_the_campaign_ends() -> None:
+    game = _opened()
+    left = _army(game, "1")
+    origin = {"q": left.q, "r": left.r}
+    step = next(cell for cell in neighbors(left.at()) if cell in set(game.hexes))
+    game = lock_orders(game, "1", {left.id: [step]}, NOW)
+    game = lock_orders(game, "2", _stay(game, "2"), NOW)
+
+    marched = [
+        item
+        for item in game.chronicle
+        if item["code"] == "marched" and item["army_id"] == left.id
+    ]
+    assert marched[-1]["origin"] == origin
+    assert marched[-1]["destination"] == {"q": step.q, "r": step.r}
+    assert project(game, "1", NOW)["chronicle"] == []
+
+    game = revert_turn(game, "1")
+    assert any(item["code"] == "reverted" for item in game.chronicle)
+    assert any(item["code"] == "marched" and item["army_id"] == left.id for item in game.chronicle)
+
+    game = expel_player(game, "1", "2", random.Random(1), NOW)
+    assert game.phase == "finished"
+    shown = project(game, "1", NOW)["chronicle"]
+    assert any(item["code"] == "marched" for item in shown)
+    assert any(item["code"] == "expelled" for item in shown)
+    assert any(item["code"] == "finished" for item in shown)
+    assert project(game, "outsider", NOW)["chronicle"] == []
+
+
 def test_disk_sizes_match_the_three_maps() -> None:
     assert len(disk(19)) == 19
     assert len(disk(37)) == 37

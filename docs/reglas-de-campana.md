@@ -10,7 +10,7 @@ Las reglas se pueden cambiar mientras el propietario no ha pulsado empezar. Desd
 
 Una campaña tiene de 2 a 4 jugadores. El número se elige al crearla. Hasta pulsar empezar, el propietario puede bajarlo para cuadrar con quien ya se ha unido, sin bajar de 2 ni de las plazas ocupadas. Nadie entra después de empezar. El mapa, que se definirá aparte, se genera a partir de ese número y del tamaño elegido.
 
-El nombre puede repetirse. Cada campaña tiene un id propio. El buscador encuentra solo ese id. El propietario también puede invitar por alias: a quien invita le aparece un aviso en la aplicación. O genera un enlace de invitación. No hay tope de campañas por cuenta.
+El nombre puede repetirse. Cada campaña tiene un id propio. El buscador encuentra solo ese id. El propietario también puede invitar por alias: a quien invita le aparece un aviso en la aplicación. O genera un enlace de invitación. Una cuenta puede crear como máximo tres campañas que sigan abiertas. Una campaña terminada deja libre esa plaza.
 
 El creador es el único administrador hasta empezar, y el propietario mientras siga activo. Al empezar puede nombrar más administradores, hasta cubrir a todos los jugadores. Un administrador que no es el propietario tiene los mismos poderes que los demás administradores, y ninguno de ellos puede expulsar ni degradar al propietario activo.
 
@@ -98,6 +98,8 @@ Pueden expulsar a un jugador que no sea el propietario activo, revertir solo el 
 Expulsar borra al momento sus ejércitos, su fortaleza y todo lo que en el futuro le pertenezca en el mapa. Cancela su orden secreta si el turno aún no se ha resuelto. No puede volver a esa campaña. La plaza no se reocupa. El contador de una fortaleza borrada desaparece con ella.
 
 Revertir el último turno se puede repetir sobre el turno que vuelve a quedar último. Las órdenes de ese turno vuelven a ser secretas y sus resultados de batalla dejan de aplicarse. Todos los jugadores ven que el turno fue revertido.
+
+Cada acción queda anotada: quién entra, las reglas si cambian, la colocación, las órdenes cerradas, el camino que recorrió cada ejército, las batallas y su resultado, las expulsiones, los abandonos, los ascensos y el final. Mientras la campaña sigue, esa crónica no se enseña. Cuando termina, quien estuvo en la mesa puede leerla entera, también lo que luego se deshizo.
 
 Un administrador puede abandonar. Sus ejércitos mueren y sale de la campaña. Si quien se va es el propietario, o es el último administrador, un jugador aleatorio de los que siguen pasa a ser el propietario. Si el propietario queda inactivo, ocurre lo mismo y el nuevo propietario recibe el aviso para expulsarlo. El propietario activo no puede ser expulsado ni degradado por otro.
 

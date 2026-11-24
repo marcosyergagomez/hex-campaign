@@ -101,6 +101,7 @@ export function CreateCampaignPage() {
           <p className="mark">{t("newCampaign")}</p>
           <h1>{t("createCampaignTitle")}</h1>
           <p className="quiet">{t("createCampaignLead")}</p>
+          <p className="quiet">{t("createLimitHint")}</p>
         </div>
         <Link className="text-link" to="/campanas">
           {t("backToCampaigns")}

@@ -72,6 +72,7 @@ _MESSAGES = {
     "unknown_player": "No hay ningún jugador con ese alias.",
     "invitation_invalid": "La invitación no es válida.",
     "revision_conflict": "La campaña ha cambiado. Vuelve a leerla.",
+    "campaign_limit": "Ya tienes tres campañas abiertas.",
 }
 _STATUS = {"not_found": 404, "invitation_invalid": 404, "forbidden": 403}
 

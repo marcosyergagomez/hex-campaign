@@ -4,6 +4,7 @@ import random
 from datetime import datetime
 
 from hexcampaign.domain.board import capture, restore
+from hexcampaign.domain.chronicle import cell, path, remember
 from hexcampaign.domain.clock import overdue, stamp
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import (
@@ -36,6 +37,7 @@ def lock_orders(
     typed = {army_id: tuple(path) for army_id, path in paths.items()}
     check_order(game, actor, typed)
     game.orders[actor] = typed
+    remember(game, "orders_locked", player_id=actor)
     if _ready(game):
         return _resolve(game, now, set(), rng or random.Random())
     return bump(game)
@@ -72,6 +74,13 @@ def report_battle(
     if actor not in battle.players:
         raise DomainError("forbidden")
     battle.reports[actor] = _outcome(battle, outcome)
+    remember(
+        game,
+        "battle_reported",
+        player_id=actor,
+        battle_id=battle.id,
+        result=battle.reports[actor],
+    )
     _agree(battle)
     _settle(game, now, rng or random.Random())
     return bump(game)
@@ -91,6 +100,7 @@ def judge_battle(
     if not conflict and not overdue(battle.opened_at, game.rules.battle_days, now):
         raise DomainError("phase_invalid")
     battle.result = _outcome(battle, outcome)
+    remember(game, "battle_judged", player_id=actor, battle_id=battle.id, result=battle.result)
     _settle(game, now, rng or random.Random())
     return bump(game)
 
@@ -102,6 +112,7 @@ def expel_player(game: Game, actor: str, target_id: str, rng: random.Random, now
         raise DomainError("forbidden")
     if target.role == "owner" and target.status == "active":
         raise DomainError("cannot_expel_owner")
+    remember(game, "expelled", player_id=actor, target_id=target.player_id)
     _remove(game, target)
     if not _active_staff(game):
         _hand_over(game, rng)
@@ -113,6 +124,7 @@ def leave_campaign(game: Game, actor: str, rng: random.Random, now: datetime) ->
     if target is None or target.status in {"expelled", "eliminated"}:
         raise DomainError("forbidden")
     was_owner = target.role == "owner"
+    remember(game, "left", player_id=actor)
     _remove(game, target)
     if was_owner or not _active_staff(game):
         _hand_over(game, rng)
@@ -127,6 +139,7 @@ def promote_player(game: Game, actor: str, target_id: str) -> Game:
         raise DomainError("forbidden")
     if target.role == "player":
         target.role = "admin"
+        remember(game, "promoted", player_id=actor, target_id=target.player_id)
     return bump(game)
 
 
@@ -134,7 +147,9 @@ def revert_turn(game: Game, actor: str) -> Game:
     require_staff(game, actor)
     if not isinstance(game.previous, dict) or game.phase not in {"orders", "battles", "finished"}:
         raise DomainError("phase_invalid")
+    undone = game.previous.get("turn", game.turn)
     restore(game, game.previous)
+    remember(game, "reverted", undone=undone)
     return bump(game)
 
 
@@ -148,6 +163,7 @@ def deactivate_player(game: Game, player_id: str, rng: random.Random) -> Game:
     member.status = "inactive"
     member.cause = "account"
     notice(game, "player_inactive", player_id, cause="account")
+    remember(game, "inactive", player_id=player_id, cause="account")
     if was_owner or not _active_staff(game):
         _hand_over(game, rng)
     return bump(game)
@@ -164,6 +180,7 @@ def _resolve(game: Game, now: datetime, defaulted: set[str], rng: random.Random)
         owners[army.id] = army.player_id
         paths[army.id] = game.orders.get(army.player_id, {}).get(army.id, ())
     moved = march(starts, paths, owners)
+    _note_marches(game, starts, paths, owners, moved)
     for army in living(game):
         cell = moved.positions[army.id]
         army.q = cell.q
@@ -198,12 +215,23 @@ def _settle(game: Game, now: datetime, rng: random.Random) -> None:
     if pending:
         return
     for battle in game.battles:
-        if battle.turn != game.turn or battle.reverted or battle.result in {None, "draw"}:
+        if battle.turn != game.turn or battle.reverted or battle.result is None:
             continue
-        for army_id in battle.army_ids:
-            found = find_army(game, army_id)
-            if found is not None and not found.destroyed and found.player_id != battle.result:
+        if battle.result != "draw":
+            for army_id in battle.army_ids:
+                found = find_army(game, army_id)
+                if found is None or found.destroyed or found.player_id == battle.result:
+                    continue
                 found.destroyed = True
+                remember(
+                    game,
+                    "destroyed",
+                    player_id=found.player_id,
+                    army_id=found.id,
+                    name=found.name,
+                    battle_id=battle.id,
+                )
+        remember(game, "battle_resolved", battle_id=battle.id, result=battle.result)
     _finish(game, now, rng)
 
 
@@ -215,6 +243,7 @@ def _finish(game: Game, now: datetime, rng: random.Random) -> None:
     if winners is not None:
         game.winners = winners
         game.phase = "finished"
+        remember(game, "finished", winners=list(winners))
         return
     if not _active_staff(game):
         _hand_over(game, rng)
@@ -260,6 +289,7 @@ def _eliminate(game: Game) -> None:
         if owned and all(army.destroyed for army in owned):
             member.status = "eliminated"
             member.cause = ""
+            remember(game, "eliminated", player_id=member.player_id)
 
 
 def _holds(game: Game) -> None:
@@ -273,6 +303,16 @@ def _holds(game: Game) -> None:
             and army.player_id != fort.player_id
         ]
         if not enemies:
+            if fort.holder_id is not None:
+                remember(
+                    game,
+                    "hold",
+                    player_id=fort.player_id,
+                    holder_id="",
+                    hold=0,
+                    q=fort.q,
+                    r=fort.r,
+                )
             fort.holder_id = None
             fort.hold = 0
             continue
@@ -284,6 +324,15 @@ def _holds(game: Game) -> None:
         else:
             fort.holder_id = holder
             fort.hold = 1
+        remember(
+            game,
+            "hold",
+            player_id=fort.player_id,
+            holder_id=holder,
+            hold=fort.hold,
+            q=fort.q,
+            r=fort.r,
+        )
 
 
 def _mark_misses(game: Game, defaulted: set[str], rng: random.Random) -> None:
@@ -293,11 +342,13 @@ def _mark_misses(game: Game, defaulted: set[str], rng: random.Random) -> None:
             continue
         if member.player_id in defaulted:
             member.missed += 1
+            remember(game, "missed", player_id=member.player_id)
             if member.missed >= game.rules.missed_turns:
                 was_owner = member.role == "owner"
                 member.status = "inactive"
                 member.cause = "missed"
                 notice(game, "player_inactive", member.player_id, cause="missed")
+                remember(game, "inactive", player_id=member.player_id, cause="missed")
                 if was_owner or not _active_staff(game):
                     hand_over = True
             continue
@@ -318,6 +369,23 @@ def _required(game: Game) -> set[str]:
 def _ready(game: Game) -> bool:
     required = _required(game)
     return bool(required) and required <= set(game.orders)
+
+
+def _note_marches(game: Game, starts, paths, owners, moved) -> None:
+    names = {army.id: army.name for army in game.armies}
+    for army_id, origin in starts.items():
+        destination = moved.positions[army_id]
+        remember(
+            game,
+            "marched",
+            player_id=owners[army_id],
+            army_id=army_id,
+            name=names.get(army_id, ""),
+            origin=cell(origin),
+            order=path(paths.get(army_id, ())),
+            trail=path(moved.trails.get(army_id, ())),
+            destination=cell(destination),
+        )
 
 
 def _reveal(game: Game, player_id: str, cells: tuple[Hex, ...]) -> None:
@@ -358,6 +426,15 @@ def _add_battle(
         )
     )
     game.next_id += 1
+    remember(
+        game,
+        "battle_opened",
+        battle_id=game.battles[-1].id,
+        q=cell.q,
+        r=cell.r,
+        army_ids=list(army_ids),
+        players=list(players),
+    )
 
 
 def _pending(game: Game, battle_id: str) -> Battle:
@@ -404,6 +481,7 @@ def _after_exit(game: Game, player_id: str, now: datetime, rng: random.Random) -
         game.phase = "finished"
         game.winners = _winners(game) or []
         game.orders = {}
+        remember(game, "finished", winners=list(game.winners))
     return bump(game)
 
 
@@ -431,10 +509,12 @@ def _hand_over(game: Game, rng: random.Random) -> None:
     if not pool:
         game.phase = "finished"
         game.winners = []
+        remember(game, "finished", winners=[])
         return
     chosen = rng.choice(sorted(pool, key=lambda member: member.player_id))
     chosen.role = "owner"
     notice(game, "owner_transferred", chosen.player_id)
+    remember(game, "owner_transferred", player_id=chosen.player_id)
 
 
 def _active_staff(game: Game) -> list:
