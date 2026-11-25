@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Link } from "react-router-dom"
 
 import {
@@ -30,6 +30,7 @@ export function MapsPage() {
   const [chart, setChart] = useState<SavedMapDetail | null>(null)
   const [pending, setPending] = useState(false)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
+  const openTicket = useRef(0)
 
   useEffect(() => {
     let current = true
@@ -66,11 +67,18 @@ export function MapsPage() {
   }
 
   async function openMap(id: string) {
+    const ticket = openTicket.current + 1
+    openTicket.current = ticket
     setErrors({})
     try {
-      setChart(await getMap(id))
+      const detail = await getMap(id)
+      if (ticket === openTicket.current) {
+        setChart(detail)
+      }
     } catch (error) {
-      setErrors(presentError(error, "mapUnknown"))
+      if (ticket === openTicket.current) {
+        setErrors(presentError(error, "mapUnknown"))
+      }
     }
   }
 
