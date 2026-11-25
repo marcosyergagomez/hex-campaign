@@ -71,7 +71,13 @@ def post_map(payload: MapBody, request: Request) -> JSONResponse:
         except CampaignError as exc:
             return _failure(exc)
         return JSONResponse(
-            {"id": str(row.id), "name": row.name, "size": row.size, "generated": row.generated},
+            {
+                "id": str(row.id),
+                "name": row.name,
+                "size": row.size,
+                "seats": row.seats,
+                "generated": row.generated,
+            },
             status_code=201,
         )
 
