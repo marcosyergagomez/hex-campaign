@@ -59,6 +59,7 @@ def create_campaign(
             raise CampaignError("campaign_limit")
         try:
             game = create_game(name, parsed, str(account.pk), account.alias)
+            game.identity_required = True
             if template is not None:
                 from hexcampaign.domain.maps import lay
 

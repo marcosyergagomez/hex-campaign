@@ -27,9 +27,11 @@ from apps.campaigns.records import (
 )
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex
+from hexcampaign.domain.identity import COLORS, FACTIONS, LEGACY
 from hexcampaign.domain.lobby import (
     begin,
     change_rules,
+    choose_identity,
     close_placement,
     describe_army,
     place_armies,
@@ -66,6 +68,10 @@ _MESSAGES = {
     "revision_conflict": "La campaña ha cambiado. Vuelve a leerla.",
     "campaign_limit": "Ya tienes tres campañas abiertas.",
     "map_unknown": "No hay ningún mapa con ese identificador.",
+    "faction_invalid": "Elige una raza de The Old World.",
+    "color_invalid": "Elige un color de la paleta.",
+    "color_taken": "Ese color ya pertenece a otro jugador.",
+    "identity_required": "Todos los jugadores deben elegir raza y color antes de empezar.",
 }
 _STATUS = {
     "not_found": 404,
@@ -98,6 +104,11 @@ class CreateBody(BaseModel):
 
 class RevisionBody(BaseModel):
     revision: int
+
+
+class IdentityBody(RevisionBody):
+    faction: str
+    color: str
 
 
 class RulesChange(BaseModel):
@@ -198,6 +209,30 @@ def get_campaigns(request: Request) -> JSONResponse:
     if isinstance(user, JSONResponse):
         return user
     return JSONResponse(list_campaigns(user))
+
+
+@router.get("/api/campaign-identity")
+@django_sync
+def get_identity_options(request: Request) -> JSONResponse:
+    user = _reader(request)
+    if isinstance(user, JSONResponse):
+        return user
+    return JSONResponse({
+        "factions": [{"id": faction, "legacy": faction in LEGACY} for faction in FACTIONS],
+        "colors": [{"id": name, "value": color} for name, color in COLORS.items()],
+    })
+
+
+@router.post("/api/campaigns/{campaign_id}/identity")
+@django_sync
+def post_identity(campaign_id: str, payload: IdentityBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return choose_identity(game, str(user.pk), payload.faction, payload.color)
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
 
 
 @router.post("/api/campaigns", status_code=201)

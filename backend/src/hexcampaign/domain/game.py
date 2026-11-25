@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex
+from hexcampaign.domain.identity import checked_identity
+from hexcampaign.domain.land import checked_home_size
 from hexcampaign.domain.rules import Rules, rules_from
 from hexcampaign.domain.terrain import Plot, checked_plot
 
@@ -19,6 +21,8 @@ class Member:
     status: str
     missed: int = 0
     cause: str = ""
+    faction: str = ""
+    color: str = ""
 
 
 @dataclass
@@ -91,6 +95,8 @@ class Game:
     anchors: list[Hex] = field(default_factory=list)
     surveyor: str | None = None
     fort_memory: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    home_size: int | None = None
+    identity_required: bool = False
 
 
 def find_member(game: Game, player_id: str) -> Member | None:
@@ -196,6 +202,8 @@ def to_dict(game: Game) -> dict[str, object]:
         "plots": _stored_plots(game),
         "anchors": [_hex(cell) for cell in game.anchors],
         "surveyor": game.surveyor,
+        "home_size": game.home_size,
+        "identity_required": game.identity_required,
         "fort_memory": {
             player_id: [
                 {"q": int(key.split(",")[0]), "r": int(key.split(",")[1]), "owner": owner}
@@ -252,6 +260,11 @@ def from_dict(data: object) -> Game:
         raise DomainError("rules_invalid")
     game.chronicle = [dict(_mapping(item)) for item in saved]
     game.plots = _plots(data.get("plots"))
+    game.home_size = checked_home_size(data.get("home_size"), game.rules.map_size)
+    identity_required = data.get("identity_required", False)
+    if not isinstance(identity_required, bool):
+        raise DomainError("rules_invalid")
+    game.identity_required = identity_required
     game.anchors = [_cell(item) for item in _list(data["anchors"])] if "anchors" in data else []
     surveyor = data.get("surveyor")
     game.surveyor = None if surveyor is None else str(surveyor)
@@ -283,6 +296,8 @@ def _member_dict(member: Member) -> dict[str, object]:
         "status": member.status,
         "missed": member.missed,
         "cause": member.cause,
+        "faction": member.faction,
+        "color": member.color,
     }
 
 
@@ -328,6 +343,7 @@ def _battle_dict(battle: Battle) -> dict[str, object]:
 
 def _member(data: object) -> Member:
     raw = _mapping(data)
+    faction, color = checked_identity(raw.get("faction", ""), raw.get("color", ""), optional=True)
     return Member(
         player_id=str(raw["player_id"]),
         alias=str(raw["alias"]),
@@ -335,6 +351,8 @@ def _member(data: object) -> Member:
         status=str(raw["status"]),
         missed=_whole(raw["missed"]),
         cause=str(raw["cause"]),
+        faction=faction,
+        color=color,
     )
 
 
