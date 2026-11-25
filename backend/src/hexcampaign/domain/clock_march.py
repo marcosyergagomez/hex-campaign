@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.march import Contact
+from hexcampaign.domain.occupy import who_can_leave, without_own_stack
 from hexcampaign.domain.terrain import Plot, exit_cost, passable
 
 
@@ -34,7 +35,8 @@ def walk(
     stopped: set[str] = set()
     contacts: list[Contact] = []
     by_id = {walker.army_id: walker for walker in walkers}
-    for _ in range(24):
+    span = max((len(walker.path) for walker in walkers), default=0)
+    for _ in range(span * 3 + 1):
         spending = _paying(walkers, plots, board, stopped)
         if not spending:
             break
@@ -72,7 +74,7 @@ def _step(ready, by_id, plots, stopped, contacts) -> None:
     position = {army_id: walker.at for army_id, walker in by_id.items()}
     owners = {army_id: walker.player_id for army_id, walker in by_id.items()}
     intended = {walker.army_id: walker.path[0] for walker in ready}
-    moving = _who_can_leave(intended, position, owners, stopped)
+    moving = who_can_leave(intended, position, owners, stopped)
     for army_id in intended:
         if army_id not in moving:
             _halt(by_id[army_id], stopped)
@@ -81,7 +83,7 @@ def _step(ready, by_id, plots, stopped, contacts) -> None:
     for army_id in moving:
         groups.setdefault(intended[army_id], []).append(army_id)
     for dest, group in groups.items():
-        entering = _without_own_stack(group, owners)
+        entering = without_own_stack(group, owners)
         for army_id in group:
             if army_id not in entering:
                 _halt(by_id[army_id], stopped)
@@ -123,37 +125,6 @@ def _halt(walker: Walker, stopped: set[str]) -> None:
     stopped.add(walker.army_id)
     if walker.paid:
         walker.paid -= 1
-
-
-def _who_can_leave(intended, position, owners, stopped) -> set[str]:
-    active = set(intended)
-    while True:
-        blocked = {
-            army_id
-            for army_id, dest in intended.items()
-            if army_id in active and _stays(army_id, dest, active, position, owners, stopped)
-        }
-        if not blocked:
-            return active
-        active -= blocked
-
-
-def _stays(army_id, dest, active, position, owners, stopped) -> bool:
-    for other, cell in position.items():
-        if other == army_id or cell != dest or other in active:
-            continue
-        if owners[other] == owners[army_id] or other in stopped:
-            return True
-    return False
-
-
-def _without_own_stack(group: list[str], owners: dict[str, str]) -> list[str]:
-    crowded = {
-        army_id
-        for army_id in group
-        if sum(owners[other] == owners[army_id] for other in group) > 1
-    }
-    return [army_id for army_id in group if army_id not in crowded]
 
 
 def _swaps(origin, by_id, stopped, contacts) -> None:

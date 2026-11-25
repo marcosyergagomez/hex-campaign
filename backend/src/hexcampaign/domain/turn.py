@@ -503,6 +503,7 @@ def _remove(game: Game, member) -> None:
     game.fortresses = [fort for fort in game.fortresses if fort.player_id != member.player_id]
     game.orders.pop(member.player_id, None)
     game.discovered.pop(member.player_id, None)
+    game.fort_memory.pop(member.player_id, None)
     drop_seat_count(game)
 
 

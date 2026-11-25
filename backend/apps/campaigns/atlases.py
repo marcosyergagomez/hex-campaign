@@ -5,7 +5,8 @@ import random
 from django.db import transaction
 
 from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.maps import drawn, dump_template, generate, load_template
+from hexcampaign.domain.map_document import drawn, dump_template, load_template
+from hexcampaign.domain.maps import generate
 from hexcampaign.domain.rules import campaign_name
 
 from .models import CampaignMap

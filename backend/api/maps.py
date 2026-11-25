@@ -6,12 +6,39 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from api.campaigns import _failure, _reader, _run
-from api.player_session import django_sync
+from api.player_gate import reader, writer
+from api.player_session import SESSION_MESSAGE, django_sync
 from apps.campaigns.atlases import list_maps, read_map, store_drawn, store_generated
 from apps.campaigns.records import CampaignError
 
 router = APIRouter()
+
+_MESSAGES = {
+    "rules_invalid": "Las reglas no son válidas.",
+    "map_unknown": "No hay ningún mapa con ese identificador.",
+}
+
+
+def _failure(exc: CampaignError) -> JSONResponse:
+    if exc.code == "account_inactive":
+        return JSONResponse(
+            status_code=401,
+            content={"errors": {"session": [SESSION_MESSAGE]}},
+        )
+    status = 404 if exc.code == "map_unknown" else 422
+    field = "map" if exc.code == "map_unknown" else "rules"
+    message = _MESSAGES.get(exc.code, _MESSAGES["rules_invalid"])
+    return JSONResponse(status_code=status, content={"errors": {field: [message]}})
+
+
+def _run(request: Request, action):
+    user = writer(request)
+    if isinstance(user, JSONResponse):
+        return user
+    try:
+        return action(user)
+    except CampaignError as exc:
+        return _failure(exc)
 
 
 class CellBody(BaseModel):
@@ -32,7 +59,7 @@ class MapBody(BaseModel):
 @router.get("/api/maps")
 @django_sync
 def get_maps(request: Request) -> JSONResponse:
-    user = _reader(request)
+    user = reader(request)
     if isinstance(user, JSONResponse):
         return user
     return JSONResponse(list_maps(user))
@@ -41,7 +68,7 @@ def get_maps(request: Request) -> JSONResponse:
 @router.get("/api/maps/{map_id}")
 @django_sync
 def get_map(map_id: str, request: Request) -> JSONResponse:
-    user = _reader(request)
+    user = reader(request)
     if isinstance(user, JSONResponse):
         return user
     try:
