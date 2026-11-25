@@ -11,19 +11,29 @@ def sees_army(game: Game, viewer: str, army: Army) -> bool:
         return True
     if army.destroyed or army.q is None or army.r is None:
         return False
+    cell = Hex(army.q, army.r)
+    if game.plots is None:
+        return _sees_without_terrain(game, viewer, cell)
+    return _sees_with_terrain(game, viewer, cell)
+
+
+def _sees_without_terrain(game: Game, viewer: str, cell: Hex) -> bool:
+    if game.rules.visibility == "full":
+        return True
+    if cell not in game.discovered.get(viewer, set()):
+        return False
+    if game.rules.visibility == "anonymous":
+        return True
+    return any(distance(cell, Hex(own.q, own.r)) <= 1 for own in living(game, viewer))
+
+
+def _sees_with_terrain(game: Game, viewer: str, cell: Hex) -> bool:
     if game.rules.visibility in {"full", "total"}:
         return True
-    cell = Hex(army.q, army.r)
-    if game.plots is not None and game.rules.visibility not in {"total", "charted", "home"}:
-        return cell in game.discovered.get(viewer, set()) and in_home(game, viewer, cell)
+    if game.rules.visibility not in {"charted", "home"}:
+        return False
     if in_home(game, viewer, cell):
         return True
-    if game.plots is None and cell not in game.discovered.get(viewer, set()):
-        return False
-    if game.plots is None and game.rules.visibility == "anonymous":
-        return True
-    if game.plots is None:
-        return any(distance(cell, Hex(own.q, own.r)) <= 1 for own in living(game, viewer))
     if game.rules.visibility == "home" and cell not in game.discovered.get(viewer, set()):
         return False
     return any(_reaches(game, own, cell) for own in living(game, viewer))
@@ -64,7 +74,3 @@ def _reaches(game: Game, army: Army, cell: Hex) -> bool:
 def remember_fort(game: Game, viewer: str, cell: Hex) -> None:
     owner = next((fort.player_id for fort in game.fortresses if fort.at() == cell), None)
     game.fort_memory.setdefault(viewer, {})[f"{cell.q},{cell.r}"] = owner
-
-
-def remembered_fort(game: Game, viewer: str, cell: Hex) -> str | None:
-    return game.fort_memory.get(viewer, {}).get(f"{cell.q},{cell.r}")

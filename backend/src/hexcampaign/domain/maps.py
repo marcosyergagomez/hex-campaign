@@ -24,6 +24,10 @@ class Template:
 
 
 def generate(size: int, seats: int, rng: random.Random) -> Template:
+    """Symmetric plains, with the same accent in every home disk.
+
+    Rivers, cliffs and roads belong on a map the player draws. They are not invented here.
+    """
     if size not in MAP_SIZES or seats not in {2, 3, 4}:
         raise DomainError("rules_invalid")
     accent = rng.choice(_ACCENTS)

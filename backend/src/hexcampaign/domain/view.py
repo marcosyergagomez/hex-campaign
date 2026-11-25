@@ -5,7 +5,7 @@ from datetime import datetime
 from hexcampaign.domain.clock import overdue
 from hexcampaign.domain.game import Game, find_member, living
 from hexcampaign.domain.hexes import Hex, distance
-from hexcampaign.domain.sight import gazed_cells, known_hex, sees_army
+from hexcampaign.domain.sight import gazed_cells, in_home, known_hex, sees_army
 
 
 def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
@@ -217,8 +217,6 @@ def _show_terrain_battle(game: Game, battle, viewer: str, staff: bool) -> bool:
 def _looking(game: Game, viewer: str, cell: Hex) -> bool:
     if game.rules.visibility in {"full", "total"}:
         return True
-    from hexcampaign.domain.sight import in_home
-
     if in_home(game, viewer, cell):
         return True
     for army in living(game, viewer):
