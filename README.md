@@ -51,8 +51,6 @@ npm install
 npm run dev
 ```
 
-Map drawing checks run with `npm run test:maps` from `frontend/`; they use Node's test runner and the existing TypeScript compiler. The landscape and campaign constraints are covered by `pytest tests/domain/test_terrain.py tests/campaigns/test_map_api.py` from `backend/`.
-
 On macOS or Linux, activate the virtual environment with `source .venv/bin/activate`.
 
 `migrate` creates the tables on an empty database and applies later changes without deleting campaigns. The Docker volume keeps the data between restarts. Mailpit accepts the confirmation message on port 1025 and shows it at http://localhost:8025. The link uses `API_ORIGIN`. `config.settings.production` refuses to start unless that origin is `https`, `DJANGO_SECRET_KEY` is a unique secret of at least 50 characters, and `SESSION_PEPPER` is a different secret of that length. The sample pepper in `.env.example` is refused in production.

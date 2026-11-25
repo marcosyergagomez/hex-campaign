@@ -1,14 +1,6 @@
 # Reglas de campaña, primera versión
 
-Hex Campaign guarda una campaña propia. Estas reglas no copian un reglamento de miniaturas. El jugador elige su raza o facción de un catálogo; el comandante y la lista se escriben libremente. La batalla se juega en la mesa y la aplicación solo anota el resultado.
-
-### Estandartes y territorios
-
-Cada jugador elige su facción y un color en «Tu estandarte», dentro de la campaña. El desplegable incluye las diez facciones principales de The Old World (también Gran Catai) y las siete Legacy: Enanos del Caos, Demonios del Caos, Elfos Oscuros, Hombres Lagarto, Reinos Ogros, Skaven y Condes Vampiro. El catálogo se contrasta con las [descargas oficiales de The Old World](https://www.warhammer-community.com/en-gb/downloads/warhammer-the-old-world/). Solo se usan nombres, no se incorporan reglas ni ilustraciones de esos libros.
-
-Los colores de la paleta no se pueden repetir dentro de una campaña, aunque las facciones sí. Las campañas nuevas no empiezan hasta que todos hayan elegido ambos. Se pueden cambiar durante el reclutamiento y quedan fijos al empezar. Las campañas antiguas conservan sus datos y permiten completar el estandarte una vez aunque ya hayan comenzado. Esta identidad no cambia el movimiento, la visión, las listas ni los datos descriptivos de los ejércitos.
-
-El mapa de campaña representa cada territorio con una veladura tenue y un contorno exterior continuo, por debajo de árboles, caminos y construcciones. El estandarte de la fortaleza y la leyenda identifican al jugador; «Territorios» permite ocultar la veladura. El territorio neutral no se tiñe. Solo se envía la propiedad de las casillas conocidas: las zonas sin explorar no revelan terreno, dueño ni fortalezas. Se usa la superficie territorial guardada en la campaña, no un radio calculado en el navegador. En los tableros antiguos sin terrenos se respeta la distribución por proximidad, dejando neutrales los empates. Ocupar una fortaleza no transfiere automáticamente su territorio: siguen aplicándose las reglas de ocupación y victoria.
+Hex Campaign guarda una campaña propia. Estas reglas no copian un reglamento de miniaturas. La raza, el comandante y la lista son nombres que escribe el jugador. La batalla se juega en la mesa y la aplicación solo anota el resultado.
 
 El estado de la partida vive en la campaña. La sesión del jugador no es la campaña: una cuenta puede jugar varias a la vez y la campaña sigue guardada cuando la sesión caduca.
 
@@ -29,7 +21,7 @@ Queda fijo en ese momento:
 - Jugadores: 2, 3 o 4.
 - Ejércitos iniciales de cada jugador: 1 o 2.
 - Movimiento de cada ejército: 1, 2 o 3 hexágonos. En esta versión es el mismo para todos.
-- Tamaño del mapa: 19, 37 o 61 hexágonos. Con terrenos, el tamaño lo define el mapa elegido. Los tres tamaños ofrecidos actualmente son 271, 397 y 547; los mapas guardados de otros tamaños siguen siendo compatibles.
+- Tamaño del mapa: 19, 37 o 61 hexágonos. Cuando la campaña use un mapa de terrenos, esos tres tamaños se llaman pequeño, mediano y grande.
 - Visibilidad de los ejércitos enemigos: todo el mapa, solo los adyacentes, o una ficha sin nombre ni composición. Con un mapa de terrenos, esta elección pasa a ser la de «Mapa y terrenos»: total, mapa conocido con niebla, o solo el territorio propio.
 - Victoria: destruir todos los ejércitos rivales, retener una fortaleza enemiga un número de turnos seguidos, o cualquiera de las dos.
 - Turnos seguidos de retención: un entero de al menos 1.
@@ -115,7 +107,7 @@ Un administrador puede abandonar. Sus ejércitos mueren y sale de la campaña. S
 
 Esto no cambia las partidas de esta versión. Es el mapa que viene después.
 
-Cada casilla tiene un terreno. El territorio de un jugador es una zona compacta alrededor de su fortaleza, definida más abajo. Lo demás es neutral. De quién es una casilla no cambia lo que cuesta salir de ella. El territorio propio se ve entero, siempre, con terreno y ejércitos.
+Cada casilla tiene un terreno. El territorio de un jugador no se pinta casilla a casilla: es el disco alrededor de su fortaleza, definido más abajo. Lo demás es neutral. De quién es una casilla no cambia lo que cuesta salir de ella. El territorio propio se ve entero, siempre, con terreno y ejércitos.
 
 El movimiento elegido al crear, 1, 2 o 3, pasa a ser puntos. Los puntos se gastan al salir de una casilla, no al entrar. Salir cuesta lo que dice el terreno que se pisa. Entrar en la siguiente no añade otro coste. Quedarse quieto gasta cero y no borra lo ya abonado. La casilla que se pisa no se paga otra vez por estar en ella: desde una montaña se sale pagando el coste de la montaña, y la llanura de destino no cobra.
 
@@ -149,51 +141,34 @@ El conocimiento de cada jugador, y el abono de salida de cada ejército, forman 
 
 Cualquier ejército paga el mismo coste. En este catálogo no hay combate, cobertura de disparo, emboscadas, desgaste, producción, barcos ni vuelo. Un terreno puede compartir efectos con otro y seguir siendo otro terreno, para poder separarlos más adelante sin rehacer el mapa.
 
-Al crear la campaña sin un mapa de terrenos, el tamaño sigue siendo 19, 37 o 61. Con un mapa de terrenos el tamaño es el de ese mapa. Los tamaños actuales son 271, 397 y 547 casillas. La pequeña admite 2 y 3 jugadores; las otras admiten 2, 3 y 4. Estos tamaños son una configuración, no tres algoritmos: `TABLE_RADII` en [hexes.py](../backend/src/hexcampaign/domain/hexes.py) define los radios ofrecidos. El tamaño se calcula como `1 + 3*r*(r+1)`. `/api/map-scales` publica tamaños, plazas viables, recomendación y superficie territorial; la interfaz no mantiene otra lista. Al cambiar esos radios, el mismo motor calcula las nuevas geometrías y composiciones. Los radios válidos son enteros de 2 a 64, dentro del límite de coordenadas guardadas, aunque los más pequeños no admiten campañas generadas con la separación exigida. Al empezar, la campaña se queda una copia del mapa.
+Al crear la campaña, el tamaño se elige como pequeño, mediano o grande. Pequeño son 19 casillas, mediano 37 y grande 61. El contorno es ese disco. El propietario usa un mapa que ya haya guardado, o pide uno generado de ese tamaño. Al empezar, la campaña se queda una copia. Luego puede cambiar el original y la partida no se entera.
 
-En un mapa nuevo generado, cada territorio ocupa aproximadamente el 7 % del tablero, redondeado a una casilla, con un mínimo de siete. Los tamaños actuales producen 19, 28 y 38 casillas por jugador. Se toman las casillas más próximas a la fortaleza y, en el anillo incompleto, se priorizan las que miran al interior del tablero. Así crecen de forma gradual, sin tener que añadir un anillo entero ni agrandar artificialmente el mapa. Todos reciben la misma superficie, sus territorios no se solapan y el centro queda neutral. El mapa guarda `home_size` y la campaña copia ese valor. Los documentos anteriores sin ese campo conservan sus discos originales: por ejemplo, 19 casillas en mapas de 397, 37 en los de 547 y 61 en los de 817.
+El terreno de un jugador es el disco alrededor de su fortaleza, recortado por el borde del mapa. En el pequeño y en el mediano llega a distancia 1: la fortaleza y sus vecinas, 7 casillas si todas caben. En el grande llega a distancia 2: hasta 19 casillas. El resto del mapa queda neutral. La idea es que la campaña no salga partida entera entre los jugadores: tiene que sobrar terreno de nadie.
 
-La fortaleza, y cualquier ejército, solo se colocan donde se puede entrar. El territorio de una fortaleza no puede compartir casilla con el de otra. Tiene que quedar terreno neutral. Si con esas plazas no cabe, esas fortalezas no valen y hay que moverlas o bajar plazas.
+La fortaleza, y cualquier ejército, solo se colocan donde se puede entrar. El disco de una fortaleza no puede compartir casilla con el de otra. Tiene que quedar al menos una casilla del mapa fuera de todos los discos. Si con esas plazas no cabe, esas fortalezas no valen y hay que moverlas o bajar plazas. En el mediano el disco no sube a distancia 2 porque, con 3 o 4 jugadores, un territorio de 19 casillas no dejaría frontera en un mapa de 37. En el grande, distancia 2 con 4 jugadores puede no caber: entonces esa colocación no vale.
 
-Si colocan los jugadores, la fortaleza y los ejércitos van en casillas distintas, todas transitables, y la fortaleza tiene que cumplir los límites territoriales. Un ejército inicial puede quedar en la fortaleza. El segundo, si lo hay, en una vecina libre en la que se pueda entrar y, si cabe, dentro del propio territorio.
+Si colocan los jugadores, la fortaleza y los ejércitos van en casillas distintas, todas transitables, y la fortaleza tiene que cumplir el disco. Un ejército inicial puede quedar en la fortaleza. El segundo, si lo hay, en una vecina libre en la que se pueda entrar y, si cabe, dentro del propio disco.
 
 En un mapa hecho a mano, si coloca la aplicación, reparte las fortalezas junto al borde, lo más lejos posible unas de otras, cumpliendo lo de arriba. El mapa en sí es libre: puede tener un río suelto, una cordillera partida o el transitable cortado en dos.
 
-En un mapa generado, las fortalezas salen solas, lejos unas de otras, y cada semilla dibuja un país distinto. No es una copia girada del mismo reino: es un solo paisaje. El lago, el río y la sierra caen donde caigan, y el otro jugador no nace con el mismo dibujo, pero sí con una fortaleza transitable, un territorio que no pisa el del vecino y un viaje de al menos cinco turnos hasta cualquier fortaleza rival. No basta con contar trece casillas: el generador calcula el viaje más rápido con 3 puntos por turno, el coste al salir y los puntos que devuelven los caminos. El viaje puede rodear el lago: esa es la frontera, no una recta de llanura vacía. El centro del tablero queda fuera de los territorios. Nadie nace sobre el agua ni encerrado por una barrera que no se pueda rodear.
+En un mapa generado, las fortalezas salen solas y el mapa nace simétrico. Cada jugador tiene el mismo disco: los mismos terrenos, los mismos caminos o puentes, las mismas casillas por las que se puede salir y el mismo coste para llegar al centro. El centro queda neutral y es la frontera común. Nadie empieza detrás de una montaña rocosa, un acantilado o un lago que el otro no tenga en el mismo sitio de su porción.
 
-El generado conecta las fortalezas por terreno transitable. Cada masa de terreno es contigua, pero puede haber muchas separadas por claros y valles; no tiene por qué usar todos los terrenos:
+El disco se parte en tantas porciones como plazas, y las demás porciones son la primera girada. Con 2 jugadores, media vuelta. Con 3, un tercio de vuelta. Con 4, la rejilla hexagonal no parte el mapa en cuatro porciones exactas: se hacen dos pares opuestos, cada par idéntico al girar media vuelta, los cuatro a la misma distancia del centro y con el mismo contenido en el disco. La fortaleza cae en el mismo punto de cada porción. Si así no caben los discos o el centro no queda libre, se genera otra vez.
+
+El generado, además, se recorre entero por donde se entra y se construye así:
 
 - El río completo forma un curso. Cada casilla, salvo los extremos, tiene dos vecinas de río completo. Un extremo toca un lago o el borde del mapa. No hay un río de una sola casilla, ni una mancha, ni un cruce.
 - La orilla toca al menos un río completo.
-- El acantilado, si sale, forma una cadena de al menos dos casillas, y cada una toca un lago o el borde del mapa.
+- El acantilado forma una cadena de al menos dos casillas, y cada una toca un lago o el borde del mapa.
 - La playa toca un lago o el borde del mapa.
 - Un lago de varias casillas es contiguo.
-- La montaña y la montaña rocosa forman sierras cortas, separadas por pasos transitables.
-- Hay varias masas de bosque. El bosque profundo, si sale, toca al menos un bosque.
-- El pantano, si sale, toca un río completo, una orilla o un lago.
+- La montaña y la montaña rocosa forman una cordillera: cada casilla toca otra de las dos, salvo un pico aislado.
+- El bosque profundo toca al menos un bosque.
+- El pantano toca un río completo, una orilla o un lago.
+- El camino forma un tramo de al menos dos casillas y no se coloca sobre un terreno infranqueable. Puede enlazar con un puente.
 - El puente o el vado está sobre una orilla o un río completo y une dos casillas en las que se puede entrar.
 
-Los mapas generados tienen caminos locales solo dentro de los territorios iniciales, no en las masas neutrales. Conservan su regla: salir cuesta 1 y devuelve 1 punto. No cambian la mirada del terreno ni abren casillas infranqueables. La fortaleza conserva su salida normal. El puente iguala el río a la llanura y, sin camino, no devuelve puntos. Si un camino local cruza un río, lleva puente.
-
-Dentro de cada territorio se identifican masas contiguas de bosque y bosque profundo, montaña transitable y colinas, pantano y orilla, y tundra. Cada masa recibe un único corredor desde su entrada cercana a la fortaleza hasta el extremo más lejano por un trayecto corto dentro de esa masa. Se llega a esos corredores por el terreno transitable: no se asfaltan todas las llanuras intermedias para crear una red de movimiento gratuito. Una masa estrecha puede coincidir con su camino; una masa ancha conserva casillas fuera de la ruta. En conjunto, menos de la mitad del territorio lleva camino. Un bosque que continúa fuera del territorio solo recibe camino en su porción propia.
-
-Cada jugador dispone de al menos tres casillas de acceso a su frontera y una posición elevada de observación accesible allí. Con movimiento 3 se exige llegar como máximo en dos turnos para los tamaños actuales; el límite crece con el alcance territorial si se configuran mesas mayores. Se aprovecha una colina o montaña existente cuando es posible; no se convierte toda la frontera en colinas. El bosque no oculta por sí mismo a un ejército ni corta la visión; la mirada depende del terreno del observador.
-
-Para aceptar el mapa, el viaje más rápido de cada jugador a su rival más cercano no puede diferir en más de un turno respecto a los demás, medido con movimiento 3. Se mantienen los cinco turnos mínimos, pero ahora también se limita el máximo: cualquier viaje entre fortalezas debe caber en `ceil(distancia_hexagonal / 3) + 2` turnos. También debe existir una casilla neutral cercana al centro con una diferencia de llegada máxima de dos turnos. No son objetivos nuevos de victoria: son comprobaciones de generación que evitan tanto ataques prematuros como rodeos interminables.
-
-Los caminos son parte del mapa, no una bonificación exclusiva del propietario: también los puede aprovechar un rival. Estas garantías se aplican a mapas nuevos generados por esta versión. No se añaden caminos ni se redistribuye terreno en mapas guardados o campañas existentes.
-
-El dibujo se compone por capas: suelo, agua continua, vegetación y relieve, construcciones y cuadrícula. Los árboles y las cumbres pueden sobresalir visualmente de su casilla, pero no cambian el terreno de la vecina. La casilla conserva su tipo, coste y mirada; pasar el puntero por ella muestra su terreno. Los puentes dibujados corresponden a puentes del mapa, no son adornos que concedan pasos nuevos. El trazado evita pequeños triángulos entre caminos vecinos, conservando cruces y circuitos amplios; el movimiento sigue dependiendo de las casillas, no de las líneas dibujadas. Los mapas de más de 547 casillas conservan todos sus detalles, pero prescinden del filtro global de ruido sobre la vegetación para reducir el coste del zoom.
-
-Los mapas nuevos crecen con contornos irregulares alrededor de sus núcleos, bosques secundarios separados y cordilleras que pueden recorrer el interior. Una misma semilla reproduce el resultado con esta versión del generador. Los mapas guardados conservan sus casillas: la mejora del dibujo no regenera su geografía ni altera campañas existentes.
-
-El motor aumenta el número de masas, no su tamaño sin límite: busca aproximadamente un 27 % de bosque en grupos de 7–14 casillas, sierras de 6–12, colinas de 3–6 y campos de 2–4. Añade lagunas secundarias y reserva claros entre masas. Los campos conservan su coste de llanura, sin introducir producción ni objetivos nuevos. Se exige al menos un 23 % de bosque y un 7 % de campos; en cada uno de los seis sectores del tablero, al menos un tercio debe contener terreno distinto de llanura, desierto, playa o tundra. No basta con cumplir una densidad global mientras media mesa queda vacía.
-
-Ninguna masa conexa de bosque o de relieve transitable puede superar 18 casillas ni exigir más de cuatro turnos entre dos de sus casillas con movimiento 3, incluso recorriéndola por dentro. El territorio neutral no recibe caminos: son los claros y la fragmentación del paisaje los que evitan atravesar bosques de cien casillas. Estas condiciones se comprueban también para tamaños que no aparecen en los tres preajustes. El dibujo suaviza las transiciones y representa ríos de anchura variable que llegan al borde o se funden con el lago. La anchura dibujada no cambia las reglas de cruce.
-
-La vegetación, las piedras y las cumbres se dibujan más pequeñas y mezcladas dentro del terreno que representan. Son detalles visuales, no casillas adicionales ni efectos nuevos. Los caminos se unen entre casillas y sus cruces se ven completos; al pasar el puntero se indica el terreno, el camino y el puente o vado, si los hay.
-
-En el visor se puede ampliar hasta el 300 %, desplazarse por el mapa y volver al 100 %. La cuadrícula puede ocultarse para contemplar el paisaje; las fortalezas y la identificación del terreno al pasar el puntero siguen disponibles. Estos controles solo cambian la vista.
+Esos rasgos son opcionales. Un mapa pequeño puede ser casi todo llanura. Lo que sí se coloca, se coloca seguido.
 
 | Terreno | Al salir | Mirada del ejército que está encima |
 | --- | --- | --- |

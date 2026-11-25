@@ -1,9 +1,7 @@
-"""Axial hexes. A plain campaign uses a disk of 19, 37 or 61. A terrain map uses a larger one."""
+"""Axial hexes. This version of the map is a filled disk and nothing is impassable."""
 
 import math
 from dataclasses import dataclass
-
-from hexcampaign.domain.errors import DomainError
 
 
 @dataclass(frozen=True, order=True)
@@ -15,9 +13,8 @@ class Hex:
 # Clockwise from the east. Pointy-top axial coordinates.
 _STEPS = ((1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1))
 
-TABLE_RADII = (9, 11, 13)
-# Saved coordinates are bounded to +/-64.
-DISK_RADIUS = {1 + 3 * radius * (radius + 1): radius for radius in range(2, 65)}
+# The only disks the table generates: radius 2, 3 and 4.
+DISK_RADIUS = {19: 2, 37: 3, 61: 4}
 
 
 def neighbors(cell: Hex) -> tuple[Hex, ...]:
@@ -30,8 +27,6 @@ def distance(left: Hex, right: Hex) -> int:
 
 
 def disk(size: int) -> tuple[Hex, ...]:
-    if type(size) is not int or size not in DISK_RADIUS:
-        raise DomainError("rules_invalid")
     radius = DISK_RADIUS[size]
     cells = [
         Hex(q, r)

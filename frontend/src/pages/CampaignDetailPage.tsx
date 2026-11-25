@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 
-import { ApiError, getCampaign, identityOptions, saveIdentity, type CampaignDetail, type IdentityOptions } from "../api"
+import { getCampaign, type CampaignDetail } from "../api"
 import { Chronicle } from "./Chronicle"
-import { PlayerIdentity } from "./PlayerIdentity"
 import { Banner } from "../form"
-import { HexBoard } from "../game/hex/HexBoard"
 import { clientNotice, type MessageKey } from "../i18n/catalog"
 import { useI18n } from "../i18n/language"
 import { presentError } from "../presentError"
@@ -22,10 +20,7 @@ export function CampaignDetailPage() {
   const { t } = useI18n()
   const { id = "" } = useParams()
   const mounted = useRef(true)
-  const routeId = useRef(id)
-  routeId.current = id
   const [campaign, setCampaign] = useState<CampaignDetail | null>(null)
-  const [options, setOptions] = useState<IdentityOptions | null>(null)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
 
   useEffect(() => {
@@ -35,11 +30,10 @@ export function CampaignDetailPage() {
       setErrors({ campaign: [clientNotice("campaignNotFound")] })
       return
     }
-    Promise.all([getCampaign(id), identityOptions()])
-      .then(([found, choices]) => {
+    getCampaign(id)
+      .then((found) => {
         if (current) {
           setCampaign(found)
-          setOptions(choices)
         }
       })
       .catch((error: unknown) => {
@@ -52,20 +46,6 @@ export function CampaignDetailPage() {
       mounted.current = false
     }
   }, [id])
-
-  async function saveBanner(faction: string, color: string) {
-    if (!campaign) throw new Error("Campaign not loaded")
-    try {
-      const updated = await saveIdentity(campaign.id, campaign.revision, faction, color)
-      if (mounted.current && routeId.current === updated.id) setCampaign(updated)
-    } catch (error: unknown) {
-      if (error instanceof ApiError && error.status === 409) {
-        const current = await getCampaign(campaign.id)
-        if (mounted.current && routeId.current === current.id) setCampaign(current)
-      }
-      throw error
-    }
-  }
 
   if (!campaign && Object.keys(errors).length === 0) {
     return <p className="quiet">{t("loadingCampaign")}</p>
@@ -89,34 +69,6 @@ export function CampaignDetailPage() {
 
       <Banner errors={errors} fields={["form", "session", "campaign"]} />
 
-      {campaign?.you && options ? (
-        <PlayerIdentity key={campaign.id} campaign={campaign} options={options} onSave={saveBanner} />
-      ) : null}
-      {campaign && campaign.hexes.length > 0 ? (
-        <section className="campaign-map" aria-labelledby="territory-title">
-          <h2 id="territory-title">{t("territoryTitle")}</h2>
-          <p className="hint">{t("territoryHint")}</p>
-          <ul className="territory-legend">
-            {campaign.members.filter(member => member.color).map(member => {
-              const faction = options?.factions.find(item => item.id === member.faction)
-              return (
-                <li key={member.player_id}>
-                  <span className="territory-dot" style={{ backgroundColor: member.color }} aria-hidden="true" />
-                  <span><strong>{member.alias}</strong>{faction ? <> · {t(faction.label)}</> : null}</span>
-                </li>
-              )
-            })}
-          </ul>
-          <HexBoard
-            cells={campaign.hexes.filter(cell => cell.known)}
-            unknown={campaign.hexes.filter(cell => !cell.known)}
-            anchors={campaign.fortresses}
-            players={campaign.members.map(member => ({
-              player_id: member.player_id, color: member.color, label: member.alias,
-            }))}
-          />
-        </section>
-      ) : null}
       {campaign ? (
         <div className="detail-grid">
           <article className="detail-panel">
@@ -164,7 +116,6 @@ export function CampaignDetailPage() {
               {campaign.members.map((member) => (
                 <li key={member.player_id}>
                   <strong>{member.alias}</strong> · {member.role} · {member.status}
-                  {!member.faction ? <> · {t("identityPending")}</> : null}
                 </li>
               ))}
             </ul>

@@ -1,6 +1,4 @@
 import { readCookie } from "./cookies"
-import { isMessageKey, type MessageKey } from "./i18n/catalog"
-import { GROUND_LABEL } from "./game/hex/grounds"
 
 export type FieldErrors = Record<string, string[]>
 
@@ -169,7 +167,7 @@ export async function register(payload: Registration): Promise<{ detail: string 
   return { detail }
 }
 
-export type MapSize = number
+export type MapSize = 19 | 37 | 61
 export type Visibility = "full" | "adjacent" | "anonymous" | "total" | "charted" | "home"
 export type Victory = "armies" | "fortress" | "either"
 export type Placement = "players" | "app"
@@ -207,16 +205,6 @@ export type CampaignMember = {
   alias: string
   role: string
   status: string
-  faction: string
-  color: string
-}
-
-export type CampaignHex = ({ known: true; owner_id: string | null } & MapCell)
-  | { q: number; r: number; known: false }
-
-export type IdentityOptions = {
-  factions: { id: string; label: MessageKey; legacy: boolean }[]
-  colors: { id: string; label: MessageKey; value: string }[]
 }
 
 export type ChronicleSpot = {
@@ -252,9 +240,6 @@ export type CampaignDetail = {
   rules: CampaignRules
   members: CampaignMember[]
   joined: boolean
-  you: CampaignMember | null
-  hexes: CampaignHex[]
-  fortresses: { q: number; r: number; player_id: string }[]
   chronicle: ChronicleEntry[]
 }
 
@@ -279,6 +264,7 @@ const PHASES: readonly CampaignPhase[] = [
   "battles",
   "finished",
 ]
+const MAP_SIZES: readonly MapSize[] = [19, 37, 61]
 const VISIBILITIES: readonly Visibility[] = [
   "full",
   "adjacent",
@@ -295,9 +281,7 @@ function isPhase(value: unknown): value is CampaignPhase {
 }
 
 function isMapSize(value: unknown): value is MapSize {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 19) return false
-  const radius = (Math.sqrt(12 * value - 3) - 3) / 6
-  return Number.isInteger(radius) && radius <= 64
+  return typeof value === "number" && (MAP_SIZES as readonly number[]).includes(value)
 }
 
 function isVisibility(value: unknown): value is Visibility {
@@ -393,7 +377,7 @@ function readMember(value: unknown): CampaignMember | null {
     return null
   }
   const record = value as Record<string, unknown>
-  const { player_id, alias, role, status, faction, color } = record
+  const { player_id, alias, role, status } = record
   if (
     typeof player_id !== "string" ||
     player_id.length === 0 ||
@@ -405,32 +389,11 @@ function readMember(value: unknown): CampaignMember | null {
     role.length > 32 ||
     typeof status !== "string" ||
     status.length === 0 ||
-    status.length > 32 ||
-    typeof faction !== "string" ||
-    (faction !== "" && !isMessageKey(`race_${faction}`)) ||
-    typeof color !== "string" ||
-    (color !== "" && !/^#[0-9a-f]{6}$/.test(color))
+    status.length > 32
   ) {
     return null
   }
-  return { player_id, alias, role, status, faction, color }
-}
-
-function readCampaignHex(value: unknown): CampaignHex | null {
-  const spot = readSpot(value)
-  if (!spot || !value || typeof value !== "object" || !("known" in value)) return null
-  if (value.known === false) {
-    if ("owner_id" in value || "ground" in value || "road" in value || "bridge" in value) return null
-    return { ...spot, known: false }
-  }
-  if (value.known !== true || !("ground" in value) || typeof value.ground !== "string" ||
-    !Object.hasOwn(GROUND_LABEL, value.ground) || !("road" in value) || typeof value.road !== "boolean" ||
-    !("bridge" in value) || typeof value.bridge !== "boolean" || !("owner_id" in value) ||
-    (value.owner_id !== null && readLabel(value.owner_id, 64) === undefined)) return null
-  return {
-    ...spot, known: true, ground: value.ground, road: value.road, bridge: value.bridge,
-    owner_id: value.owner_id === null ? null : String(value.owner_id),
-  }
+  return { player_id, alias, role, status }
 }
 
 function readDetailCampaign(value: unknown): CampaignDetail | null {
@@ -469,28 +432,6 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
     }
     members.push(member)
   }
-  const you = record.you === null || !record.joined ? null : readMember(record.you)
-  const hexes: CampaignHex[] = []
-  const fortresses: CampaignDetail["fortresses"] = []
-  if (record.joined) {
-    if (!you || !Array.isArray(record.hexes) || record.hexes.length !== rules.map_size ||
-      !Array.isArray(record.fortresses) || record.fortresses.length > 8) return null
-    for (const value of record.hexes) {
-      const cell = readCampaignHex(value)
-      if (!cell || (cell.known && cell.owner_id !== null &&
-        !members.some(member => member.player_id === cell.owner_id))) return null
-      hexes.push(cell)
-    }
-    if (new Set(hexes.map(cell => `${cell.q},${cell.r}`)).size !== hexes.length) return null
-    for (const value of record.fortresses) {
-      const spot = readSpot(value)
-      if (!spot || !value || typeof value !== "object" || !("player_id" in value) ||
-        typeof value.player_id !== "string" ||
-        !members.some(member => member.player_id === value.player_id) ||
-        !hexes.some(cell => cell.q === spot.q && cell.r === spot.r && cell.known)) return null
-      fortresses.push({ ...spot, player_id: value.player_id })
-    }
-  }
   return {
     id: record.id,
     name: record.name,
@@ -500,9 +441,6 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
     rules,
     members,
     joined: record.joined,
-    you,
-    hexes,
-    fortresses,
     chronicle: record.phase === "finished" ? readChronicle(record.chronicle) : [],
   }
 }
@@ -656,44 +594,6 @@ export async function getCampaign(id: string): Promise<CampaignDetail> {
   return campaign
 }
 
-export async function identityOptions(): Promise<IdentityOptions> {
-  const data = await request("/api/campaign-identity", { method: "GET" })
-  if (!data || typeof data !== "object" || !("factions" in data) || !Array.isArray(data.factions) ||
-    !("colors" in data) || !Array.isArray(data.colors) ||
-    data.factions.length === 0 || data.factions.length > 40 ||
-    data.colors.length < 4 || data.colors.length > 16) throw new ApiError(200, {})
-  const factions = data.factions.map((value: unknown) => {
-    if (!value || typeof value !== "object" || !("id" in value) || typeof value.id !== "string" ||
-      !("legacy" in value) || typeof value.legacy !== "boolean") throw new ApiError(200, {})
-    const label = `race_${value.id}`
-    if (!isMessageKey(label)) throw new ApiError(200, {})
-    return { id: value.id, label, legacy: value.legacy }
-  })
-  const colors = data.colors.map((value: unknown) => {
-    if (!value || typeof value !== "object" || !("id" in value) || typeof value.id !== "string" ||
-      !("value" in value) || typeof value.value !== "string" ||
-      !/^#[0-9a-f]{6}$/.test(value.value)) throw new ApiError(200, {})
-    const label = `color_${value.id}`
-    if (!isMessageKey(label)) throw new ApiError(200, {})
-    return { id: value.id, label, value: value.value }
-  })
-  if (new Set(factions.map(item => item.id)).size !== factions.length ||
-    new Set(colors.map(item => item.value)).size !== colors.length) throw new ApiError(200, {})
-  return { factions, colors }
-}
-
-export async function saveIdentity(
-  id: string, revision: number, faction: string, color: string,
-): Promise<CampaignDetail> {
-  const campaign = readDetailCampaign(await request(`/api/campaigns/${encodeURIComponent(id)}/identity`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...csrfHeaders() },
-    body: JSON.stringify({ revision, faction, color }),
-  }))
-  if (!campaign) throw new ApiError(200, {})
-  return campaign
-}
-
 export type SavedMap = {
   id: string
   name: string
@@ -713,42 +613,6 @@ export type MapCell = {
 export type SavedMapDetail = SavedMap & {
   cells: MapCell[]
   anchors: { q: number; r: number }[]
-}
-
-export type MapScale = {
-  key: "small" | "medium" | "large"
-  size: MapSize
-  seats: number[]
-  recommend: number
-  home_size: number
-}
-
-export async function listMapScales(): Promise<MapScale[]> {
-  const data = await request("/api/map-scales", { method: "GET" })
-  if (!Array.isArray(data) || data.length !== 3) throw new ApiError(200, {})
-  const scales = data.map((value): MapScale => {
-    if (!value || typeof value !== "object") throw new ApiError(200, {})
-    const record = value as Record<string, unknown>
-    if (
-      (record.key !== "small" && record.key !== "medium" && record.key !== "large") ||
-      !isMapSize(record.size) || !Array.isArray(record.seats) ||
-      record.seats.length < 1 || record.seats.length > 3
-    ) throw new ApiError(200, {})
-    const seats = record.seats.map((seat: unknown) => {
-      const parsed = readInt(seat, 2, 4)
-      if (parsed === null) throw new ApiError(200, {})
-      return parsed
-    })
-    const recommend = readInt(record.recommend, 2, 4)
-    const home = readInt(record.home_size, 7, Math.floor(record.size / 2) - 1)
-    if (recommend === null || home === null || !seats.includes(recommend)) {
-      throw new ApiError(200, {})
-    }
-    return { key: record.key, size: record.size, seats, recommend, home_size: home }
-  })
-  if (new Set(scales.map(scale => scale.key)).size !== 3 ||
-    new Set(scales.map(scale => scale.size)).size !== 3) throw new ApiError(200, {})
-  return scales
 }
 
 export async function listMaps(): Promise<SavedMap[]> {

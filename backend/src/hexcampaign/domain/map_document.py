@@ -2,7 +2,6 @@
 
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex, disk
-from hexcampaign.domain.land import checked_home_size
 from hexcampaign.domain.maps import Template
 from hexcampaign.domain.rules import MAP_SIZES
 from hexcampaign.domain.terrain import Plot, checked_plot
@@ -24,7 +23,6 @@ def dump_template(template: Template) -> dict[str, object]:
         "size": template.size,
         "seats": template.seats,
         "generated": template.generated,
-        "home_size": template.home_size,
         "cells": cells,
         "anchors": [{"q": cell.q, "r": cell.r} for cell in template.anchors],
     }
@@ -56,8 +54,7 @@ def load_template(data: object) -> Template:
     if set(plots) != set(disk(size)):
         raise DomainError("rules_invalid")
     anchors = tuple(_anchor(item) for item in raw_anchors)
-    home_size = checked_home_size(data.get("home_size"), size)
-    return Template(size, seats, generated, plots, anchors, home_size)
+    return Template(size, seats, generated, plots, anchors)
 
 
 def drawn(size: int, cells: list[dict[str, object]]) -> Template:

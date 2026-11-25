@@ -20,7 +20,6 @@ from hexcampaign.domain.game import (
     seated,
 )
 from hexcampaign.domain.hexes import DISK_RADIUS, Hex, angle, disk, distance, neighbors
-from hexcampaign.domain.identity import checked_identity
 from hexcampaign.domain.land import home_radius, owned
 from hexcampaign.domain.rules import Rules, campaign_name, label, roster_text
 from hexcampaign.domain.terrain import passable
@@ -91,28 +90,12 @@ def accept_seat(game: Game, player_id: str, alias: str) -> Game:
     return bump(game)
 
 
-def choose_identity(game: Game, actor: str, faction: str, color: str) -> Game:
-    member = require_player(game, actor)
-    require_phase(game, "recruiting", "placing", "orders", "battles")
-    if member.status != "active":
-        raise DomainError("forbidden")
-    if game.phase != "recruiting" and (member.faction or member.color):
-        raise DomainError("phase_invalid")
-    faction, color = checked_identity(faction, color)
-    if any(other.player_id != actor and other.color == color for other in game.members):
-        raise DomainError("color_taken")
-    member.faction, member.color = faction, color
-    return bump(game)
-
-
 def begin(game: Game, actor: str, admin_ids: list[str], now: datetime) -> Game:
     require_owner(game, actor)
     require_phase(game, "recruiting")
     playing = seated(game)
     if len(playing) < 2 or len(playing) != game.rules.seats:
         raise DomainError("phase_invalid")
-    if game.identity_required and any(not member.faction or not member.color for member in playing):
-        raise DomainError("identity_required")
     known = {member.player_id for member in playing}
     if any(player_id not in known for player_id in admin_ids):
         raise DomainError("forbidden")
@@ -300,7 +283,7 @@ def _territory(game: Game) -> None:
             cells: set[Hex] = set()
             for fort in game.fortresses:
                 if fort.player_id == player_id:
-                    cells.update(owned(fort.at(), radius, board, count=game.home_size))
+                    cells.update(owned(fort.at(), radius, board))
             game.discovered[player_id] = cells
         _grant_surveyor(game)
         return
@@ -353,11 +336,9 @@ def _standable(game: Game, cell: Hex) -> bool:
 def _disks_overlap(game: Game, actor: str, fortress: Hex) -> bool:
     board = set(game.hexes)
     radius = home_radius(game.rules.map_size)
-    claimed = owned(fortress, radius, board, count=game.home_size)
+    claimed = owned(fortress, radius, board)
     for fort in game.fortresses:
-        if fort.player_id != actor and claimed & owned(
-            fort.at(), radius, board, count=game.home_size,
-        ):
+        if fort.player_id != actor and claimed & owned(fort.at(), radius, board):
             return True
     return False
 
@@ -367,7 +348,7 @@ def _frontier(game: Game) -> bool:
     radius = home_radius(game.rules.map_size)
     claimed: set[Hex] = set()
     for fort in game.fortresses:
-        claimed.update(owned(fort.at(), radius, board, count=game.home_size))
+        claimed.update(owned(fort.at(), radius, board))
     return len(claimed) < len(board)
 
 

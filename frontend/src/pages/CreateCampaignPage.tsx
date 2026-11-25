@@ -184,16 +184,6 @@ export function CreateCampaignPage() {
                 setMapId(value)
                 const chosen = maps.find((item) => item.id === value)
                 if (!chosen) {
-                  const plainSize =
-                    rules.map_size === 19 || rules.map_size === 37 || rules.map_size === 61
-                  const plainSight =
-                    rules.visibility === "full" ||
-                    rules.visibility === "adjacent" ||
-                    rules.visibility === "anonymous"
-                  patchRules({
-                    map_size: plainSize ? rules.map_size : 19,
-                    visibility: plainSight ? rules.visibility : "full",
-                  })
                   return
                 }
                 patchRules({
@@ -218,7 +208,6 @@ export function CreateCampaignPage() {
               name="seats"
               value={String(rules.seats)}
               hint={t("ruleSeatsHint")}
-              disabled={maps.some((item) => item.id === mapId && item.seats != null)}
               options={[
                 { value: "2", label: "2" },
                 { value: "3", label: "3" },
@@ -226,14 +215,11 @@ export function CreateCampaignPage() {
               ]}
               onChange={(value) => patchRules({ seats: Number(value) })}
             />
-            <fieldset className="choice-set" disabled={mapId !== ""}>
+            <fieldset className="choice-set">
               <legend className="label-text">{t("ruleMapSize")}</legend>
               <p className="hint">{t("ruleMapSizeHint")}</p>
               <div className="choice-grid">
-                {(mapId
-                  ? [rules.map_size]
-                  : ([19, 37, 61] as const)
-                ).map((size) => (
+                {([19, 37, 61] as const).map((size) => (
                   <button
                     key={size}
                     type="button"

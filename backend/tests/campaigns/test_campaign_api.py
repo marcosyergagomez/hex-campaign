@@ -103,56 +103,13 @@ def _started(ana, boa):
         {"revision": preview.json()["revision"]},
     )
     assert joined.status_code == 200, joined.text
-    chosen = joined
-    for client, faction, color in ((ana, "empire", "#ac454f"), (boa, "skaven", "#3974b5")):
-        chosen = _write(client, f"/api/campaigns/{campaign['id']}/identity", {
-            "revision": chosen.json()["revision"], "faction": faction, "color": color,
-        })
-        assert chosen.status_code == 200, chosen.text
     started = _write(
         ana,
         f"/api/campaigns/{campaign['id']}/start",
-        {"revision": chosen.json()["revision"], "admins": []},
+        {"revision": joined.json()["revision"], "admins": []},
     )
     assert started.status_code == 200, started.text
     return started.json()
-
-
-@pytest.mark.django_db(transaction=True)
-def test_identity_choices_are_private_writes_validated_and_persisted(clients) -> None:
-    ana, boa = clients
-    owner = _player("ana-banner@example.com", "ana_one")
-    rival = _player("boa-banner@example.com", "boa_two")
-    assert _read(ana, "/api/campaign-identity").status_code == 401
-    _login(ana, owner.email)
-    _login(boa, rival.email)
-    options = _read(ana, "/api/campaign-identity")
-    assert options.status_code == 200
-    assert any(item == {"id": "cathay", "legacy": False} for item in options.json()["factions"])
-    assert any(item == {"id": "skaven", "legacy": True} for item in options.json()["factions"])
-    created = _write(ana, "/api/campaigns", {"name": "Estandartes", "rules": RULES}).json()
-    path = f"/api/campaigns/{created['id']}"
-    identity = {"revision": created["revision"], "faction": "cathay", "color": "#ac454f"}
-    assert _write(boa, f"{path}/identity", identity).status_code == 403
-    rejected = _write(ana, f"{path}/identity", {**identity, "color": "url(https://example.com)"})
-    assert rejected.status_code == 422
-    assert _read(ana, path).json()["revision"] == created["revision"]
-    saved = _write(ana, f"{path}/identity", identity)
-    assert saved.status_code == 200, saved.text
-    read = _read(ana, path).json()
-    assert read["you"]["faction"] == "cathay"
-    assert read["members"][0]["color"] == "#ac454f"
-    assert _write(ana, f"{path}/identity", identity).status_code == 409
-    link = _write(ana, f"{path}/links", {}).json()["token"]
-    joined = _write(boa, f"/api/invitations/{link}/accept", {"revision": read["revision"]}).json()
-    missing = _write(ana, f"{path}/start", {"revision": joined["revision"]})
-    assert missing.status_code == 422
-    assert missing.json()["errors"]["campaign"] == [
-        "Todos los jugadores deben elegir raza y color antes de empezar.",
-    ]
-    duplicate = _write(boa, f"{path}/identity", {**identity, "revision": joined["revision"]})
-    assert duplicate.status_code == 422
-    assert duplicate.json()["errors"]["campaign"] == ["Ese color ya pertenece a otro jugador."]
 
 
 @pytest.mark.django_db(transaction=True)

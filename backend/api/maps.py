@@ -10,8 +10,6 @@ from api.player_gate import reader, writer
 from api.player_session import SESSION_MESSAGE, django_sync
 from apps.campaigns.atlases import list_maps, read_map, store_drawn, store_generated
 from apps.campaigns.records import CampaignError
-from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.maps import table_presets
 
 router = APIRouter()
 
@@ -58,18 +56,6 @@ class MapBody(BaseModel):
     cells: list[CellBody] | None = None
 
 
-@router.get("/api/map-scales")
-@django_sync
-def get_map_scales(request: Request) -> JSONResponse:
-    user = reader(request)
-    if isinstance(user, JSONResponse):
-        return user
-    try:
-        return JSONResponse(table_presets())
-    except DomainError as exc:
-        return _failure(CampaignError(exc.code))
-
-
 @router.get("/api/maps")
 @django_sync
 def get_maps(request: Request) -> JSONResponse:
@@ -97,8 +83,7 @@ def post_map(payload: MapBody, request: Request) -> JSONResponse:
     def action(user):
         try:
             if payload.cells is None:
-                sizes = {row["size"] for row in table_presets()}
-                if payload.seats is None or payload.size not in sizes:
+                if payload.seats is None:
                     raise CampaignError("rules_invalid")
                 row = store_generated(
                     user,
@@ -110,8 +95,8 @@ def post_map(payload: MapBody, request: Request) -> JSONResponse:
             else:
                 cells = [item.model_dump() for item in payload.cells]
                 row = store_drawn(user, payload.name, payload.size, cells)
-        except (CampaignError, DomainError) as exc:
-            return _failure(CampaignError(exc.code))
+        except CampaignError as exc:
+            return _failure(exc)
         return JSONResponse(
             {
                 "id": str(row.id),

@@ -53,9 +53,7 @@ def in_home(game: Game, viewer: str, cell: Hex) -> bool:
     board = set(game.hexes)
     radius = home_radius(game.rules.map_size)
     for fort in game.fortresses:
-        if fort.player_id == viewer and cell in owned(
-            fort.at(), radius, board, count=game.home_size,
-        ):
+        if fort.player_id == viewer and cell in owned(fort.at(), radius, board):
             return True
     return False
 
