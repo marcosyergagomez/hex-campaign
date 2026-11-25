@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from api.campaigns import router as campaign_router
 from api.guard import AccountGuard
+from api.maps import router as map_router
 from api.pages import confirm_page, result_page
 from api.player_session import router as player_session_router
 from apps.accounts.languages import normalize
@@ -40,6 +41,7 @@ api = FastAPI(
 api.add_middleware(AccountGuard)
 api.include_router(player_session_router)
 api.include_router(campaign_router)
+api.include_router(map_router)
 
 INVALID_LINK = "El enlace no es válido o ha caducado."
 CONFIRMED = "Correo confirmado."

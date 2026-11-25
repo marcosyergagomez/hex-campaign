@@ -9,7 +9,7 @@ from hexcampaign.domain.game import Game
 from hexcampaign.domain.hexes import DISK_RADIUS, Hex, disk, distance, neighbors
 from hexcampaign.domain.land import home_radius, owned, rotate
 from hexcampaign.domain.rules import MAP_SIZES
-from hexcampaign.domain.terrain import Plot
+from hexcampaign.domain.terrain import Plot, checked_plot
 
 _SIZE_OF_RADIUS = {radius: size for size, radius in DISK_RADIUS.items()}
 _ACCENTS = ("bosque", "colina", "tundra")
@@ -93,7 +93,7 @@ def _four(map_radius: int, gap: int, home: int) -> tuple[Hex, ...]:
     ring = [cell for cell in board if distance(cell, Hex(0, 0)) == map_radius]
     ring.sort()
     for sites in combinations(ring, 4):
-        if min(_span(left, right) for left, right in combinations(sites, 2)) < gap:
+        if min(distance(left, right) for left, right in combinations(sites, 2)) < gap:
             continue
         if not all(rotate(site, 3) in sites for site in sites):
             continue
@@ -103,5 +103,63 @@ def _four(map_radius: int, gap: int, home: int) -> tuple[Hex, ...]:
     raise DomainError("rules_invalid")
 
 
-def _span(left: Hex, right: Hex) -> int:
-    return distance(left, right)
+def dump_template(template: Template) -> dict[str, object]:
+    cells = [
+        {
+            "q": cell.q,
+            "r": cell.r,
+            "ground": plot.ground,
+            "road": plot.road,
+            "bridge": plot.bridge,
+        }
+        for cell, plot in sorted(template.cells.items())
+    ]
+    return {
+        "version": 1,
+        "size": template.size,
+        "seats": template.seats,
+        "generated": template.generated,
+        "cells": cells,
+        "anchors": [{"q": cell.q, "r": cell.r} for cell in template.anchors],
+    }
+
+
+def load_template(data: object) -> Template:
+    if not isinstance(data, dict) or data.get("version") != 1:
+        raise DomainError("rules_invalid")
+    size = data["size"]
+    if size not in MAP_SIZES:
+        raise DomainError("rules_invalid")
+    seats = data["seats"]
+    if seats is not None and seats not in {2, 3, 4}:
+        raise DomainError("rules_invalid")
+    generated = data["generated"]
+    if not isinstance(generated, bool):
+        raise DomainError("rules_invalid")
+    plots: dict[Hex, Plot] = {}
+    for item in data["cells"]:
+        if not isinstance(item, dict):
+            raise DomainError("rules_invalid")
+        cell = Hex(int(item["q"]), int(item["r"]))
+        if cell in plots:
+            raise DomainError("rules_invalid")
+        road = item["road"]
+        bridge = item["bridge"]
+        plots[cell] = checked_plot(item["ground"], road is True, bridge is True)
+    if set(plots) != set(disk(size)):
+        raise DomainError("rules_invalid")
+    anchors = tuple(Hex(int(item["q"]), int(item["r"])) for item in data["anchors"])
+    return Template(size, seats, generated, plots, anchors)
+
+
+def drawn(size: int, cells: list[dict[str, object]]) -> Template:
+    return load_template(
+        {
+            "version": 1,
+            "size": size,
+            "seats": None,
+            "generated": False,
+            "cells": cells,
+            "anchors": [],
+        }
+    )

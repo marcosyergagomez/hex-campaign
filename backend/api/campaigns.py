@@ -73,8 +73,14 @@ _MESSAGES = {
     "invitation_invalid": "La invitación no es válida.",
     "revision_conflict": "La campaña ha cambiado. Vuelve a leerla.",
     "campaign_limit": "Ya tienes tres campañas abiertas.",
+    "map_unknown": "No hay ningún mapa con ese identificador.",
 }
-_STATUS = {"not_found": 404, "invitation_invalid": 404, "forbidden": 403}
+_STATUS = {
+    "not_found": 404,
+    "invitation_invalid": 404,
+    "forbidden": 403,
+    "map_unknown": 404,
+}
 
 
 class RulesBody(BaseModel):
@@ -94,6 +100,8 @@ class RulesBody(BaseModel):
 class CreateBody(BaseModel):
     name: str
     rules: RulesBody
+    map_id: str | None = None
+    blind: bool = False
 
 
 class RevisionBody(BaseModel):
@@ -226,7 +234,18 @@ def get_campaigns(request: Request) -> JSONResponse:
 @django_sync
 def post_campaign(payload: CreateBody, request: Request) -> JSONResponse:
     def action(user):
-        campaign, game = create_campaign(user, payload.name, payload.rules.model_dump())
+        template = None
+        if payload.map_id:
+            from apps.campaigns.atlases import take_template
+
+            template = take_template(user, payload.map_id)
+        campaign, game = create_campaign(
+            user,
+            payload.name,
+            payload.rules.model_dump(),
+            template,
+            payload.blind,
+        )
         return _view(user, campaign, game, 201)
 
     return _run(request, action)
