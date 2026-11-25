@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from .models import Campaign, Invitation, Seat
+from .models import Campaign, CampaignMap, Invitation, Seat
 
 
 @admin.register(Campaign)
@@ -16,6 +16,13 @@ class CampaignAdmin(admin.ModelAdmin):
 class SeatAdmin(admin.ModelAdmin):
     list_display = ("alias", "role", "status", "campaign")
     search_fields = ("alias",)
+
+
+@admin.register(CampaignMap)
+class CampaignMapAdmin(admin.ModelAdmin):
+    list_display = ("name", "size", "generated", "owner", "created_at")
+    readonly_fields = ("id", "created_at")
+    search_fields = ("name",)
 
 
 @admin.register(Invitation)
