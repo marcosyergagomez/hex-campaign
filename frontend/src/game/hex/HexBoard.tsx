@@ -1,9 +1,9 @@
-import { useState } from "react"
+import { memo, useCallback, useId, useMemo, useRef } from "react"
 
 import type { MapCell } from "../../api"
 import { useI18n } from "../../i18n/language"
 import { hexCenter, hexPoints } from "./geometry"
-import { GROUND_LABEL } from "./grounds"
+import { GROUND_ART, GROUND_LABEL, isWater } from "./grounds"
 import "./board.css"
 
 const SIZE = 28
@@ -35,9 +35,29 @@ export function HexBoard({
   size?: number
 }) {
   const { t } = useI18n()
-  const [hover, setHover] = useState<string | null>(null)
+  const caption = useRef<HTMLParagraphElement>(null)
+  const label = useRef<(ground: string | null) => void>(() => {})
+  label.current = (ground) => {
+    const node = caption.current
+    if (!node) {
+      return
+    }
+    const key = ground ? GROUND_LABEL[ground] : undefined
+    node.textContent = key ? t(key) : ""
+  }
+  const onHover = useCallback((ground: string | null) => {
+    label.current(ground)
+  }, [])
+  const boardId = useId().replaceAll(":", "")
   const points = hexPoints(size)
-  const placed = cells.map((cell) => ({ ...cell, ...hexCenter(cell.q, cell.r, size) }))
+  const placed = useMemo(
+    () => cells.map((cell) => ({ ...cell, ...hexCenter(cell.q, cell.r, size) })),
+    [cells, size],
+  )
+  const forts = useMemo(
+    () => new Set(anchors.map((spot) => `${spot.q},${spot.r}`)),
+    [anchors],
+  )
   if (placed.length === 0) {
     return null
   }
@@ -46,8 +66,6 @@ export function HexBoard({
   const minY = Math.min(...placed.map((cell) => cell.y)) - pad
   const width = Math.max(...placed.map((cell) => cell.x)) - minX + pad
   const height = Math.max(...placed.map((cell) => cell.y)) - minY + pad
-  const forts = new Set(anchors.map((spot) => `${spot.q},${spot.r}`))
-  const labelKey = hover ? GROUND_LABEL[hover] : undefined
 
   return (
     <div className="hex-stage">
@@ -63,119 +81,69 @@ export function HexBoard({
             cell={cell}
             points={points}
             fort={forts.has(`${cell.q},${cell.r}`)}
-            onHover={setHover}
+            clipId={`${boardId}-${cell.q}-${cell.r}`}
+            onHover={onHover}
           />
         ))}
       </svg>
-      <p className="hex-caption">{labelKey ? t(labelKey) : ""}</p>
+      <p ref={caption} className="hex-caption" />
     </div>
   )
 }
 
-function HexTile({
+const HexTile = memo(function HexTile({
   cell,
   points,
   fort,
+  clipId,
   onHover,
 }: {
   cell: Placed
   points: string
   fort: boolean
+  clipId: string
   onHover: (ground: string | null) => void
 }) {
-  const clip = `hex-${cell.q}-${cell.r}`
+  const span = SIZE * 5
+  const driftX = ((Math.abs(cell.q * 37 + cell.r * 17) % 70) - 35)
+  const driftY = ((Math.abs(cell.q * 11 + cell.r * 41) % 70) - 35)
   return (
     <g
       transform={`translate(${cell.x} ${cell.y})`}
       onMouseEnter={() => onHover(cell.ground)}
       onMouseLeave={() => onHover(null)}
     >
-      <clipPath id={clip}>
+      <clipPath id={clipId}>
         <polygon points={points} />
       </clipPath>
-      <g clipPath={`url(#${clip})`}>
-        <polygon points={points} className={`hex-fill hex-${cell.ground}${fort ? " is-fort" : ""}`} />
-        <Face ground={cell.ground} seed={cell.q * 3 + cell.r} />
+      <g clipPath={`url(#${clipId})`}>
+        <image
+          href={GROUND_ART[cell.ground] ?? GROUND_ART.llanura}
+          x={-span / 2 + driftX}
+          y={-span / 2 + driftY}
+          width={span}
+          height={span}
+          preserveAspectRatio="xMidYMid slice"
+        />
+        {isWater(cell.ground) ? <rect className="hex-sheen" x={-SIZE} y={-SIZE} width={SIZE * 2} height={SIZE * 2} /> : null}
       </g>
-      <polygon points={points} className={`hex-fill${fort ? " is-fort" : ""}`} fill="none" />
-      {fort ? <Fortress /> : null}
+      <polygon points={points} className={`hex-edge${fort ? " is-fort" : ""}`} />
+      {fort ? (
+        <>
+          <clipPath id={`${clipId}-keep`}>
+            <circle r="11" />
+          </clipPath>
+          <image
+            className="hex-keep"
+            href="/terrain/fortaleza.jpg"
+            x={-12}
+            y={-12}
+            width={24}
+            height={24}
+            clipPath={`url(#${clipId}-keep)`}
+          />
+        </>
+      ) : null}
     </g>
   )
-}
-
-function Face({ ground, seed }: { ground: string; seed: number }) {
-  if (ground === "colina") {
-    return <path className="hex-ridge" d="M -12 4 Q 0 -6 12 5" />
-  }
-  if (ground === "bosque" || ground === "bosque_profundo") {
-    return <Trees deep={ground === "bosque_profundo"} />
-  }
-  if (ground === "montana" || ground === "montana_rocosa") {
-    return <path className="hex-peak" d="M -10 8 L -2 -8 L 4 8 M 0 8 L 8 -4 L 14 8" />
-  }
-  if (ground === "desierto") {
-    return <path className="hex-dune" d="M -14 2 Q -4 -4 6 2 T 16 1" />
-  }
-  if (ground === "campo") {
-    return <path className="hex-furrow" d="M -12 -4 H 12 M -12 2 H 12 M -12 8 H 12" />
-  }
-  if (ground === "rio" || ground === "lago" || ground === "orilla") {
-    return <Current seed={seed} lake={ground === "lago"} />
-  }
-  if (ground === "playa") {
-    return <path className="hex-foam" d="M -16 8 Q 0 2 16 8" />
-  }
-  if (ground === "pantano") {
-    return <Bubbles seed={seed} />
-  }
-  if (ground === "acantilado") {
-    return <path className="hex-peak" d="M -14 10 H 14 M -8 4 H 10 M -2 -2 H 8" />
-  }
-  return null
-}
-
-function Trees({ deep }: { deep: boolean }) {
-  const spots = deep
-    ? [[-8, 2], [0, 6], [8, 1], [-3, -6], [6, -5]]
-    : [[-6, 4], [5, 5], [0, -3]]
-  return spots.map(([x, y], index) => (
-    <path
-      key={`${x},${y}`}
-      className="hex-tree"
-      style={{ animationDelay: `${index * 0.35}s` }}
-      d={`M ${x - 3} ${y + 5} H ${x + 3} L ${x} ${y - 6} Z`}
-    />
-  ))
-}
-
-function Current({ seed, lake }: { seed: number; lake: boolean }) {
-  const turn = (Math.abs(seed) % 3) * 60
-  return (
-    <g transform={`rotate(${turn})`}>
-      <path className="hex-current" d="M -16 0 H 16" />
-      <path className="hex-current hex-current-slow" d={lake ? "M -16 6 H 16 M -16 -6 H 16" : "M -16 5 H 16"} />
-    </g>
-  )
-}
-
-function Bubbles({ seed }: { seed: number }) {
-  const spots = [
-    [-6, 2],
-    [4, -2],
-    [0, 6],
-  ]
-  return spots.map(([x, y], index) => (
-    <circle
-      key={`${x},${y}`}
-      className="hex-bubble"
-      cx={x + (seed % 2)}
-      cy={y}
-      r={1.3}
-      style={{ animationDelay: `${index * 0.8}s` }}
-    />
-  ))
-}
-
-function Fortress() {
-  return <path className="hex-fort" d="M -3 6 H 3 L 2 -2 H 5 L 0 -10 L -5 -2 H -2 Z" />
-}
+})
