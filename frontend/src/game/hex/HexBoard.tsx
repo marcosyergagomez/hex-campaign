@@ -12,15 +12,36 @@ type Spot = { q: number; r: number }
 
 type Placed = MapCell & { x: number; y: number }
 
-export function HexBoard({ cells, anchors }: { cells: MapCell[]; anchors: Spot[] }) {
+const SAMPLES = ["rio", "lago", "playa", "orilla", "pantano", "bosque", "montana", "desierto"]
+
+export function HexStrip() {
+  const cells = SAMPLES.map((ground, index) => ({
+    q: index,
+    r: 0,
+    ground,
+    road: false,
+    bridge: false,
+  }))
+  return <HexBoard cells={cells} anchors={[]} />
+}
+
+export function HexBoard({
+  cells,
+  anchors,
+  size = SIZE,
+}: {
+  cells: MapCell[]
+  anchors: Spot[]
+  size?: number
+}) {
   const { t } = useI18n()
   const [hover, setHover] = useState<string | null>(null)
-  const points = hexPoints(SIZE)
-  const placed = cells.map((cell) => ({ ...cell, ...hexCenter(cell.q, cell.r, SIZE) }))
+  const points = hexPoints(size)
+  const placed = cells.map((cell) => ({ ...cell, ...hexCenter(cell.q, cell.r, size) }))
   if (placed.length === 0) {
     return null
   }
-  const pad = SIZE + 6
+  const pad = size + 6
   const minX = Math.min(...placed.map((cell) => cell.x)) - pad
   const minY = Math.min(...placed.map((cell) => cell.y)) - pad
   const width = Math.max(...placed.map((cell) => cell.x)) - minX + pad
