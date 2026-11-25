@@ -23,6 +23,11 @@ class March:
 
 def check_order(game: Game, player_id: str, paths: dict[str, tuple[Hex, ...]]) -> None:
     """Reject what this player can already see, including two of their armies sharing a hex."""
+    if game.plots is not None:
+        from hexcampaign.domain.terrain_order import check_terrain_order
+
+        check_terrain_order(game, player_id, paths)
+        return
     own = [army for army in game.armies if army.player_id == player_id and not army.destroyed]
     if {army.id for army in own} != set(paths) or any(army.at() is None for army in own):
         raise DomainError("order_illegal")
