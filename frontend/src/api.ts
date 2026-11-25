@@ -168,7 +168,7 @@ export async function register(payload: Registration): Promise<{ detail: string 
 }
 
 export type MapSize = 19 | 37 | 61
-export type Visibility = "full" | "adjacent" | "anonymous"
+export type Visibility = "full" | "adjacent" | "anonymous" | "total" | "charted" | "home"
 export type Victory = "armies" | "fortress" | "either"
 export type Placement = "players" | "app"
 export type CampaignPhase =
@@ -265,7 +265,14 @@ const PHASES: readonly CampaignPhase[] = [
   "finished",
 ]
 const MAP_SIZES: readonly MapSize[] = [19, 37, 61]
-const VISIBILITIES: readonly Visibility[] = ["full", "adjacent", "anonymous"]
+const VISIBILITIES: readonly Visibility[] = [
+  "full",
+  "adjacent",
+  "anonymous",
+  "total",
+  "charted",
+  "home",
+]
 const VICTORIES: readonly Victory[] = ["armies", "fortress", "either"]
 const PLACEMENTS: readonly Placement[] = ["players", "app"]
 
@@ -554,6 +561,7 @@ export async function listCampaigns(): Promise<CampaignSummary[]> {
 export async function createCampaign(
   name: string,
   rules: CampaignRules,
+  map?: { id: string; blind: boolean },
 ): Promise<CampaignDetail> {
   const campaign = readDetailCampaign(
     await request("/api/campaigns", {
@@ -562,7 +570,12 @@ export async function createCampaign(
         "Content-Type": "application/json",
         ...csrfHeaders(),
       },
-      body: JSON.stringify({ name, rules }),
+      body: JSON.stringify({
+        name,
+        rules,
+        map_id: map?.id ?? null,
+        blind: map?.blind ?? false,
+      }),
     }),
   )
   if (!campaign) {
@@ -580,3 +593,114 @@ export async function getCampaign(id: string): Promise<CampaignDetail> {
   }
   return campaign
 }
+
+export type SavedMap = {
+  id: string
+  name: string
+  size: MapSize
+  seats: number | null
+  generated: boolean
+}
+
+export type MapCell = {
+  q: number
+  r: number
+  ground: string
+  road: boolean
+  bridge: boolean
+}
+
+export type SavedMapDetail = SavedMap & {
+  cells: MapCell[]
+  anchors: { q: number; r: number }[]
+}
+
+export async function listMaps(): Promise<SavedMap[]> {
+  const data = await request("/api/maps", { method: "GET" })
+  if (!Array.isArray(data) || data.length > 100) {
+    throw new ApiError(200, {})
+  }
+  return data.map(readSavedMap)
+}
+
+export async function generateMap(name: string, size: MapSize, seats: number): Promise<SavedMap> {
+  return readSavedMap(
+    await request("/api/maps", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ name, size, seats }),
+    }),
+  )
+}
+
+export async function getMap(id: string): Promise<SavedMapDetail> {
+  const data = await request(`/api/maps/${encodeURIComponent(id)}`, { method: "GET" })
+  const summary = readSavedMap(data)
+  if (!data || typeof data !== "object") {
+    throw new ApiError(200, {})
+  }
+  const record = data as Record<string, unknown>
+  if (!Array.isArray(record.cells) || !Array.isArray(record.anchors)) {
+    throw new ApiError(200, {})
+  }
+  const cells: MapCell[] = []
+  for (const item of record.cells) {
+    if (!item || typeof item !== "object") {
+      throw new ApiError(200, {})
+    }
+    const cell = item as Record<string, unknown>
+    const q = readInt(cell.q, -64, 64)
+    const r = readInt(cell.r, -64, 64)
+    if (q === null || r === null || typeof cell.ground !== "string") {
+      throw new ApiError(200, {})
+    }
+    cells.push({
+      q,
+      r,
+      ground: cell.ground,
+      road: cell.road === true,
+      bridge: cell.bridge === true,
+    })
+  }
+  const anchors: { q: number; r: number }[] = []
+  for (const item of record.anchors) {
+    if (!item || typeof item !== "object") {
+      throw new ApiError(200, {})
+    }
+    const spot = item as Record<string, unknown>
+    const q = readInt(spot.q, -64, 64)
+    const r = readInt(spot.r, -64, 64)
+    if (q === null || r === null) {
+      throw new ApiError(200, {})
+    }
+    anchors.push({ q, r })
+  }
+  return { ...summary, cells, anchors }
+}
+
+function readSavedMap(value: unknown): SavedMap {
+  if (!value || typeof value !== "object") {
+    throw new ApiError(200, {})
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.id !== "string" ||
+    typeof record.name !== "string" ||
+    !isMapSize(record.size) ||
+    typeof record.generated !== "boolean"
+  ) {
+    throw new ApiError(200, {})
+  }
+  const seats = record.seats === null ? null : readInt(record.seats, 2, 4)
+  if (record.seats !== null && seats === null) {
+    throw new ApiError(200, {})
+  }
+  return {
+    id: record.id,
+    name: record.name,
+    size: record.size,
+    seats,
+    generated: record.generated,
+  }
+}
+

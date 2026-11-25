@@ -4,8 +4,10 @@ import { Link, useNavigate } from "react-router-dom"
 import {
   createCampaign,
   DEFAULT_CAMPAIGN_RULES,
+  listMaps,
   type CampaignRules,
   type Placement,
+  type SavedMap,
   type Victory,
   type Visibility,
 } from "../api"
@@ -23,12 +25,28 @@ export function CreateCampaignPage() {
   const [step, setStep] = useState<Step>(1)
   const [name, setName] = useState("")
   const [rules, setRules] = useState<CampaignRules>(DEFAULT_CAMPAIGN_RULES)
+  const [maps, setMaps] = useState<SavedMap[]>([])
+  const [mapId, setMapId] = useState("")
+  const [blind, setBlind] = useState(true)
   const [pending, setPending] = useState(false)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
 
   useEffect(() => {
     mounted.current = true
+    let current = true
+    listMaps()
+      .then((rows) => {
+        if (current) {
+          setMaps(rows)
+        }
+      })
+      .catch(() => {
+        if (current) {
+          setMaps([])
+        }
+      })
     return () => {
+      current = false
       mounted.current = false
     }
   }, [])
@@ -76,7 +94,20 @@ export function CreateCampaignPage() {
     setPending(true)
     setErrors({})
     try {
-      const created = await createCampaign(name.trim(), rules)
+      const chosen = maps.find((item) => item.id === mapId)
+      const next = chosen
+        ? {
+            ...rules,
+            map_size: chosen.size,
+            seats: chosen.seats ?? rules.seats,
+            visibility: terrainVisibility(rules.visibility),
+          }
+        : rules
+      const created = await createCampaign(
+        name.trim(),
+        next,
+        chosen && chosen.generated ? { id: chosen.id, blind } : chosen ? { id: chosen.id, blind: false } : undefined,
+      )
       if (!mounted.current) {
         return
       }
@@ -127,7 +158,7 @@ export function CreateCampaignPage() {
       </ol>
 
       <form className="wizard-panel" onSubmit={onSubmit} noValidate>
-        <Banner errors={errors} fields={["form", "campaign", "rules", "origin", "csrf", "session"]} />
+        <Banner errors={errors} fields={["form", "campaign", "map", "rules", "origin", "csrf", "session"]} />
 
         {step === 1 ? (
           <div className="wizard-fields">
@@ -140,6 +171,38 @@ export function CreateCampaignPage() {
               error={errors.name}
               onChange={setName}
             />
+            <SelectField
+              label={t("mapsTitle")}
+              name="map"
+              value={mapId}
+              hint={t("mapsLead")}
+              options={[
+                { value: "", label: t("mapNone") },
+                ...maps.map((item) => ({ value: item.id, label: item.name })),
+              ]}
+              onChange={(value) => {
+                setMapId(value)
+                const chosen = maps.find((item) => item.id === value)
+                if (!chosen) {
+                  return
+                }
+                patchRules({
+                  map_size: chosen.size,
+                  seats: chosen.seats ?? rules.seats,
+                  visibility: terrainVisibility(rules.visibility),
+                })
+              }}
+            />
+            {maps.some((item) => item.id === mapId && item.generated) ? (
+              <label className="check-line">
+                <input
+                  type="checkbox"
+                  checked={blind}
+                  onChange={(event) => setBlind(event.target.checked)}
+                />
+                {t("mapBlind")}
+              </label>
+            ) : null}
             <SelectField
               label={t("ruleSeats")}
               name="seats"
@@ -213,12 +276,17 @@ export function CreateCampaignPage() {
               <legend className="label-text">{t("ruleVisibility")}</legend>
               <p className="hint">{t("ruleVisibilityHint")}</p>
               <div className="choice-grid choice-grid-wide">
-                {(
-                  [
-                    ["full", "visibilityFull"],
-                    ["adjacent", "visibilityAdjacent"],
-                    ["anonymous", "visibilityAnonymous"],
-                  ] as const
+                {(mapId
+                  ? ([
+                      ["total", "visibilityTotal"],
+                      ["charted", "visibilityCharted"],
+                      ["home", "visibilityHome"],
+                    ] as const)
+                  : ([
+                      ["full", "visibilityFull"],
+                      ["adjacent", "visibilityAdjacent"],
+                      ["anonymous", "visibilityAnonymous"],
+                    ] as const)
                 ).map(([value, labelKey]) => (
                   <button
                     key={value}
@@ -335,13 +403,26 @@ function dayOptions() {
 }
 
 function visibilityKey(value: Visibility) {
-  if (value === "full") {
-    return "visibilityFull" as const
+  if (value === "full" || value === "total") {
+    return value === "total" ? ("visibilityTotal" as const) : ("visibilityFull" as const)
+  }
+  if (value === "charted") {
+    return "visibilityCharted" as const
+  }
+  if (value === "home") {
+    return "visibilityHome" as const
   }
   if (value === "adjacent") {
     return "visibilityAdjacent" as const
   }
   return "visibilityAnonymous" as const
+}
+
+function terrainVisibility(value: Visibility): Visibility {
+  if (value === "total" || value === "charted" || value === "home") {
+    return value
+  }
+  return "home"
 }
 
 function victoryKey(value: Victory) {
