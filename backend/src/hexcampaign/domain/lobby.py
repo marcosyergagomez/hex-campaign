@@ -44,9 +44,17 @@ def change_rules(game: Game, actor: str, name: str, rules: Rules) -> Game:
     require_phase(game, "recruiting")
     if rules.seats > game.rules.seats or rules.seats < len(seated(game)):
         raise DomainError("rules_invalid")
+    if game.plots is not None:
+        if rules.map_size != game.rules.map_size:
+            raise DomainError("rules_invalid")
+        if rules.visibility not in {"total", "charted", "home"}:
+            raise DomainError("rules_invalid")
+        if game.anchors and rules.seats != len(game.anchors):
+            raise DomainError("rules_invalid")
     game.name = campaign_name(name)
     game.rules = rules
-    game.hexes = list(disk(rules.map_size))
+    if game.plots is None:
+        game.hexes = list(disk(rules.map_size))
     remember(game, "rules_changed", player_id=actor)
     return bump(game)
 

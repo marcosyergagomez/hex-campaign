@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import Game
 from hexcampaign.domain.hexes import Hex, distance
+from hexcampaign.domain.occupy import who_can_leave, without_own_stack
 from hexcampaign.domain.sight import sees_army
 
 
@@ -94,7 +95,7 @@ def march(
 
 def _step_all(intended, position, remaining, trails, owners, stopped, contacts) -> None:
     """One simultaneous step. Someone who leaves a hex does not block it."""
-    moving = _who_can_leave(intended, position, owners, stopped)
+    moving = who_can_leave(intended, position, owners, stopped)
     for army_id in intended:
         if army_id not in moving:
             stopped.add(army_id)
@@ -104,7 +105,7 @@ def _step_all(intended, position, remaining, trails, owners, stopped, contacts) 
     for army_id in moving:
         groups.setdefault(intended[army_id], []).append(army_id)
     for dest, group in groups.items():
-        entering = _without_own_stack(group, owners)
+        entering = without_own_stack(group, owners)
         for army_id in group:
             if army_id not in entering:
                 stopped.add(army_id)
@@ -123,38 +124,6 @@ def _step_all(intended, position, remaining, trails, owners, stopped, contacts) 
         if fight:
             contacts.append(_contact((*entering, *holders), dest))
     _fights_on_a_swap(origin, position, owners, remaining, stopped, contacts)
-
-
-def _who_can_leave(intended, position, owners, stopped) -> set[str]:
-    active = set(intended)
-    while True:
-        blocked = {
-            army_id
-            for army_id, dest in intended.items()
-            if army_id in active
-            and _hex_stays_blocked(army_id, dest, active, position, owners, stopped)
-        }
-        if not blocked:
-            return active
-        active -= blocked
-
-
-def _hex_stays_blocked(army_id, dest, active, position, owners, stopped) -> bool:
-    for other, cell in position.items():
-        if other == army_id or cell != dest or other in active:
-            continue
-        if owners[other] == owners[army_id] or other in stopped:
-            return True
-    return False
-
-
-def _without_own_stack(group: list[str], owners: dict[str, str]) -> list[str]:
-    crowded = {
-        army_id
-        for army_id in group
-        if sum(owners[other] == owners[army_id] for other in group) > 1
-    }
-    return [army_id for army_id in group if army_id not in crowded]
 
 
 def _arrive(position, trails, remaining, stopped, army_id, dest, *, fight: bool) -> None:

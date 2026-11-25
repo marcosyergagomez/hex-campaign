@@ -18,7 +18,7 @@ def check_terrain_order(game: Game, player_id: str, paths: dict[str, tuple[Hex, 
     blocked.difference_update(army.at() for army in own if army.at() is not None)
     for army in own:
         path = paths[army.id]
-        if len(path) > 8:
+        if len(path) > len(board):
             raise DomainError("order_illegal")
         previous = army.at()
         assert previous is not None
@@ -45,6 +45,24 @@ def check_terrain_order(game: Game, player_id: str, paths: dict[str, tuple[Hex, 
         if army.at() is not None
     ]
     moved = walk(walkers, plots, board)
+    for army in own:
+        assert army.at() is not None
+        solo = walk(
+            [
+                Walker(
+                    army.id,
+                    army.player_id,
+                    army.at(),
+                    list(paths[army.id]),
+                    game.rules.movement,
+                    army.paid,
+                )
+            ],
+            plots,
+            board,
+        )
+        if moved.positions[army.id] != solo.positions[army.id]:
+            raise DomainError("order_illegal")
     occupied: dict[Hex, str] = {}
     for army_id, cell in moved.positions.items():
         if cell in occupied:

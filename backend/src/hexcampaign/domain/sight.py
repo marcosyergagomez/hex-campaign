@@ -14,6 +14,8 @@ def sees_army(game: Game, viewer: str, army: Army) -> bool:
     if game.rules.visibility in {"full", "total"}:
         return True
     cell = Hex(army.q, army.r)
+    if game.plots is not None and game.rules.visibility not in {"total", "charted", "home"}:
+        return cell in game.discovered.get(viewer, set()) and in_home(game, viewer, cell)
     if in_home(game, viewer, cell):
         return True
     if game.plots is None and cell not in game.discovered.get(viewer, set()):

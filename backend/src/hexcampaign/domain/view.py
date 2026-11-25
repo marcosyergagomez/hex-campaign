@@ -113,8 +113,10 @@ def _armies(game: Game, viewer: str) -> list[dict[str, object]]:
 
 def _fortresses(game: Game, viewer: str) -> list[dict[str, object]]:
     shown: list[dict[str, object]] = []
+    live: set[Hex] = set()
     for fort in game.fortresses:
         cell = Hex(fort.q, fort.r)
+        live.add(cell)
         if fort.player_id != viewer and not known_hex(game, viewer, cell):
             continue
         visible = _hold_visible(game, viewer, fort)
@@ -127,7 +129,25 @@ def _fortresses(game: Game, viewer: str) -> list[dict[str, object]]:
                 "hold": fort.hold if visible else 0,
             }
         )
+    shown.extend(_remembered_fortresses(game, viewer, live))
     return shown
+
+
+def _remembered_fortresses(game: Game, viewer: str, live: set[Hex]) -> list[dict[str, object]]:
+    if game.plots is None:
+        return []
+    remembered: list[dict[str, object]] = []
+    for key, owner in game.fort_memory.get(viewer, {}).items():
+        if not owner:
+            continue
+        q_text, r_text = key.split(",")
+        cell = Hex(int(q_text), int(r_text))
+        if cell in live or _looking(game, viewer, cell) or not known_hex(game, viewer, cell):
+            continue
+        remembered.append(
+            {"player_id": owner, "q": cell.q, "r": cell.r, "holder_id": None, "hold": 0}
+        )
+    return remembered
 
 
 def _show_battle(game: Game, battle, viewer: str, staff: bool) -> bool:

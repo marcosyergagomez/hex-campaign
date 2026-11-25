@@ -9,10 +9,12 @@ from hexcampaign.domain.clock_march import Walker, walk
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.land import owned, rotate
-from hexcampaign.domain.lobby import accept_seat, begin, create_game
+from hexcampaign.domain.lobby import accept_seat, begin, change_rules, create_game
 from hexcampaign.domain.maps import generate, lay
 from hexcampaign.domain.rules import rules_from
+from hexcampaign.domain.sight import remember_fort
 from hexcampaign.domain.terrain import HOME_RADIUS, Plot, checked_plot, exit_cost, gaze_from
+from hexcampaign.domain.turn import lock_orders
 from hexcampaign.domain.view import project
 
 
@@ -207,6 +209,52 @@ def test_a_player_who_looked_at_the_generated_map_knows_every_hex() -> None:
     begin(game, "ana", [], NOW)
     assert game.discovered["ana"] == set(game.hexes)
     assert len(game.discovered["boa"]) < len(game.hexes)
+
+
+def test_a_road_keeps_paying_for_the_hexes_after_the_eighth() -> None:
+    cells = [Hex(index, 0) for index in range(10)]
+    plots = {cell: Plot("llanura", road=True) for cell in cells}
+    walker = Walker("a", "p", cells[0], cells[1:], budget=1, paid=0)
+    moved = walk([walker], plots, set(plots))
+    assert moved.positions["a"] == cells[-1]
+
+
+def test_changing_rules_cannot_detach_the_ground() -> None:
+    game = create_game("Norte", _table(), "ana", "Ana")
+    lay(game, generate(19, 2, random.Random(1)), surveyor=None)
+    with pytest.raises(DomainError):
+        change_rules(game, "ana", "Norte", _table(map_size=37))
+    with pytest.raises(DomainError):
+        change_rules(game, "ana", "Norte", _table(visibility="adjacent"))
+    change_rules(game, "ana", "Norte", _table(hold_turns=4))
+    assert game.plots is not None
+    assert len(game.hexes) == 19
+    assert game.rules.hold_turns == 4
+
+
+def test_two_armies_of_one_player_cannot_lock_the_same_hex() -> None:
+    game = create_game("Norte", _table(armies=2), "ana", "Ana")
+    lay(game, generate(19, 2, random.Random(1)), surveyor=None)
+    accept_seat(game, "boa", "Boa")
+    begin(game, "ana", [], NOW)
+    own = [army for army in game.armies if army.player_id == "ana"]
+    own[0].q, own[0].r = 0, 0
+    own[1].q, own[1].r = 0, 1
+    with pytest.raises(DomainError):
+        lock_orders(game, "ana", {own[0].id: (Hex(1, 0),), own[1].id: (Hex(1, 0),)}, NOW)
+
+
+def test_a_seen_fortress_stays_until_the_player_looks_again() -> None:
+    game = create_game("Norte", _table(), "ana", "Ana")
+    lay(game, generate(19, 2, random.Random(1)), surveyor=None)
+    accept_seat(game, "boa", "Boa")
+    begin(game, "ana", [], NOW)
+    fort = next(item for item in game.fortresses if item.player_id == "boa")
+    game.discovered["ana"].add(fort.at())
+    remember_fort(game, "ana", fort.at())
+    game.fortresses = [item for item in game.fortresses if item.player_id != "boa"]
+    view = project(game, "ana", NOW)
+    assert any(item["player_id"] == "boa" for item in view["fortresses"])
 
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)

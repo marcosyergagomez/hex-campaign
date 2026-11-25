@@ -47,9 +47,8 @@ export function MapsPage() {
     setErrors({})
     try {
       const created = await generateMap(name.trim(), size, seats)
-      const detail = await getMap(created.id)
       setMaps((current) => [created, ...current.filter((item) => item.id !== created.id)])
-      setChart(detail)
+      setChart(null)
       setName("")
     } catch (error) {
       setErrors(presentError(error, "rulesInvalid"))

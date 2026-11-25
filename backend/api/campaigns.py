@@ -7,17 +7,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from api.player_session import (
-    CSRF_COOKIE,
-    CSRF_HEADER,
-    CSRF_MESSAGE,
-    ORIGIN_MESSAGE,
-    SESSION_COOKIE,
-    SESSION_MESSAGE,
-    django_sync,
-    same_origin,
-)
-from apps.accounts.sessions import csrf_matches, load_session
+from api.player_gate import reader as _reader
+from api.player_gate import writer as _writer
+from api.player_session import SESSION_MESSAGE, django_sync
 from apps.campaigns.records import (
     CampaignError,
     RevisionConflict,
@@ -170,28 +162,6 @@ def _failure(exc: CampaignError) -> JSONResponse:
     status = _STATUS.get(exc.code, 422)
     message = _MESSAGES.get(exc.code, _MESSAGES["rules_invalid"])
     return _errors(status, "campaign", message)
-
-
-def _reader(request: Request):
-    session = load_session(request.cookies.get(SESSION_COOKIE, ""))
-    if session is None:
-        return _errors(401, "session", SESSION_MESSAGE)
-    return session.user
-
-
-def _writer(request: Request):
-    if not same_origin(request):
-        return _errors(403, "origin", ORIGIN_MESSAGE)
-    session = load_session(request.cookies.get(SESSION_COOKIE, ""))
-    if session is None:
-        return _errors(401, "session", SESSION_MESSAGE)
-    if not csrf_matches(
-        session,
-        request.headers.get(CSRF_HEADER, ""),
-        request.cookies.get(CSRF_COOKIE, ""),
-    ):
-        return _errors(403, "csrf", CSRF_MESSAGE)
-    return session.user
 
 
 def _run(request: Request, action):
