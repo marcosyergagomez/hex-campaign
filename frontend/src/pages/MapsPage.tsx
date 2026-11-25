@@ -9,7 +9,7 @@ import {
   type SavedMap,
   type SavedMapDetail,
 } from "../api"
-import { HexBoard } from "../game/hex/HexBoard"
+import { HexBoard, HexStrip } from "../game/hex/HexBoard"
 import { Banner, Field, SelectField } from "../form"
 import { useI18n } from "../i18n/language"
 import { presentError } from "../presentError"
@@ -120,6 +120,7 @@ export function MapsPage() {
           </button>
         </form>
         <div className="map-studio-board">
+          <HexStrip />
           {chart ? (
             <HexBoard cells={chart.cells} anchors={chart.anchors} />
           ) : (
