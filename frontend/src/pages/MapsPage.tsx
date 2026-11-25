@@ -9,9 +9,17 @@ import {
   type SavedMap,
   type SavedMapDetail,
 } from "../api"
+import { HexBoard } from "../game/hex/HexBoard"
 import { Banner, Field, SelectField } from "../form"
 import { useI18n } from "../i18n/language"
 import { presentError } from "../presentError"
+import "../game/hex/board.css"
+
+const TABLES: { size: MapSize; label: "tableSmall" | "tableMedium" | "tableLarge" }[] = [
+  { size: 19, label: "tableSmall" },
+  { size: 37, label: "tableMedium" },
+  { size: 61, label: "tableLarge" },
+]
 
 export function MapsPage() {
   const { t } = useI18n()
@@ -67,7 +75,7 @@ export function MapsPage() {
   }
 
   return (
-    <section className="wizard">
+    <section className="map-studio">
       <header className="stage stage-short">
         <img className="stage-photo" src="/campaign-seal.jpg" alt="" />
         <div className="stage-copy">
@@ -79,9 +87,9 @@ export function MapsPage() {
           </Link>
         </div>
       </header>
-      <form className="wizard-panel" onSubmit={onSubmit}>
-        <Banner errors={errors} fields={["form", "map", "rules", "name"]} />
-        <div className="wizard-fields">
+      <div className="map-studio-body">
+        <form className="wizard-panel map-studio-form" onSubmit={onSubmit}>
+          <Banner errors={errors} fields={["form", "map", "rules", "name"]} />
           <Field label={t("mapName")} name="map-name" value={name} onChange={setName} />
           <SelectField
             label={t("mapSeats")}
@@ -94,66 +102,50 @@ export function MapsPage() {
             ]}
             onChange={(value) => setSeats(Number(value))}
           />
-          <div className="choice-grid">
-            {([19, 37, 61] as const).map((option) => (
+          <div className="table-picks">
+            {TABLES.map((table) => (
               <button
-                key={option}
+                key={table.size}
                 type="button"
-                className={size === option ? "choice is-selected" : "choice"}
-                onClick={() => setSize(option)}
+                className={size === table.size ? "table-pick is-selected" : "table-pick"}
+                onClick={() => setSize(table.size)}
               >
-                {option}
+                <span>{t(table.label)}</span>
+                <strong>{table.size}</strong>
               </button>
             ))}
           </div>
           <button type="submit" disabled={pending || name.trim().length === 0}>
             {pending ? t("generatingMap") : t("generateMap")}
           </button>
+        </form>
+        <div className="map-studio-board">
+          {chart ? (
+            <HexBoard cells={chart.cells} anchors={chart.anchors} />
+          ) : (
+            <div className="hex-stage hex-stage-empty">
+              <p className="hex-caption">{t("mapsLead")}</p>
+            </div>
+          )}
+          <ul className="map-strip">
+            {maps.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className={chart?.id === item.id ? "map-chip is-selected" : "map-chip"}
+                  onClick={() => openMap(item.id)}
+                >
+                  <span>{item.name}</span>
+                  <small>
+                    {item.size}
+                    {item.seats ? ` · ${item.seats}` : ""}
+                  </small>
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
-      </form>
-      <ul className="campaign-list">
-        {maps.map((item) => (
-          <li key={item.id}>
-            <button type="button" className="campaign-card" onClick={() => openMap(item.id)}>
-              <span className="campaign-card-body">
-                <span className="campaign-card-name">{item.name}</span>
-                <span className="campaign-card-meta">
-                  {item.size}
-                  {item.seats ? ` · ${item.seats}` : ""}
-                </span>
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      {chart ? <Atlas chart={chart} /> : null}
+      </div>
     </section>
-  )
-}
-
-function Atlas({ chart }: { chart: SavedMapDetail }) {
-  const forts = new Set(chart.anchors.map((spot) => `${spot.q},${spot.r}`))
-  const placed = chart.cells.map((cell) => ({
-    cell,
-    x: (cell.q + cell.r / 2) * 46,
-    y: cell.r * 40,
-  }))
-  const minX = Math.min(...placed.map((item) => item.x))
-  const minY = Math.min(...placed.map((item) => item.y))
-  const width = Math.max(...placed.map((item) => item.x)) - minX + 78
-  const height = Math.max(...placed.map((item) => item.y)) - minY + 48
-  return (
-    <div className="atlas" style={{ width, height }}>
-      {placed.map(({ cell, x, y }) => (
-        <span
-          key={`${cell.q},${cell.r}`}
-          className={forts.has(`${cell.q},${cell.r}`) ? "atlas-cell is-fort" : "atlas-cell"}
-          style={{ left: x - minX, top: y - minY }}
-          title={cell.ground}
-        >
-          {cell.ground}
-        </span>
-      ))}
-    </div>
   )
 }
