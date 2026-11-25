@@ -728,3 +728,32 @@ button:disabled {
     width: 100%;
   }
 }
+
+.atlas {
+  position: relative;
+  margin: 18px 0 32px;
+}
+
+.atlas-cell {
+  position: absolute;
+  width: 74px;
+  height: 36px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.62rem;
+  line-height: 36px;
+  text-align: center;
+}
+
+.atlas-cell.is-fort {
+  border-color: var(--gold);
+  color: var(--ink);
+}
+
+.check-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+}

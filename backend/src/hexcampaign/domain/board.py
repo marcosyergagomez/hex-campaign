@@ -16,7 +16,13 @@ def capture(game: Game) -> dict[str, object]:
         "orders_opened_at": game.orders_opened_at,
         "winners": list(game.winners),
         "armies": [
-            {"id": army.id, "q": army.q, "r": army.r, "destroyed": army.destroyed}
+            {
+                "id": army.id,
+                "q": army.q,
+                "r": army.r,
+                "destroyed": army.destroyed,
+                "paid": army.paid,
+            }
             for army in game.armies
         ],
         "fortresses": [
@@ -46,6 +52,7 @@ def capture(game: Game) -> dict[str, object]:
         ],
         "battle_ids": [battle.id for battle in game.battles],
         "previous": copy.deepcopy(game.previous),
+        "fort_memory": copy.deepcopy(game.fort_memory),
     }
 
 
@@ -60,6 +67,7 @@ def restore(game: Game, board: dict) -> None:
         army.q = saved["q"]
         army.r = saved["r"]
         army.destroyed = saved["destroyed"]
+        army.paid = saved.get("paid", 0)
     saved_forts = {item["player_id"]: item for item in board["fortresses"]}
     for fort in game.fortresses:
         saved = saved_forts.get(fort.player_id)
@@ -109,3 +117,5 @@ def restore(game: Game, board: dict) -> None:
     game.events.append({"turn": board["turn"], "code": "reverted"})
     del game.events[:-30]
     game.previous = board["previous"]
+    if "fort_memory" in board:
+        game.fort_memory = copy.deepcopy(board["fort_memory"])

@@ -96,3 +96,29 @@ class Invitation(models.Model):
 
     def __str__(self) -> str:
         return f"{self.campaign_id} {self.created_at:%Y-%m-%d}"
+
+
+class CampaignMap(models.Model):
+    """A reusable picture of the ground. A started campaign keeps its own copy."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="campaign_maps",
+    )
+    name = models.CharField(max_length=120)
+    size = models.PositiveSmallIntegerField()
+    seats = models.PositiveSmallIntegerField(null=True, blank=True)
+    generated = models.BooleanField(default=False)
+    document = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["owner", "created_at"], name="campaign_map_owner"),
+        ]
+
+    def __str__(self) -> str:
+        return self.name

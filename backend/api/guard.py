@@ -105,6 +105,8 @@ def _error_field(path: str) -> str:
         return "credentials"
     if normalized.startswith("/api/campaigns") or normalized.startswith("/api/invitations"):
         return "campaign"
+    if normalized.startswith("/api/maps"):
+        return "map"
     return "email"
 
 
@@ -128,6 +130,8 @@ def _body_limit(path: str) -> int | None:
     if path in _BODY_LIMITED:
         return _ACCOUNT_BODY
     if path.startswith("/api/campaigns") or path.startswith("/api/invitations"):
+        return _CAMPAIGN_BODY
+    if path.startswith("/api/maps"):
         return _CAMPAIGN_BODY
     return None
 

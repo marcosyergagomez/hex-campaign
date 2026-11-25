@@ -159,6 +159,19 @@ export const en = {
   chronicleHoldLost: "The fortress of {owner} was left empty.",
   chronicleWinners: "The campaign ended. {names} won.",
   chronicleNoWinner: "The campaign ended. Nobody won.",
+  mapsNav: "Maps",
+  mapsTitle: "Maps",
+  mapsLead: "Generate a symmetric table, or open one you already saved.",
+  mapName: "Map name",
+  mapSeats: "Seats",
+  generateMap: "Generate map",
+  generatingMap: "Generating…",
+  mapBlind: "Do not look at the generated map",
+  mapNone: "No saved map",
+  visibilityTotal: "Everything visible",
+  visibilityCharted: "The map is known, armies stay in fog",
+  visibilityHome: "Only your territory",
+  mapUnknown: "There is no map with that identifier.",
 } as const
 
 export type MessageKey = keyof typeof en

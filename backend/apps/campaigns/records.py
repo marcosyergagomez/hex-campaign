@@ -41,7 +41,13 @@ OPEN_PHASES = ("recruiting", "placing", "orders", "battles")
 OPEN_CAMPAIGN_LIMIT = 3
 
 
-def create_campaign(user, name: str, rules: dict) -> tuple[Campaign, Game]:
+def create_campaign(
+    user,
+    name: str,
+    rules: dict,
+    template=None,
+    blind: bool = False,
+) -> tuple[Campaign, Game]:
     try:
         parsed = rules_from(rules)
     except DomainError as exc:
@@ -53,6 +59,11 @@ def create_campaign(user, name: str, rules: dict) -> tuple[Campaign, Game]:
             raise CampaignError("campaign_limit")
         try:
             game = create_game(name, parsed, str(account.pk), account.alias)
+            if template is not None:
+                from hexcampaign.domain.maps import lay
+
+                surveyor = None if template.generated and blind else str(account.pk)
+                lay(game, template, surveyor)
         except DomainError as exc:
             raise CampaignError(exc.code) from exc
         campaign = Campaign.objects.create(
