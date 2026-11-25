@@ -17,8 +17,6 @@ from apps.accounts.throttle import account_posts
 
 _ACCOUNT_BODY = 4096
 _CAMPAIGN_BODY = 8192
-# Drawn maps send every hex, including previously saved 817-cell boards.
-_MAP_BODY = 98304
 _BODY_LIMITED = {
     "/api/users",
     "/api/users/verify-email",
@@ -134,7 +132,7 @@ def _body_limit(path: str) -> int | None:
     if path.startswith("/api/campaigns") or path.startswith("/api/invitations"):
         return _CAMPAIGN_BODY
     if path.startswith("/api/maps"):
-        return _MAP_BODY
+        return _CAMPAIGN_BODY
     return None
 
 

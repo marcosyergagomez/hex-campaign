@@ -4,12 +4,11 @@ import unicodedata
 from dataclasses import dataclass
 
 from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.hexes import DISK_RADIUS
 
 VISIBILITY = frozenset({"full", "adjacent", "anonymous", "total", "charted", "home"})
 VICTORY = frozenset({"armies", "fortress", "either"})
 PLACEMENT = frozenset({"players", "app"})
-MAP_SIZES = frozenset(DISK_RADIUS)
+MAP_SIZES = frozenset({19, 37, 61})
 
 
 @dataclass(frozen=True)

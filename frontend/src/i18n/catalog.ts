@@ -58,10 +58,6 @@ const fromSpanish = [
   "campaignRevisionConflict",
   "campaignOpenLimit",
   "mapUnknown",
-  "factionInvalid",
-  "colorInvalid",
-  "colorTaken",
-  "identityRequired",
 ] as const satisfies readonly MessageKey[]
 
 const knownMessages: Record<string, MessageKey> = indexSpanish(fromSpanish)
