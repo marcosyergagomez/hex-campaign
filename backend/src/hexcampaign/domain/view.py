@@ -5,12 +5,14 @@ from datetime import datetime
 from hexcampaign.domain.clock import overdue
 from hexcampaign.domain.game import Game, find_member, living
 from hexcampaign.domain.hexes import Hex, distance
+from hexcampaign.domain.land import home_radius, owned
 from hexcampaign.domain.sight import gazed_cells, in_home, known_hex, sees_army
 
 
 def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
     member = find_member(game, viewer)
     staff = member is not None and member.role in {"owner", "admin"} and member.status == "active"
+    owners = _territorial_owners(game)
     body = {
         "revision": game.revision,
         "name": game.name,
@@ -31,7 +33,7 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
         },
         "you": None if member is None else _you(member),
         "members": [_member_view(item, staff or item.player_id == viewer) for item in game.members],
-        "hexes": [_hex_view(game, viewer, cell) for cell in game.hexes],
+        "hexes": [_hex_view(game, viewer, cell, owners.get(cell)) for cell in game.hexes],
         "armies": _armies(game, viewer),
         "fortresses": _fortresses(game, viewer),
         "orders": {
@@ -60,6 +62,8 @@ def _you(member) -> dict[str, object]:
         "role": member.role,
         "status": member.status,
         "missed": member.missed,
+        "faction": member.faction,
+        "color": member.color,
     }
 
 
@@ -69,20 +73,41 @@ def _member_view(member, show_missed: bool) -> dict[str, object]:
         "alias": member.alias,
         "role": member.role,
         "status": member.status,
+        "faction": member.faction,
+        "color": member.color,
     }
     if show_missed:
         shown["missed"] = member.missed
     return shown
 
 
-def _hex_view(game: Game, viewer: str, cell: Hex) -> dict[str, object]:
+def _territorial_owners(game: Game) -> dict[Hex, str]:
+    if game.plots is None:
+        owners: dict[Hex, str] = {}
+        for cell in game.hexes:
+            nearest = sorted(
+                (distance(cell, fort.at()), fort.player_id) for fort in game.fortresses
+            )
+            if nearest and (len(nearest) == 1 or nearest[0][0] < nearest[1][0]):
+                owners[cell] = nearest[0][1]
+        return owners
+    board = set(game.hexes)
+    return {
+        cell: fort.player_id
+        for fort in game.fortresses
+        for cell in owned(fort.at(), home_radius(game.rules.map_size), board, count=game.home_size)
+    }
+
+
+def _hex_view(game: Game, viewer: str, cell: Hex, owner: str | None) -> dict[str, object]:
     known = known_hex(game, viewer, cell)
     shown: dict[str, object] = {"q": cell.q, "r": cell.r, "known": known}
     plot = None if game.plots is None else game.plots.get(cell)
-    if known and plot is not None:
-        shown["ground"] = plot.ground
-        shown["road"] = plot.road
-        shown["bridge"] = plot.bridge
+    if known:
+        shown["ground"] = plot.ground if plot is not None else "llanura"
+        shown["road"] = plot.road if plot is not None else False
+        shown["bridge"] = plot.bridge if plot is not None else False
+        shown["owner_id"] = owner
     return shown
 
 
