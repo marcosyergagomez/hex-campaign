@@ -2,7 +2,7 @@
 
 from hexcampaign.domain.clock_march import Walker, walk
 from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.game import Game, living
+from hexcampaign.domain.game import Army, Game, living
 from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.sight import sees_army
 from hexcampaign.domain.terrain import passable
@@ -14,6 +14,11 @@ def check_terrain_order(game: Game, player_id: str, paths: dict[str, tuple[Hex, 
         raise DomainError("order_illegal")
     board = set(game.hexes)
     plots = game.plots or {}
+    _reject_illegal_steps(game, player_id, own, paths, board, plots)
+    _reject_allies_in_the_way(game, own, paths, board, plots)
+
+
+def _reject_illegal_steps(game, player_id, own, paths, board, plots) -> None:
     blocked = {Hex(army.q, army.r) for army in game.armies if sees_army(game, player_id, army)}
     blocked.difference_update(army.at() for army in own if army.at() is not None)
     for army in own:
@@ -32,39 +37,22 @@ def check_terrain_order(game: Game, player_id: str, paths: dict[str, tuple[Hex, 
             if step in blocked and index != len(path) - 1:
                 raise DomainError("order_illegal")
             previous = step
-    walkers = [
-        Walker(
-            army.id,
-            army.player_id,
-            army.at(),  # type: ignore[arg-type]
-            list(paths[army.id]),
-            game.rules.movement,
-            army.paid,
-        )
-        for army in own
-        if army.at() is not None
-    ]
-    moved = walk(walkers, plots, board)
+
+
+def _reject_allies_in_the_way(game, own, paths, board, plots) -> None:
+    moved = walk([_walker(game, army, paths[army.id]) for army in own], plots, board)
     for army in own:
-        assert army.at() is not None
-        solo = walk(
-            [
-                Walker(
-                    army.id,
-                    army.player_id,
-                    army.at(),
-                    list(paths[army.id]),
-                    game.rules.movement,
-                    army.paid,
-                )
-            ],
-            plots,
-            board,
-        )
+        solo = walk([_walker(game, army, paths[army.id])], plots, board)
         if moved.positions[army.id] != solo.positions[army.id]:
             raise DomainError("order_illegal")
-    occupied: dict[Hex, str] = {}
-    for army_id, cell in moved.positions.items():
+    occupied: set[Hex] = set()
+    for cell in moved.positions.values():
         if cell in occupied:
             raise DomainError("order_illegal")
-        occupied[cell] = army_id
+        occupied.add(cell)
+
+
+def _walker(game: Game, army: Army, path: tuple[Hex, ...]) -> Walker:
+    spot = army.at()
+    assert spot is not None
+    return Walker(army.id, army.player_id, spot, list(path), game.rules.movement, army.paid)
