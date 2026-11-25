@@ -7,17 +7,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from api.player_session import (
-    CSRF_COOKIE,
-    CSRF_HEADER,
-    CSRF_MESSAGE,
-    ORIGIN_MESSAGE,
-    SESSION_COOKIE,
-    SESSION_MESSAGE,
-    django_sync,
-    same_origin,
-)
-from apps.accounts.sessions import csrf_matches, load_session
+from api.player_gate import reader as _reader
+from api.player_gate import writer as _writer
+from api.player_session import SESSION_MESSAGE, django_sync
 from apps.campaigns.records import (
     CampaignError,
     RevisionConflict,
@@ -73,8 +65,14 @@ _MESSAGES = {
     "invitation_invalid": "La invitación no es válida.",
     "revision_conflict": "La campaña ha cambiado. Vuelve a leerla.",
     "campaign_limit": "Ya tienes tres campañas abiertas.",
+    "map_unknown": "No hay ningún mapa con ese identificador.",
 }
-_STATUS = {"not_found": 404, "invitation_invalid": 404, "forbidden": 403}
+_STATUS = {
+    "not_found": 404,
+    "invitation_invalid": 404,
+    "forbidden": 403,
+    "map_unknown": 404,
+}
 
 
 class RulesBody(BaseModel):
@@ -94,6 +92,8 @@ class RulesBody(BaseModel):
 class CreateBody(BaseModel):
     name: str
     rules: RulesBody
+    map_id: str | None = None
+    blind: bool = False
 
 
 class RevisionBody(BaseModel):
@@ -164,28 +164,6 @@ def _failure(exc: CampaignError) -> JSONResponse:
     return _errors(status, "campaign", message)
 
 
-def _reader(request: Request):
-    session = load_session(request.cookies.get(SESSION_COOKIE, ""))
-    if session is None:
-        return _errors(401, "session", SESSION_MESSAGE)
-    return session.user
-
-
-def _writer(request: Request):
-    if not same_origin(request):
-        return _errors(403, "origin", ORIGIN_MESSAGE)
-    session = load_session(request.cookies.get(SESSION_COOKIE, ""))
-    if session is None:
-        return _errors(401, "session", SESSION_MESSAGE)
-    if not csrf_matches(
-        session,
-        request.headers.get(CSRF_HEADER, ""),
-        request.cookies.get(CSRF_COOKIE, ""),
-    ):
-        return _errors(403, "csrf", CSRF_MESSAGE)
-    return session.user
-
-
 def _run(request: Request, action):
     user = _writer(request)
     if isinstance(user, JSONResponse):
@@ -226,7 +204,18 @@ def get_campaigns(request: Request) -> JSONResponse:
 @django_sync
 def post_campaign(payload: CreateBody, request: Request) -> JSONResponse:
     def action(user):
-        campaign, game = create_campaign(user, payload.name, payload.rules.model_dump())
+        template = None
+        if payload.map_id:
+            from apps.campaigns.atlases import take_template
+
+            template = take_template(user, payload.map_id)
+        campaign, game = create_campaign(
+            user,
+            payload.name,
+            payload.rules.model_dump(),
+            template,
+            payload.blind,
+        )
         return _view(user, campaign, game, 201)
 
     return _run(request, action)

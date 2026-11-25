@@ -6,6 +6,7 @@ from datetime import datetime
 from hexcampaign.domain.board import capture, restore
 from hexcampaign.domain.chronicle import cell, path, remember
 from hexcampaign.domain.clock import overdue, stamp
+from hexcampaign.domain.clock_march import Walker, walk
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import (
     Battle,
@@ -23,6 +24,7 @@ from hexcampaign.domain.game import (
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.lobby import drop_seat_count
 from hexcampaign.domain.march import check_order, march
+from hexcampaign.domain.sight import gazed_cells, remember_fort
 
 
 def lock_orders(
@@ -179,13 +181,34 @@ def _resolve(game: Game, now: datetime, defaulted: set[str], rng: random.Random)
         starts[army.id] = Hex(army.q, army.r)
         owners[army.id] = army.player_id
         paths[army.id] = game.orders.get(army.player_id, {}).get(army.id, ())
-    moved = march(starts, paths, owners)
+    if game.plots is None:
+        moved = march(starts, paths, owners)
+    else:
+        moved = walk(
+            [
+                Walker(
+                    army_id,
+                    owners[army_id],
+                    starts[army_id],
+                    list(paths.get(army_id, ())),
+                    game.rules.movement,
+                    next(army.paid for army in game.armies if army.id == army_id),
+                )
+                for army_id in starts
+            ],
+            game.plots,
+            set(game.hexes),
+        )
     _note_marches(game, starts, paths, owners, moved)
     for army in living(game):
         cell = moved.positions[army.id]
         army.q = cell.q
         army.r = cell.r
-        _reveal(game, army.player_id, moved.trails.get(army.id, ()))
+        if game.plots is not None:
+            army.paid = moved.paid[army.id]
+            _reveal_gaze(game, army.player_id, moved.trails.get(army.id, ()))
+        else:
+            _reveal(game, army.player_id, moved.trails.get(army.id, ()))
     for contact in moved.contacts:
         _add_battle(game, contact.army_ids, contact.hex, owners, now)
     _mark_misses(game, defaulted, rng)
@@ -397,6 +420,18 @@ def _reveal(game: Game, player_id: str, cells: tuple[Hex, ...]) -> None:
     known.update(cell for cell in cells if cell in board)
 
 
+def _reveal_gaze(game: Game, player_id: str, cells: tuple[Hex, ...]) -> None:
+    if game.rules.visibility in {"full", "total", "charted"}:
+        game.discovered[player_id] = set(game.hexes)
+    else:
+        known = game.discovered.setdefault(player_id, set())
+        for cell in cells:
+            known.update(gazed_cells(game, cell))
+    for cell in cells:
+        for seen in gazed_cells(game, cell):
+            remember_fort(game, player_id, seen)
+
+
 def _add_battle(
     game: Game,
     army_ids: tuple[str, ...],
@@ -468,6 +503,7 @@ def _remove(game: Game, member) -> None:
     game.fortresses = [fort for fort in game.fortresses if fort.player_id != member.player_id]
     game.orders.pop(member.player_id, None)
     game.discovered.pop(member.player_id, None)
+    game.fort_memory.pop(member.player_id, None)
     drop_seat_count(game)
 
 

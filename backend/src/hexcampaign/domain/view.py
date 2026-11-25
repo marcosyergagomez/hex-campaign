@@ -5,7 +5,7 @@ from datetime import datetime
 from hexcampaign.domain.clock import overdue
 from hexcampaign.domain.game import Game, find_member, living
 from hexcampaign.domain.hexes import Hex, distance
-from hexcampaign.domain.sight import known_hex, sees_army
+from hexcampaign.domain.sight import gazed_cells, in_home, known_hex, sees_army
 
 
 def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
@@ -31,10 +31,7 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
         },
         "you": None if member is None else _you(member),
         "members": [_member_view(item, staff or item.player_id == viewer) for item in game.members],
-        "hexes": [
-            {"q": cell.q, "r": cell.r, "known": known_hex(game, viewer, cell)}
-            for cell in game.hexes
-        ],
+        "hexes": [_hex_view(game, viewer, cell) for cell in game.hexes],
         "armies": _armies(game, viewer),
         "fortresses": _fortresses(game, viewer),
         "orders": {
@@ -78,6 +75,17 @@ def _member_view(member, show_missed: bool) -> dict[str, object]:
     return shown
 
 
+def _hex_view(game: Game, viewer: str, cell: Hex) -> dict[str, object]:
+    known = known_hex(game, viewer, cell)
+    shown: dict[str, object] = {"q": cell.q, "r": cell.r, "known": known}
+    plot = None if game.plots is None else game.plots.get(cell)
+    if known and plot is not None:
+        shown["ground"] = plot.ground
+        shown["road"] = plot.road
+        shown["bridge"] = plot.bridge
+    return shown
+
+
 def _armies(game: Game, viewer: str) -> list[dict[str, object]]:
     shown: list[dict[str, object]] = []
     for army in game.armies:
@@ -105,8 +113,10 @@ def _armies(game: Game, viewer: str) -> list[dict[str, object]]:
 
 def _fortresses(game: Game, viewer: str) -> list[dict[str, object]]:
     shown: list[dict[str, object]] = []
+    live: set[Hex] = set()
     for fort in game.fortresses:
         cell = Hex(fort.q, fort.r)
+        live.add(cell)
         if fort.player_id != viewer and not known_hex(game, viewer, cell):
             continue
         visible = _hold_visible(game, viewer, fort)
@@ -119,10 +129,30 @@ def _fortresses(game: Game, viewer: str) -> list[dict[str, object]]:
                 "hold": fort.hold if visible else 0,
             }
         )
+    shown.extend(_remembered_fortresses(game, viewer, live))
     return shown
 
 
+def _remembered_fortresses(game: Game, viewer: str, live: set[Hex]) -> list[dict[str, object]]:
+    if game.plots is None:
+        return []
+    remembered: list[dict[str, object]] = []
+    for key, owner in game.fort_memory.get(viewer, {}).items():
+        if not owner:
+            continue
+        q_text, r_text = key.split(",")
+        cell = Hex(int(q_text), int(r_text))
+        if cell in live or _looking(game, viewer, cell) or not known_hex(game, viewer, cell):
+            continue
+        remembered.append(
+            {"player_id": owner, "q": cell.q, "r": cell.r, "holder_id": None, "hold": 0}
+        )
+    return remembered
+
+
 def _show_battle(game: Game, battle, viewer: str, staff: bool) -> bool:
+    if game.plots is not None:
+        return _show_terrain_battle(game, battle, viewer, staff)
     if staff or viewer in battle.players or game.rules.visibility == "full":
         return True
     # An anonymous token has no name. A battle list would put the name back.
@@ -139,7 +169,9 @@ def _show_battle(game: Game, battle, viewer: str, staff: bool) -> bool:
 
 
 def _hold_visible(game: Game, viewer: str, fort) -> bool:
-    if not fort.holder_id or fort.holder_id == viewer or game.rules.visibility == "full":
+    if game.plots is not None and not _looking(game, viewer, fort.at()):
+        return False
+    if not fort.holder_id or fort.holder_id == viewer or game.rules.visibility in {"full", "total"}:
         return bool(fort.holder_id)
     if game.rules.visibility == "anonymous":
         return False
@@ -168,6 +200,30 @@ def _battle_view(game: Game, battle, viewer: str, staff: bool, now: datetime) ->
     if staff:
         shown["reports"] = dict(battle.reports)
     return shown
+
+
+def _show_terrain_battle(game: Game, battle, viewer: str, staff: bool) -> bool:
+    if viewer in battle.players or game.rules.visibility in {"full", "total"}:
+        return True
+    if staff and battle.result is None:
+        return True
+    cell = Hex(battle.q, battle.r)
+    if not known_hex(game, viewer, cell):
+        return False
+    involved = [army for army in game.armies if army.id in set(battle.army_ids)]
+    return any(sees_army(game, viewer, army) for army in involved) or _looking(game, viewer, cell)
+
+
+def _looking(game: Game, viewer: str, cell: Hex) -> bool:
+    if game.rules.visibility in {"full", "total"}:
+        return True
+    if in_home(game, viewer, cell):
+        return True
+    for army in living(game, viewer):
+        spot = army.at()
+        if spot is not None and cell in gazed_cells(game, spot):
+            return True
+    return False
 
 
 def _chronicle(game: Game, member: bool) -> list[dict[str, object]]:

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.rules import Rules, rules_from
+from hexcampaign.domain.terrain import Plot, checked_plot
 
 VERSION = 2
 PHASES = frozenset({"recruiting", "placing", "orders", "battles", "finished"})
@@ -31,6 +32,7 @@ class Army:
     q: int | None
     r: int | None
     destroyed: bool = False
+    paid: int = 0
 
     def at(self) -> Hex | None:
         if self.q is None or self.r is None:
@@ -85,6 +87,10 @@ class Game:
     orders_opened_at: str | None = None
     previous: dict | None = None
     next_id: int = 1
+    plots: dict[Hex, Plot] | None = None
+    anchors: list[Hex] = field(default_factory=list)
+    surveyor: str | None = None
+    fort_memory: dict[str, dict[str, str | None]] = field(default_factory=dict)
 
 
 def find_member(game: Game, player_id: str) -> Member | None:
@@ -187,6 +193,16 @@ def to_dict(game: Game) -> dict[str, object]:
         "orders_opened_at": game.orders_opened_at,
         "previous": game.previous,
         "next_id": game.next_id,
+        "plots": _stored_plots(game),
+        "anchors": [_hex(cell) for cell in game.anchors],
+        "surveyor": game.surveyor,
+        "fort_memory": {
+            player_id: [
+                {"q": int(key.split(",")[0]), "r": int(key.split(",")[1]), "owner": owner}
+                for key, owner in sorted(memory.items())
+            ]
+            for player_id, memory in game.fort_memory.items()
+        },
     }
 
 
@@ -235,6 +251,11 @@ def from_dict(data: object) -> Game:
     if not isinstance(saved, list):
         raise DomainError("rules_invalid")
     game.chronicle = [dict(_mapping(item)) for item in saved]
+    game.plots = _plots(data.get("plots"))
+    game.anchors = [_cell(item) for item in _list(data["anchors"])] if "anchors" in data else []
+    surveyor = data.get("surveyor")
+    game.surveyor = None if surveyor is None else str(surveyor)
+    game.fort_memory = _memory(data.get("fort_memory", {}))
     return game
 
 
@@ -276,6 +297,7 @@ def _army_dict(army: Army) -> dict[str, object]:
         "q": army.q,
         "r": army.r,
         "destroyed": army.destroyed,
+        "paid": army.paid,
     }
 
 
@@ -328,6 +350,7 @@ def _army(data: object) -> Army:
         q=_optional_whole(raw["q"]),
         r=_optional_whole(raw["r"]),
         destroyed=bool(raw["destroyed"]),
+        paid=_whole(raw["paid"]) if "paid" in raw else 0,
     )
 
 
@@ -363,6 +386,49 @@ def _battle(data: object) -> Battle:
 
 def _text_map(data: object) -> dict[str, str]:
     return {str(key): str(value) for key, value in _mapping(data).items()}
+
+
+def _stored_plots(game: Game) -> list[dict[str, object]] | None:
+    if game.plots is None:
+        return None
+    return [_plot_dict(cell, plot) for cell, plot in sorted(game.plots.items())]
+
+
+def _plot_dict(cell: Hex, plot: Plot) -> dict[str, object]:
+    return {
+        "q": cell.q,
+        "r": cell.r,
+        "ground": plot.ground,
+        "road": plot.road,
+        "bridge": plot.bridge,
+    }
+
+
+def _plots(value: object) -> dict[Hex, Plot] | None:
+    if value is None:
+        return None
+    found: dict[Hex, Plot] = {}
+    for item in _list(value):
+        raw = _mapping(item)
+        cell = Hex(_whole(raw["q"]), _whole(raw["r"]))
+        if cell in found:
+            raise DomainError("rules_invalid")
+        found[cell] = checked_plot(raw["ground"], bool(raw["road"]), bool(raw["bridge"]))
+    return found
+
+
+def _memory(value: object) -> dict[str, dict[str, str | None]]:
+    if not isinstance(value, dict):
+        raise DomainError("rules_invalid")
+    memory: dict[str, dict[str, str | None]] = {}
+    for player_id, rows in value.items():
+        kept: dict[str, str | None] = {}
+        for item in _list(rows):
+            raw = _mapping(item)
+            owner = raw["owner"]
+            kept[f"{_whole(raw['q'])},{_whole(raw['r'])}"] = None if owner is None else str(owner)
+        memory[str(player_id)] = kept
+    return memory
 
 
 def _hex(cell: Hex) -> dict[str, int]:
