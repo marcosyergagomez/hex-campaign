@@ -2,9 +2,12 @@ import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Link } from "react-router-dom"
 
 import {
+  ApiError,
   generateMap,
   getMap,
+  listMapScales,
   listMaps,
+  type MapScale,
   type MapSize,
   type SavedMap,
   type SavedMapDetail,
@@ -15,16 +18,13 @@ import { useI18n } from "../i18n/language"
 import { presentError } from "../presentError"
 import "../game/hex/board.css"
 
-const TABLES: { size: MapSize; label: "tableSmall" | "tableMedium" | "tableLarge" }[] = [
-  { size: 19, label: "tableSmall" },
-  { size: 37, label: "tableMedium" },
-  { size: 61, label: "tableLarge" },
-]
+const TABLE_LABELS = { small: "tableSmall", medium: "tableMedium", large: "tableLarge" } as const
 
 export function MapsPage() {
   const { t } = useI18n()
   const [name, setName] = useState("")
-  const [size, setSize] = useState<MapSize>(19)
+  const [size, setSize] = useState<MapSize | null>(null)
+  const [tables, setTables] = useState<MapScale[]>([])
   const [seats, setSeats] = useState(2)
   const [maps, setMaps] = useState<SavedMap[]>([])
   const [chart, setChart] = useState<SavedMapDetail | null>(null)
@@ -34,10 +34,13 @@ export function MapsPage() {
 
   useEffect(() => {
     let current = true
-    listMaps()
-      .then((rows) => {
+    Promise.all([listMaps(), listMapScales()])
+      .then(([rows, scales]) => {
         if (current) {
           setMaps(rows)
+          setTables(scales)
+          setSize(scales[0].size)
+          setSeats(scales[0].recommend)
         }
       })
       .catch((error: unknown) => {
@@ -55,6 +58,9 @@ export function MapsPage() {
     setPending(true)
     setErrors({})
     try {
+      if (size === null || !tables.some(table => table.size === size && table.seats.includes(seats))) {
+        throw new ApiError(422, {})
+      }
       const created = await generateMap(name.trim(), size, seats)
       setMaps((current) => [created, ...current.filter((item) => item.id !== created.id)])
       setChart(null)
@@ -108,22 +114,43 @@ export function MapsPage() {
               { value: "3", label: "3" },
               { value: "4", label: "4" },
             ]}
-            onChange={(value) => setSeats(Number(value))}
+            onChange={(value) => {
+              const next = Number(value)
+              setSeats(next)
+              setSize((current) => {
+                const table = tables.find((item) => item.size === current)
+                if (table && table.seats.includes(next)) {
+                  return current
+                }
+                return tables.find((item) => item.recommend === next)?.size
+                  ?? tables.find((item) => item.seats.includes(next))?.size ?? null
+              })
+            }}
           />
           <div className="table-picks">
-            {TABLES.map((table) => (
-              <button
-                key={table.size}
-                type="button"
-                className={size === table.size ? "table-pick is-selected" : "table-pick"}
-                onClick={() => setSize(table.size)}
-              >
-                <span>{t(table.label)}</span>
-                <strong>{table.size}</strong>
-              </button>
-            ))}
+            {tables.map((table) => {
+              const allowed = table.seats.includes(seats)
+              return (
+                <button
+                  key={table.size}
+                  type="button"
+                  disabled={!allowed}
+                  className={size === table.size ? "table-pick is-selected" : "table-pick"}
+                  onClick={() => setSize(table.size)}
+                >
+                  <span>
+                    {t(TABLE_LABELS[table.key])}
+                    {table.recommend === seats ? (
+                      <small>{t("tableRecommended", { seats: String(seats) })}</small>
+                    ) : null}
+                    <small>{t("mapHomeArea", { count: String(table.home_size) })}</small>
+                  </span>
+                  <strong>{table.size}</strong>
+                </button>
+              )
+            })}
           </div>
-          <button type="submit" disabled={pending || name.trim().length === 0}>
+          <button type="submit" disabled={pending || size === null || name.trim().length === 0}>
             {pending ? t("generatingMap") : t("generateMap")}
           </button>
         </form>

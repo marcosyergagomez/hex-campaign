@@ -80,6 +80,7 @@ export function SelectField({
   hint,
   error,
   options,
+  disabled = false,
   onChange,
 }: {
   label: string
@@ -88,6 +89,7 @@ export function SelectField({
   hint?: string
   error?: string[]
   options: readonly { value: string; label: string }[]
+  disabled?: boolean
   onChange: (value: string) => void
 }) {
   const { text } = useI18n()
@@ -105,6 +107,7 @@ export function SelectField({
         name={name}
         value={value}
         required
+        disabled={disabled}
         aria-invalid={Boolean(shown?.length)}
         aria-describedby={describedBy || undefined}
         onChange={(event) => onChange(event.target.value)}
