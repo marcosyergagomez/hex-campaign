@@ -20,7 +20,9 @@ from hexcampaign.domain.game import (
     seated,
 )
 from hexcampaign.domain.hexes import DISK_RADIUS, Hex, angle, disk, distance, neighbors
+from hexcampaign.domain.land import home_radius, owned
 from hexcampaign.domain.rules import Rules, campaign_name, label, roster_text
+from hexcampaign.domain.terrain import passable
 
 
 def create_game(name: str, rules: Rules, owner_id: str, alias: str) -> Game:
@@ -114,6 +116,12 @@ def place_armies(game: Game, actor: str, fortress: Hex, spots: dict[str, Hex]) -
         raise DomainError("order_illegal")
     if fortress not in board or any(spot not in board for spot in spots.values()):
         raise DomainError("order_illegal")
+    if game.plots is not None and (
+        not _standable(game, fortress) or any(not _standable(game, spot) for spot in spots.values())
+    ):
+        raise DomainError("order_illegal")
+    if game.plots is not None and _disks_overlap(game, actor, fortress):
+        raise DomainError("order_illegal")
     if len({fortress, *spots.values()}) != 1 + len(spots):
         raise DomainError("order_illegal")
     _reject_overlap(game, actor, {fortress, *spots.values()})
@@ -139,7 +147,10 @@ def close_placement(game: Game, actor: str, now: datetime) -> Game:
             raise DomainError("phase_invalid")
     if any(army.at() is None for army in game.armies if not army.destroyed):
         raise DomainError("phase_invalid")
+    if game.plots is not None and not _frontier(game):
+        raise DomainError("phase_invalid")
     _territory(game)
+    _home_notice(game)
     remember(game, "placement_closed", player_id=actor)
     game.phase = "orders"
     game.turn = 1
@@ -178,21 +189,31 @@ def _reject_overlap(game: Game, actor: str, cells: set[Hex]) -> None:
 
 
 def _deploy(game: Game) -> None:
-    radius = DISK_RADIUS[game.rules.map_size]
-    border = [cell for cell in game.hexes if distance(cell, Hex(0, 0)) == radius]
-    border.sort(key=lambda cell: (angle(cell), cell.q, cell.r))
     players = seated(game)
-    chosen = [border[(index * len(border)) // len(players)] for index in range(len(players))]
+    if game.anchors:
+        if len(game.anchors) != len(players):
+            raise DomainError("rules_invalid")
+        chosen = list(game.anchors)
+    else:
+        radius = DISK_RADIUS[game.rules.map_size]
+        border = [cell for cell in game.hexes if distance(cell, Hex(0, 0)) == radius]
+        border.sort(key=lambda cell: (angle(cell), cell.q, cell.r))
+        if game.plots is not None:
+            border = [cell for cell in border if _standable(game, cell)]
+        chosen = [border[(index * len(border)) // len(players)] for index in range(len(players))]
     taken = set(chosen)
     for member, fort in zip(players, chosen, strict=True):
+        if game.plots is not None and not _standable(game, fort):
+            raise DomainError("rules_invalid")
         game.fortresses.append(Fortress(member.player_id, fort.q, fort.r))
         spots = [fort]
         if game.rules.armies == 2:
-            spots.append(_beside(fort, taken, set(game.hexes)))
+            spots.append(_beside(fort, taken, _stand_board(game)))
             taken.add(spots[-1])
         for number, spot in enumerate(spots, start=1):
             game.armies.append(_army(game, member.player_id, str(number), spot))
     _territory(game)
+    _home_notice(game)
 
 
 def _blank_armies(game: Game) -> None:
@@ -241,8 +262,24 @@ def _note_deployment(game: Game, player_id: str | None = None) -> None:
 
 
 def _territory(game: Game) -> None:
-    forts = [(fort.at(), fort.player_id) for fort in game.fortresses]
     players = [member.player_id for member in seated(game)]
+    if game.plots is not None and game.rules.visibility in {"full", "total", "charted"}:
+        for player_id in players:
+            game.discovered[player_id] = set(game.hexes)
+        _grant_surveyor(game)
+        return
+    if game.plots is not None and game.rules.visibility == "home":
+        board = set(game.hexes)
+        radius = home_radius(game.rules.map_size)
+        for player_id in players:
+            cells: set[Hex] = set()
+            for fort in game.fortresses:
+                if fort.player_id == player_id:
+                    cells.update(owned(fort.at(), radius, board))
+            game.discovered[player_id] = cells
+        _grant_surveyor(game)
+        return
+    forts = [(fort.at(), fort.player_id) for fort in game.fortresses]
     if game.rules.visibility == "full":
         for player_id in players:
             game.discovered[player_id] = set(game.hexes)
@@ -275,3 +312,45 @@ def drop_seat_count(game: Game) -> None:
     living_count = len(seated(game))
     offered = max(game.rules.seats - 1, living_count)
     game.rules = replace(game.rules, seats=offered)
+
+
+def _stand_board(game: Game) -> set[Hex]:
+    if game.plots is None:
+        return set(game.hexes)
+    return {cell for cell in game.hexes if _standable(game, cell)}
+
+
+def _standable(game: Game, cell: Hex) -> bool:
+    plot = None if game.plots is None else game.plots.get(cell)
+    return plot is not None and passable(plot)
+
+
+def _disks_overlap(game: Game, actor: str, fortress: Hex) -> bool:
+    board = set(game.hexes)
+    radius = home_radius(game.rules.map_size)
+    claimed = owned(fortress, radius, board)
+    for fort in game.fortresses:
+        if fort.player_id != actor and claimed & owned(fort.at(), radius, board):
+            return True
+    return False
+
+
+def _frontier(game: Game) -> bool:
+    board = set(game.hexes)
+    radius = home_radius(game.rules.map_size)
+    claimed: set[Hex] = set()
+    for fort in game.fortresses:
+        claimed.update(owned(fort.at(), radius, board))
+    return len(claimed) < len(board)
+
+
+def _home_notice(game: Game) -> None:
+    if game.rules.visibility != "home":
+        return
+    for member in seated(game):
+        notice(game, "home_land", member.player_id)
+
+
+def _grant_surveyor(game: Game) -> None:
+    if game.surveyor:
+        game.discovered[game.surveyor] = set(game.hexes)

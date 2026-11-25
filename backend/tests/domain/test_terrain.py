@@ -1,12 +1,19 @@
 """Exit costs, the home disk, and the point clock. No database."""
 
+import random
+from datetime import UTC, datetime
+
 import pytest
 
 from hexcampaign.domain.clock_march import Walker, walk
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.land import owned, rotate
+from hexcampaign.domain.lobby import accept_seat, begin, create_game
+from hexcampaign.domain.maps import generate, lay
+from hexcampaign.domain.rules import rules_from
 from hexcampaign.domain.terrain import HOME_RADIUS, Plot, checked_plot, exit_cost, gaze_from
+from hexcampaign.domain.view import project
 
 
 def test_a_road_makes_the_exit_cost_one_and_a_hill_looks_one_farther() -> None:
@@ -124,3 +131,82 @@ def test_leaving_by_a_road_pays_for_one_more_plain() -> None:
     walker = Walker("a", "p", first, [second, third], budget=1, paid=0)
     moved = walk([walker], plots, set(plots))
     assert moved.positions["a"] == third
+
+
+def _table(**overrides: object):
+    data: dict[str, object] = {
+        "seats": 2,
+        "armies": 1,
+        "movement": 1,
+        "map_size": 19,
+        "visibility": "home",
+        "victory": "armies",
+        "hold_turns": 3,
+        "placement": "players",
+        "order_days": 7,
+        "battle_days": 7,
+        "missed_turns": 2,
+    }
+    data.update(overrides)
+    return rules_from(data)
+
+
+def test_a_generated_map_gives_both_players_the_same_ground() -> None:
+    template = generate(19, 2, random.Random(3))
+    for cell, plot in template.cells.items():
+        assert template.cells[rotate(cell, 3)] == plot
+    left, right = template.anchors
+    assert rotate(left, 3) == right
+    board = set(template.cells)
+    assert owned(left, 1, board) != owned(right, 1, board)
+    assert len(owned(left, 1, board) | owned(right, 1, board)) < len(board)
+
+
+def test_three_players_turn_the_same_portion() -> None:
+    template = generate(37, 3, random.Random(4))
+    first, second, third = template.anchors
+    assert rotate(first, 2) == second
+    assert rotate(second, 2) == third
+
+
+def test_four_players_keep_matching_disks_when_the_map_has_room() -> None:
+    template = generate(61, 4, random.Random(5))
+    board = set(template.cells)
+    contents = [
+        sorted(template.cells[cell].ground for cell in owned(fort, 2, board))
+        for fort in template.anchors
+    ]
+    assert contents[0] == contents[1] == contents[2] == contents[3]
+    claimed: set[Hex] = set()
+    for fort in template.anchors:
+        claimed.update(owned(fort, 2, board))
+    assert len(claimed) < len(board)
+
+
+def test_the_copy_starts_each_player_on_their_own_disk() -> None:
+    game = create_game("Norte", _table(), "ana", "Ana")
+    template = generate(19, 2, random.Random(1))
+    lay(game, template, surveyor=None)
+    accept_seat(game, "boa", "Boa")
+    begin(game, "ana", [], NOW)
+    board = set(game.hexes)
+    forts = {fort.player_id: fort.at() for fort in game.fortresses}
+    assert game.discovered["ana"] == owned(forts["ana"], 1, board)
+    assert forts["boa"] not in game.discovered["ana"]
+    view = project(game, "ana", NOW)
+    hidden = [cell for cell in view["hexes"] if not cell["known"]]
+    assert hidden
+    assert "ground" not in hidden[0]
+    assert any(item["code"] == "home_land" for item in view["notices"])
+
+
+def test_a_player_who_looked_at_the_generated_map_knows_every_hex() -> None:
+    game = create_game("Norte", _table(), "ana", "Ana")
+    lay(game, generate(19, 2, random.Random(2)), surveyor="ana")
+    accept_seat(game, "boa", "Boa")
+    begin(game, "ana", [], NOW)
+    assert game.discovered["ana"] == set(game.hexes)
+    assert len(game.discovered["boa"]) < len(game.hexes)
+
+
+NOW = datetime(2026, 1, 1, tzinfo=UTC)

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from hexcampaign.domain.errors import DomainError
 
-VISIBILITY = frozenset({"full", "adjacent", "anonymous"})
+VISIBILITY = frozenset({"full", "adjacent", "anonymous", "total", "charted", "home"})
 VICTORY = frozenset({"armies", "fortress", "either"})
 PLACEMENT = frozenset({"players", "app"})
 MAP_SIZES = frozenset({19, 37, 61})
