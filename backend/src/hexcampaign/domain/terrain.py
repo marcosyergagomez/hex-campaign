@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from hexcampaign.domain.errors import DomainError
+from hexcampaign.domain.hexes import Hex, neighbors
 
 # Stable names. The battle rules do not care about the spelling on the map.
 GROUNDS = frozenset(
@@ -43,7 +44,7 @@ _EXIT = {
 }
 _GAZE = {"colina": 3, "montana": 4, "bosque_profundo": 0}
 _BASE_GAZE = 2
-HOME_RADIUS = {19: 1, 37: 1, 61: 2}
+HOME_RADIUS = {19: 1, 37: 1, 61: 2, 271: 2, 397: 2, 547: 3, 817: 4}
 
 
 @dataclass(frozen=True)
@@ -80,3 +81,22 @@ def gaze_from(plot: Plot | None) -> int:
     if plot is None:
         return _BASE_GAZE
     return _GAZE.get(plot.ground, _BASE_GAZE)
+
+
+def terrain_groups(plots: dict[Hex, Plot], grounds: set[str] | frozenset[str]) -> list[set[Hex]]:
+    pending = {cell for cell, plot in plots.items() if plot.ground in grounds}
+    groups: list[set[Hex]] = []
+    while pending:
+        start = min(pending)
+        pending.remove(start)
+        group = {start}
+        queue = [start]
+        while queue:
+            cell = queue.pop()
+            for other in neighbors(cell):
+                if other in pending:
+                    pending.remove(other)
+                    group.add(other)
+                    queue.append(other)
+        groups.append(group)
+    return groups

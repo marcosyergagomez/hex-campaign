@@ -632,6 +632,131 @@ button:disabled {
   gap: 14px;
 }
 
+.player-identity {
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 240px);
+  gap: 24px;
+  margin-bottom: 20px;
+  align-items: center;
+}
+
+.identity-copy,
+.campaign-map {
+  display: grid;
+  gap: 14px;
+}
+
+.identity-palette {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.identity-colors {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px 8px;
+  margin-top: 14px;
+}
+
+.identity-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  cursor: pointer;
+  font-size: .8rem;
+}
+
+.identity-color input,
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.identity-swatch,
+.territory-dot {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(239, 224, 184, .45);
+  border-radius: 50%;
+  color: #fff4d6;
+}
+
+.identity-color input:checked + .identity-swatch {
+  box-shadow: 0 0 0 3px var(--field), 0 0 0 4px var(--gold);
+}
+
+.identity-color input:focus-visible + .identity-swatch {
+  outline: 2px solid var(--gold);
+  outline-offset: 5px;
+}
+
+.identity-color.is-taken {
+  opacity: .38;
+  cursor: not-allowed;
+}
+
+.identity-preview {
+  margin: 0;
+  min-width: 0;
+}
+
+.identity-preview figcaption {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: .75rem;
+  text-align: center;
+}
+
+.campaign-map {
+  margin: 20px 0;
+}
+
+.campaign-map h2 {
+  margin: 0;
+}
+
+.territory-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 0;
+  margin: 0 0 6px;
+  list-style: none;
+  font-size: .85rem;
+}
+
+.territory-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.territory-dot {
+  width: 12px;
+  height: 12px;
+}
+
+@media (max-width: 650px) {
+  .player-identity {
+    grid-template-columns: 1fr;
+  }
+  .identity-preview {
+    max-width: 220px;
+    justify-self: center;
+  }
+  .identity-colors {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .detail-panel {
   display: grid;
   gap: 10px;
@@ -727,28 +852,6 @@ button:disabled {
   .wizard-actions button {
     width: 100%;
   }
-}
-
-.atlas {
-  position: relative;
-  margin: 18px 0 32px;
-}
-
-.atlas-cell {
-  position: absolute;
-  width: 74px;
-  height: 36px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 0.62rem;
-  line-height: 36px;
-  text-align: center;
-}
-
-.atlas-cell.is-fort {
-  border-color: var(--gold);
-  color: var(--ink);
 }
 
 .check-line {
