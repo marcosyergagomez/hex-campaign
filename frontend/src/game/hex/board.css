@@ -69,6 +69,18 @@
 
 .hex-edge.is-pick {
   cursor: pointer;
+  touch-action: none;
+}
+
+.hex-ghost {
+  fill: rgba(198, 161, 90, 0.08);
+  stroke: rgba(198, 161, 90, 0.35);
+  stroke-dasharray: 3 2;
+}
+
+.hex-ghost:hover,
+.hex-ghost.is-pick:hover {
+  fill: rgba(198, 161, 90, 0.22);
 }
 
 .hex-sheen {
