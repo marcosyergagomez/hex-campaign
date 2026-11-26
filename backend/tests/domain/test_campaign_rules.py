@@ -9,9 +9,11 @@ import pytest
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import find_member, from_dict, to_dict
 from hexcampaign.domain.hexes import Hex, disk, distance, neighbors
+from hexcampaign.domain.identity import COLORS
 from hexcampaign.domain.lobby import (
     accept_seat,
     begin,
+    choose_identity,
     close_placement,
     create_game,
     place_armies,
@@ -30,6 +32,58 @@ from hexcampaign.domain.turn import (
 from hexcampaign.domain.view import project
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def test_player_identity_is_persisted_and_required_before_a_new_campaign_starts() -> None:
+    game = create_game("Estandartes", rules_from(_rules()), "1", "ana")
+    game.identity_required = True
+    accept_seat(game, "2", "boa")
+    choose_identity(game, "1", "cathay", COLORS["garnet"])
+    with pytest.raises(DomainError, match="identity_required"):
+        begin(game, "1", [], NOW)
+    assert game.phase == "recruiting"
+    choose_identity(game, "2", "cathay", COLORS["azure"])
+    restored = from_dict(to_dict(game))
+    assert [(member.faction, member.color) for member in restored.members] == [
+        ("cathay", COLORS["garnet"]), ("cathay", COLORS["azure"]),
+    ]
+    begin(restored, "1", [], NOW)
+    assert restored.rules == game.rules
+    assert restored.phase == "orders"
+    with pytest.raises(DomainError, match="phase_invalid"):
+        choose_identity(restored, "1", "empire", COLORS["emerald"])
+
+
+@pytest.mark.parametrize(("actor", "faction", "color", "error"), [
+    ("2", "not_a_faction", COLORS["azure"], "faction_invalid"),
+    ("2", "skaven", "red", "color_invalid"),
+    ("2", "skaven", COLORS["garnet"], "color_taken"),
+    ("outsider", "skaven", COLORS["azure"], "forbidden"),
+])
+def test_invalid_identity_cannot_mutate_a_campaign(actor, faction, color, error) -> None:
+    game = create_game("Estandartes", rules_from(_rules()), "1", "ana")
+    accept_seat(game, "2", "boa")
+    choose_identity(game, "1", "empire", COLORS["garnet"])
+    before = to_dict(game)
+    with pytest.raises(DomainError, match=error):
+        choose_identity(game, actor, faction, color)
+    assert to_dict(game) == before
+
+
+def test_a_legacy_running_campaign_can_choose_its_banners_once_without_losing_state() -> None:
+    old = to_dict(_opened())
+    old.pop("identity_required")
+    for member in old["members"]:
+        member.pop("faction")
+        member.pop("color")
+    game = from_dict(old)
+    armies = to_dict(game)["armies"]
+    choose_identity(game, "1", "vampire_counts", COLORS["violet"])
+    assert game.turn == old["turn"]
+    assert to_dict(game)["armies"] == armies
+    assert from_dict(to_dict(game)).members[0].faction == "vampire_counts"
+    with pytest.raises(DomainError, match="phase_invalid"):
+        choose_identity(game, "1", "skaven", COLORS["garnet"])
 
 
 def _rules(**overrides: object) -> dict[str, object]:
