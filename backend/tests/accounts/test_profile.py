@@ -78,6 +78,7 @@ def test_profile_updates_alias_sex_and_password(client) -> None:
     user = _player()
     _login(client)
     csrf = client.cookies.get(CSRF_COOKIE)
+    old_csrf = csrf
 
     response = client.post(
         "/api/profile",
@@ -97,6 +98,11 @@ def test_profile_updates_alias_sex_and_password(client) -> None:
     assert user.alias == "nueva_ada"
     assert user.sex == "undisclosed"
     assert user.check_password("otra-clave-larga")
+    # Changing the password must mint a fresh cookie so this browser stays signed in.
+    assert client.cookies.get(CSRF_COOKIE) != old_csrf
+    still = client.get("/api/session")
+    assert still.status_code == 200
+    assert still.json()["alias"] == "nueva_ada"
 
 
 @pytest.mark.django_db(transaction=True)

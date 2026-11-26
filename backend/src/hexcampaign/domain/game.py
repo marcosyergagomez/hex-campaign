@@ -99,6 +99,7 @@ class Game:
     home_size: int | None = None
     identity_required: bool = False
     road_ready: set[str] = field(default_factory=set)
+    lobby_ready: set[str] = field(default_factory=set)
 
 
 def find_member(game: Game, player_id: str) -> Member | None:
@@ -208,6 +209,7 @@ def to_dict(game: Game) -> dict[str, object]:
         "home_size": game.home_size,
         "identity_required": game.identity_required,
         "road_ready": sorted(game.road_ready),
+        "lobby_ready": sorted(game.lobby_ready),
         "fort_memory": {
             player_id: [
                 {"q": int(key.split(",")[0]), "r": int(key.split(",")[1]), "owner": owner}
@@ -278,6 +280,10 @@ def from_dict(data: object) -> Game:
     if not isinstance(ready, list) or any(not isinstance(item, str) for item in ready):
         raise DomainError("rules_invalid")
     game.road_ready = set(ready)
+    lobby = data.get("lobby_ready", [])
+    if not isinstance(lobby, list) or any(not isinstance(item, str) for item in lobby):
+        raise DomainError("rules_invalid")
+    game.lobby_ready = set(lobby)
     return game
 
 

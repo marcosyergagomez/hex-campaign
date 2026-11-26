@@ -113,10 +113,16 @@ def _preparing(ana, boa, *, blind: bool, map_id: str, size: int = 271) -> dict:
     )
     assert joined.status_code == 200, joined.text
     chosen = joined
-    for client, faction, color in ((ana, "empire", "#ac454f"), (boa, "skaven", "#3974b5")):
+    for client, faction, color in ((ana, "empire", "#c62828"), (boa, "skaven", "#1565c0")):
         chosen = _write(client, f"/api/campaigns/{campaign['id']}/identity", {
             "revision": chosen.json()["revision"], "faction": faction, "color": color,
         })
+        assert chosen.status_code == 200, chosen.text
+        chosen = _write(
+            client,
+            f"/api/campaigns/{campaign['id']}/ready",
+            {"revision": chosen.json()["revision"]},
+        )
         assert chosen.status_code == 200, chosen.text
     started = _write(
         ana,

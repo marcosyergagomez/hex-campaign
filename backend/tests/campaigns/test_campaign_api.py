@@ -104,17 +104,28 @@ def _started(ana, boa):
     )
     assert joined.status_code == 200, joined.text
     chosen = joined
-    for client, faction, color in ((ana, "empire", "#ac454f"), (boa, "skaven", "#3974b5")):
+    for client, faction, color in ((ana, "empire", "#c62828"), (boa, "skaven", "#1565c0")):
         chosen = _write(client, f"/api/campaigns/{campaign['id']}/identity", {
             "revision": chosen.json()["revision"], "faction": faction, "color": color,
         })
         assert chosen.status_code == 200, chosen.text
+        chosen = _write(
+            client,
+            f"/api/campaigns/{campaign['id']}/ready",
+            {"revision": chosen.json()["revision"]},
+        )
+        assert chosen.status_code == 200, chosen.text
+    sealed = _read(ana, f"/api/campaigns/{campaign['id']}")
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["hexes"] == []
+    assert sealed.json()["phase"] == "recruiting"
     started = _write(
         ana,
         f"/api/campaigns/{campaign['id']}/start",
         {"revision": chosen.json()["revision"], "admins": []},
     )
     assert started.status_code == 200, started.text
+    assert len(started.json()["hexes"]) > 0
     return started.json()
 
 
@@ -132,7 +143,7 @@ def test_identity_choices_are_private_writes_validated_and_persisted(clients) ->
     assert any(item == {"id": "skaven", "legacy": True} for item in options.json()["factions"])
     created = _write(ana, "/api/campaigns", {"name": "Estandartes", "rules": RULES}).json()
     path = f"/api/campaigns/{created['id']}"
-    identity = {"revision": created["revision"], "faction": "cathay", "color": "#ac454f"}
+    identity = {"revision": created["revision"], "faction": "cathay", "color": "#c62828"}
     assert _write(boa, f"{path}/identity", identity).status_code == 403
     rejected = _write(ana, f"{path}/identity", {**identity, "color": "url(https://example.com)"})
     assert rejected.status_code == 422
@@ -141,7 +152,7 @@ def test_identity_choices_are_private_writes_validated_and_persisted(clients) ->
     assert saved.status_code == 200, saved.text
     read = _read(ana, path).json()
     assert read["you"]["faction"] == "cathay"
-    assert read["members"][0]["color"] == "#ac454f"
+    assert read["members"][0]["color"] == "#c62828"
     assert _write(ana, f"{path}/identity", identity).status_code == 409
     link = _write(ana, f"{path}/links", {}).json()["token"]
     joined = _write(boa, f"/api/invitations/{link}/accept", {"revision": read["revision"]}).json()
@@ -150,6 +161,7 @@ def test_identity_choices_are_private_writes_validated_and_persisted(clients) ->
     assert missing.json()["errors"]["campaign"] == [
         "Todos los jugadores deben elegir raza y color antes de empezar.",
     ]
+    assert _read(ana, path).json()["hexes"] == []
     duplicate = _write(boa, f"{path}/identity", {**identity, "revision": joined["revision"]})
     assert duplicate.status_code == 422
     assert duplicate.json()["errors"]["campaign"] == ["Ese color ya pertenece a otro jugador."]
@@ -290,6 +302,106 @@ def test_an_inactive_account_cannot_open_a_campaign() -> None:
         create_campaign(user, "Norte", RULES)
 
     assert caught.value.code == "account_inactive"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_owner_can_delete_a_prepared_campaign(clients, settings) -> None:
+    from apps.campaigns.models import Campaign
+
+    settings.API_ORIGIN = ORIGIN
+    ana, _boa = clients
+    _player("borrar@example.com", "borrar_mesa")
+    _login(ana, "borrar@example.com")
+    created = _write(ana, "/api/campaigns", {"name": "Borrable", "rules": RULES})
+    assert created.status_code == 201, created.text
+    campaign_id = created.json()["id"]
+
+    refused = _write(ana, f"/api/campaigns/{campaign_id}/scrap", {"confirm_name": "Otro"})
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["errors"]["campaign"] == [
+        "Escribe el nombre exacto de la campaña para confirmar.",
+    ]
+
+    deleted = _write(ana, f"/api/campaigns/{campaign_id}/scrap", {"confirm_name": "Borrable"})
+    assert deleted.status_code == 204, deleted.text
+    assert not Campaign.objects.filter(pk=campaign_id).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_owner_leaving_a_running_campaign_hands_over_and_hides_it() -> None:
+    from apps.campaigns.records import _sync, scrap_campaign
+    from hexcampaign.domain.game import find_member, from_dict, to_dict
+    from hexcampaign.domain.lobby import accept_seat, invite_player
+
+    owner = _player("correr@example.com", "correr")
+    guest = _player("releve@example.com", "releve")
+    third = _player("tercera@example.com", "tercera")
+    wide = {**RULES, "seats": 3}
+    campaign, game = create_campaign(owner, "Marcha", wide)
+    game = invite_player(game, str(owner.pk), str(guest.pk), guest.alias)
+    game = accept_seat(game, str(guest.pk), guest.alias)
+    game = invite_player(game, str(owner.pk), str(third.pk), third.alias)
+    game = accept_seat(game, str(third.pk), third.alias)
+    game.phase = "orders"
+    game.turn = 1
+    campaign.state = to_dict(game)
+    campaign.phase = "orders"
+    campaign.save(update_fields=["state", "phase"])
+    _sync(campaign, game)
+
+    scrap_campaign(owner, campaign.id, "Marcha")
+    campaign.refresh_from_db()
+    updated = from_dict(campaign.state)
+    left = find_member(updated, str(owner.pk))
+    assert left is not None and left.status == "expelled"
+    assert find_member(updated, str(guest.pk)).role == "owner" or find_member(
+        updated, str(third.pk)
+    ).role == "owner"
+    assert updated.phase == "orders"
+    assert list_campaigns(owner) == []
+    assert any(row["id"] == str(campaign.id) for row in list_campaigns(guest))
+    assert any(row["id"] == str(campaign.id) for row in list_campaigns(third))
+
+
+@pytest.mark.django_db(transaction=True)
+def test_player_leaving_becomes_inactive_and_can_be_restored() -> None:
+    from apps.campaigns.models import Seat
+    from apps.campaigns.records import play, scrap_campaign
+    from hexcampaign.domain.game import find_member, from_dict, to_dict
+    from hexcampaign.domain.lobby import accept_seat, invite_player
+    from hexcampaign.domain.turn import restore_player
+
+    owner = _player("mesa@example.com", "mesa_due")
+    guest = _player("sale@example.com", "sale_uno")
+    campaign, game = create_campaign(owner, "Retirada", RULES)
+    game = invite_player(game, str(owner.pk), str(guest.pk), guest.alias)
+    game = accept_seat(game, str(guest.pk), guest.alias)
+    game.phase = "orders"
+    game.turn = 1
+    campaign.state = to_dict(game)
+    campaign.phase = "orders"
+    campaign.save(update_fields=["state", "phase"])
+    from apps.campaigns.records import _sync
+
+    _sync(campaign, game)
+
+    scrap_campaign(guest, campaign.id, "Retirada")
+    campaign.refresh_from_db()
+    updated = from_dict(campaign.state)
+    seat = find_member(updated, str(guest.pk))
+    assert seat is not None
+    assert seat.status == "inactive"
+    assert Seat.objects.get(campaign=campaign, user=guest).status == "inactive"
+    assert list_campaigns(guest) == []
+
+    campaign, restored = play(
+        owner,
+        campaign.id,
+        updated.revision,
+        lambda current: restore_player(current, str(owner.pk), str(guest.pk)),
+    )
+    assert find_member(restored, str(guest.pk)).status == "active"
+    assert any(row["id"] == str(campaign.id) for row in list_campaigns(guest))
 
 
 @pytest.mark.django_db(transaction=True)

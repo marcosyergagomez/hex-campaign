@@ -17,6 +17,7 @@ from hexcampaign.domain.lobby import (
     close_placement,
     create_game,
     invite_player,
+    mark_ready,
     place_armies,
 )
 from hexcampaign.domain.march import march
@@ -49,6 +50,10 @@ def test_player_identity_is_persisted_and_required_before_a_new_campaign_starts(
     assert [(member.faction, member.color) for member in restored.members] == [
         ("cathay", COLORS["garnet"]), ("cathay", COLORS["azure"]),
     ]
+    with pytest.raises(DomainError, match="lobby_not_ready"):
+        begin(restored, "1", [], NOW)
+    mark_ready(restored, "1")
+    mark_ready(restored, "2")
     begin(restored, "1", [], NOW)
     assert restored.rules == game.rules
     assert restored.phase == "orders"
@@ -106,10 +111,17 @@ def _rules(**overrides: object) -> dict[str, object]:
     return data
 
 
+def _ready_table(game):
+    for member in game.members:
+        if member.status == "active":
+            mark_ready(game, member.player_id)
+    return game
+
+
 def _opened(**overrides: object):
     game = create_game("Norte", rules_from(_rules(**overrides)), "1", "ana")
     game = accept_seat(game, "2", "boa")
-    return begin(game, "1", [], NOW)
+    return begin(_ready_table(game), "1", [], NOW)
 
 
 def _army(game, player_id: str):
@@ -412,7 +424,7 @@ def test_an_eliminated_owner_passes_the_table_when_the_war_continues() -> None:
     game = create_game("Norte", rules_from(_rules(seats=3, victory="fortress")), "1", "ana")
     game = accept_seat(game, "2", "boa")
     game = accept_seat(game, "3", "cio")
-    game = begin(game, "1", [], NOW)
+    game = begin(_ready_table(game), "1", [], NOW)
     owner = _army(game, "1")
     rival = _army(game, "2")
     third = _army(game, "3")
@@ -436,7 +448,7 @@ def test_a_hidden_battle_and_its_occupier_stay_out_of_the_other_view() -> None:
     game = create_game("Norte", rules_from(_rules(seats=3, visibility="anonymous")), "1", "ana")
     game = accept_seat(game, "2", "boa")
     game = accept_seat(game, "3", "cio")
-    game = begin(game, "1", [], NOW)
+    game = begin(_ready_table(game), "1", [], NOW)
     left = _army(game, "1")
     right = _army(game, "2")
     bystander = _army(game, "3")
@@ -465,7 +477,7 @@ def test_an_adjacent_holder_is_hidden_until_that_army_is_visible() -> None:
     game = create_game("Norte", rules_from(_rules(seats=3, visibility="adjacent")), "1", "ana")
     game = accept_seat(game, "2", "boa")
     game = accept_seat(game, "3", "cio")
-    game = begin(game, "1", [], NOW)
+    game = begin(_ready_table(game), "1", [], NOW)
     watcher = _army(game, "3")
     rival = _army(game, "2")
     far = next(
@@ -495,7 +507,7 @@ def test_a_placed_army_discovers_the_hex_it_stands_on() -> None:
         "ana",
     )
     game = accept_seat(game, "2", "boa")
-    game = begin(game, "1", [], NOW)
+    game = begin(_ready_table(game), "1", [], NOW)
     border = [
         cell
         for cell in game.hexes
@@ -522,7 +534,7 @@ def test_players_place_forts_inside_pre_marked_home_land() -> None:
     game = accept_seat(game, "2", "boa")
     game.plots = {cell: Plot("llanura") for cell in game.hexes}
     game.home_size = 7
-    game = begin(game, "1", [], NOW)
+    game = begin(_ready_table(game), "1", [], NOW)
     assert game.phase == "placing"
     assert len(game.anchors) == 2
     home_one = set(game.discovered["1"])

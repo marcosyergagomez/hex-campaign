@@ -84,7 +84,7 @@ def _errors(status: int, field: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"errors": {field: [message]}})
 
 
-def _set_session_cookies(response: Response, opened: OpenedSession) -> None:
+def set_session_cookies(response: Response, opened: OpenedSession) -> None:
     response.set_cookie(
         SESSION_COOKIE,
         opened.token,
@@ -133,7 +133,7 @@ def open_player_session(payload: LoginPayload, request: Request) -> JSONResponse
     except LoginRejected:
         return _errors(401, "credentials", CREDENTIALS_MESSAGE)
     response = JSONResponse({"email": opened.user.email, "alias": opened.user.alias})
-    _set_session_cookies(response, opened)
+    set_session_cookies(response, opened)
     return response
 
 
