@@ -176,9 +176,29 @@ export type Placement = "players" | "app"
 export type CampaignPhase =
   | "recruiting"
   | "placing"
+  | "preparing"
   | "orders"
   | "battles"
   | "finished"
+
+export type RoadPrep = {
+  budget: number
+  laid: number
+  left: number
+  ready: boolean
+}
+
+export type RoadsDelta = {
+  kind: "roads_delta"
+  id: string
+  revision: number
+  phase: CampaignPhase
+  turn: number
+  road_ready: string[]
+  roads: RoadPrep | null
+  hexes: CampaignHex[]
+  joined: true
+}
 
 export type CampaignRules = {
   seats: number
@@ -256,6 +276,8 @@ export type CampaignDetail = {
   hexes: CampaignHex[]
   fortresses: { q: number; r: number; player_id: string }[]
   chronicle: ChronicleEntry[]
+  road_ready: string[]
+  roads: RoadPrep | null
 }
 
 export const DEFAULT_CAMPAIGN_RULES: CampaignRules = {
@@ -275,6 +297,7 @@ export const DEFAULT_CAMPAIGN_RULES: CampaignRules = {
 const PHASES: readonly CampaignPhase[] = [
   "recruiting",
   "placing",
+  "preparing",
   "orders",
   "battles",
   "finished",
@@ -491,6 +514,11 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
       fortresses.push({ ...spot, player_id: value.player_id })
     }
   }
+  const road_ready = readIdList(record.road_ready)
+  const roads = readRoadPrep(record.roads)
+  if (road_ready === null || (record.phase === "preparing" && record.joined && roads === null)) {
+    return null
+  }
   return {
     id: record.id,
     name: record.name,
@@ -504,7 +532,43 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
     hexes,
     fortresses,
     chronicle: record.phase === "finished" ? readChronicle(record.chronicle) : [],
+    road_ready: road_ready ?? [],
+    roads: record.phase === "preparing" ? roads : null,
   }
+}
+
+function readIdList(value: unknown): string[] | null {
+  if (value === undefined) {
+    return []
+  }
+  if (!Array.isArray(value) || value.length > 8) {
+    return null
+  }
+  const ids: string[] = []
+  for (const item of value) {
+    if (typeof item !== "string" || item.length === 0 || item.length > 64) {
+      return null
+    }
+    ids.push(item)
+  }
+  return ids
+}
+
+function readRoadPrep(value: unknown): RoadPrep | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (!value || typeof value !== "object") {
+    return null
+  }
+  const record = value as Record<string, unknown>
+  const budget = readInt(record.budget, 0, 64)
+  const laid = readInt(record.laid, 0, 64)
+  const left = readInt(record.left, 0, 64)
+  if (budget === null || laid === null || left === null || typeof record.ready !== "boolean") {
+    return null
+  }
+  return { budget, laid, left, ready: record.ready }
 }
 
 const CODE = /^[a-z_]{1,40}$/
@@ -694,6 +758,97 @@ export async function saveIdentity(
   return campaign
 }
 
+async function postRoadMutation(
+  id: string,
+  path: string,
+  body: object,
+  baseline: CampaignDetail,
+): Promise<CampaignDetail> {
+  const data = await request(`/api/campaigns/${encodeURIComponent(id)}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...csrfHeaders() },
+    body: JSON.stringify(body),
+  })
+  const merged = readRoadMutation(data, baseline)
+  if (!merged) throw new ApiError(200, {})
+  return merged
+}
+
+export async function placeRoad(
+  id: string, revision: number, q: number, r: number, baseline: CampaignDetail,
+): Promise<CampaignDetail> {
+  return postRoadMutation(id, "/roads", { revision, q, r }, baseline)
+}
+
+export async function clearRoad(
+  id: string, revision: number, q: number, r: number, baseline: CampaignDetail,
+): Promise<CampaignDetail> {
+  return postRoadMutation(id, "/roads/clear", { revision, q, r }, baseline)
+}
+
+export async function finishRoads(
+  id: string, revision: number, baseline: CampaignDetail,
+): Promise<CampaignDetail> {
+  return postRoadMutation(id, "/roads/ready", { revision }, baseline)
+}
+
+function readRoadMutation(value: unknown, baseline: CampaignDetail): CampaignDetail | null {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  if (record.kind === "roads_delta") {
+    return applyRoadsDelta(baseline, record)
+  }
+  return readDetailCampaign(value)
+}
+
+function applyRoadsDelta(
+  baseline: CampaignDetail,
+  record: Record<string, unknown>,
+): CampaignDetail | null {
+  if (baseline.id !== record.id || record.joined !== true || !isPhase(record.phase)) {
+    return null
+  }
+  const revision = readInt(record.revision, 1, 1_000_000_000)
+  const turn = readInt(record.turn, 0, 1_000_000)
+  const road_ready = readIdList(record.road_ready)
+  if (revision === null || turn === null || road_ready === null) return null
+  if (revision < baseline.revision) return null
+  const roads = readRoadPrep(record.roads)
+  if (record.phase === "preparing" && roads === null) return null
+  if (!Array.isArray(record.hexes) || record.hexes.length > 8) return null
+
+  const patches = new Map<string, CampaignHex>()
+  for (const value of record.hexes) {
+    const cell = readCampaignHex(value)
+    if (!cell) return null
+    if (cell.known && cell.owner_id !== null &&
+      !baseline.members.some(member => member.player_id === cell.owner_id)) {
+      return null
+    }
+    patches.set(`${cell.q},${cell.r}`, cell)
+  }
+
+  let applied = 0
+  const hexes = baseline.hexes.map(cell => {
+    const patch = patches.get(`${cell.q},${cell.r}`)
+    if (!patch) return cell
+    applied += 1
+    return patch
+  })
+  if (applied !== patches.size) return null
+
+  return {
+    ...baseline,
+    revision,
+    phase: record.phase,
+    turn,
+    road_ready,
+    roads: record.phase === "preparing" ? roads : null,
+    hexes,
+    chronicle: record.phase === "finished" ? baseline.chronicle : [],
+  }
+}
+
 export type SavedMap = {
   id: string
   name: string
@@ -767,6 +922,13 @@ export async function generateMap(name: string, size: MapSize, seats: number): P
       body: JSON.stringify({ name, size, seats }),
     }),
   )
+}
+
+export async function deleteMap(id: string): Promise<void> {
+  await request(`/api/maps/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { ...csrfHeaders() },
+  })
 }
 
 export async function getMap(id: string): Promise<SavedMapDetail> {

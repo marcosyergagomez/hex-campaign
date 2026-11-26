@@ -4,7 +4,7 @@ import heapq
 import math
 import random
 
-from hexcampaign.domain.balance import arrival_times, balance_problems, local_roads
+from hexcampaign.domain.balance import arrival_times, balance_problems, raise_lookouts
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex, angle, disk, distance, neighbors
 from hexcampaign.domain.land import rotate
@@ -18,13 +18,13 @@ _WOODS = frozenset({"bosque", "bosque_profundo"})
 
 def paint(board: set[Hex], forts: tuple[Hex, ...], rng: random.Random) -> dict[Hex, Plot]:
     """Build a country. A failed sketch is thrown away and the seed continues."""
-    for _ in range(64):
+    for _ in range(128):
         plots = _sketch(board, forts, rng)
         _settle(plots, forts, rng)
-        _ford(plots)
+        _ford(plots, rng)
         _link(plots, board, forts)
         _single_cliffs(plots)
-        if local_roads(plots, forts, rng) and not _problems(plots, board, forts):
+        if raise_lookouts(plots, forts, rng) and not _problems(plots, board, forts):
             return plots
     raise DomainError("rules_invalid")
 
@@ -387,18 +387,58 @@ def _settle(plots: dict[Hex, Plot], forts: tuple[Hex, ...], rng: random.Random) 
             plots[ring[2]] = Plot("colina")
 
 
-def _ford(plots: dict[Hex, Plot]) -> None:
-    for cell, plot in plots.items():
-        if plot.ground != "rio":
+def _ford(plots: dict[Hex, Plot], rng: random.Random) -> None:
+    """A bridge every four or five river hexes, with a little give on the count."""
+    for group in terrain_groups(plots, {"rio"}):
+        path = _river_walk(group)
+        if len(path) < 2:
             continue
-        sides = [
+        spacing = rng.randint(4, 5)
+        until = rng.randint(max(2, spacing - 1), spacing + 1)
+        for cell in path:
+            until -= 1
+            if until > 0:
+                continue
+            if _crossing_banks(plots, cell):
+                plots[cell] = Plot("rio", bridge=True)
+                spacing = rng.randint(4, 5)
+                until = spacing
+            else:
+                until = 1
+
+
+def _river_walk(group: set[Hex]) -> list[Hex]:
+    tips = [cell for cell in group if _degree(cell, group) == 1]
+    start = min(tips) if tips else min(group)
+    ordered = [start]
+    previous: Hex | None = None
+    while len(ordered) < len(group):
+        cell = ordered[-1]
+        nxt = [
             other
             for other in neighbors(cell)
-            if other in plots and passable(plots[other]) and plots[other].ground != "rio"
+            if other in group and other != previous
         ]
-        if len(sides) >= 2:
-            plots[cell] = Plot("rio", bridge=True)
-            return
+        if not nxt:
+            break
+        previous = cell
+        ordered.append(min(nxt))
+    return ordered
+
+
+def _crossing_banks(plots: dict[Hex, Plot], cell: Hex) -> tuple[Hex, Hex] | None:
+    """Two dry banks that face each other across this river hex."""
+    ring = neighbors(cell)
+    banks = [
+        index
+        for index, other in enumerate(ring)
+        if other in plots and passable(plots[other]) and plots[other].ground != "rio"
+    ]
+    for index in banks:
+        opposite = (index + 3) % 6
+        if opposite in banks:
+            return ring[index], ring[opposite]
+    return None
 
 
 def _link(plots: dict[Hex, Plot], board: set[Hex], forts: tuple[Hex, ...]) -> None:
@@ -519,14 +559,8 @@ def _shores_ok(plots: dict[Hex, Plot], board: set[Hex]) -> bool:
             )
             if not rocky or not (_touches(plots, cell, "lago") or _rim(cell, board)):
                 return False
-        if plot.bridge:
-            sides = [
-                other
-                for other in neighbors(cell)
-                if other in plots and passable(plots[other])
-            ]
-            if len(sides) < 2:
-                return False
+        if plot.bridge and _crossing_banks(plots, cell) is None:
+            return False
     return True
 
 

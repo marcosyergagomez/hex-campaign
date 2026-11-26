@@ -1,7 +1,9 @@
 """Save a map the player can reuse. The campaign stores a copy, not a link."""
 
 import random
+import uuid
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from hexcampaign.domain.errors import DomainError
@@ -12,15 +14,19 @@ from hexcampaign.domain.rules import campaign_name
 from .models import CampaignMap
 from .records import CampaignError, _actor
 
+# Keeps atlas storage bounded per account; campaigns already copy the ground.
+_MAP_LIMIT = 40
+
 
 def store_generated(user, name: str, size: int, seats: int, rng: random.Random) -> CampaignMap:
+    try:
+        template = generate(size, seats, rng)
+        title = campaign_name(name)
+    except DomainError as exc:
+        raise CampaignError(exc.code) from exc
     with transaction.atomic():
         account = _actor(user)
-        try:
-            template = generate(size, seats, rng)
-            title = campaign_name(name)
-        except DomainError as exc:
-            raise CampaignError(exc.code) from exc
+        _ensure_room(account)
         return CampaignMap.objects.create(
             owner=account,
             name=title,
@@ -32,13 +38,14 @@ def store_generated(user, name: str, size: int, seats: int, rng: random.Random) 
 
 
 def store_drawn(user, name: str, size: int, cells: list[dict[str, object]]) -> CampaignMap:
+    try:
+        template = drawn(size, cells)
+        title = campaign_name(name)
+    except DomainError as exc:
+        raise CampaignError(exc.code) from exc
     with transaction.atomic():
         account = _actor(user)
-        try:
-            template = drawn(size, cells)
-            title = campaign_name(name)
-        except DomainError as exc:
-            raise CampaignError(exc.code) from exc
+        _ensure_room(account)
         return CampaignMap.objects.create(
             owner=account,
             name=title,
@@ -68,12 +75,26 @@ def read_map(user, map_id: str) -> dict[str, object]:
     return {"id": str(row.id), "name": row.name, **row.document}
 
 
+def drop_map(user, map_id: str) -> None:
+    """Remove a saved atlas. Campaigns already hold their own copy of the ground."""
+    with transaction.atomic():
+        _actor(user)
+        row = _owned(user, map_id)
+        row.delete()
+
+
 def take_template(user, map_id: str):
     return load_template(_owned(user, map_id).document)
 
 
 def _owned(user, map_id: str) -> CampaignMap:
     try:
+        uuid.UUID(str(map_id))
         return CampaignMap.objects.get(pk=map_id, owner=user)
-    except (CampaignMap.DoesNotExist, ValueError):
+    except (CampaignMap.DoesNotExist, ValueError, TypeError, ValidationError):
         raise CampaignError("map_unknown") from None
+
+
+def _ensure_room(account) -> None:
+    if CampaignMap.objects.filter(owner=account).count() >= _MAP_LIMIT:
+        raise CampaignError("map_limit")

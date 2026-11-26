@@ -70,6 +70,10 @@ function sentence(
       return t("chroniclePlaced", { alias: who, q: String(entry.q ?? 0), r: String(entry.r ?? 0) })
     case "placement_closed":
       return t("chroniclePlacementClosed", { alias: who })
+    case "roads_ready":
+      return t("chronicleRoadsReady", { alias: who })
+    case "preparation_closed":
+      return t("chroniclePreparationClosed")
     case "named":
       return t("chronicleNamed", { alias: who, name: entry.name ?? army })
     case "orders_locked":

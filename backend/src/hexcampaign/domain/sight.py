@@ -2,11 +2,18 @@
 
 from hexcampaign.domain.game import Army, Game, living
 from hexcampaign.domain.hexes import Hex, distance
-from hexcampaign.domain.land import home_radius, owned
 from hexcampaign.domain.terrain import gaze_from
+from hexcampaign.domain.territory import home_land
 
 
-def sees_army(game: Game, viewer: str, army: Army) -> bool:
+def sees_army(
+    game: Game,
+    viewer: str,
+    army: Army,
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> bool:
     if army.player_id == viewer:
         return True
     if army.destroyed or army.q is None or army.r is None:
@@ -14,7 +21,7 @@ def sees_army(game: Game, viewer: str, army: Army) -> bool:
     cell = Hex(army.q, army.r)
     if game.plots is None:
         return _sees_without_terrain(game, viewer, cell)
-    return _sees_with_terrain(game, viewer, cell)
+    return _sees_with_terrain(game, viewer, cell, home=home, board=board)
 
 
 def _sees_without_terrain(game: Game, viewer: str, cell: Hex) -> bool:
@@ -27,37 +34,53 @@ def _sees_without_terrain(game: Game, viewer: str, cell: Hex) -> bool:
     return any(distance(cell, Hex(own.q, own.r)) <= 1 for own in living(game, viewer))
 
 
-def _sees_with_terrain(game: Game, viewer: str, cell: Hex) -> bool:
+def _sees_with_terrain(
+    game: Game,
+    viewer: str,
+    cell: Hex,
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> bool:
     if game.rules.visibility in {"full", "total"}:
         return True
     if game.rules.visibility not in {"charted", "home"}:
         return False
-    if in_home(game, viewer, cell):
+    if in_home(game, viewer, cell, home=home, board=board):
         return True
     if game.rules.visibility == "home" and cell not in game.discovered.get(viewer, set()):
         return False
     return any(_reaches(game, own, cell) for own in living(game, viewer))
 
 
-def known_hex(game: Game, viewer: str, cell: Hex) -> bool:
+def known_hex(
+    game: Game,
+    viewer: str,
+    cell: Hex,
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> bool:
+    cells = board if board is not None else set(game.hexes)
     if game.rules.visibility in {"full", "total", "charted"}:
-        return cell in set(game.hexes)
-    if in_home(game, viewer, cell):
+        return cell in cells
+    if in_home(game, viewer, cell, home=home, board=cells):
         return True
     return cell in game.discovered.get(viewer, set())
 
 
-def in_home(game: Game, viewer: str, cell: Hex) -> bool:
+def in_home(
+    game: Game,
+    viewer: str,
+    cell: Hex,
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> bool:
     if game.plots is None:
         return False
-    board = set(game.hexes)
-    radius = home_radius(game.rules.map_size)
-    for fort in game.fortresses:
-        if fort.player_id == viewer and cell in owned(
-            fort.at(), radius, board, count=game.home_size,
-        ):
-            return True
-    return False
+    claimed = home if home is not None else home_land(game, viewer, board=board)
+    return cell in claimed
 
 
 def gazed_cells(game: Game, origin: Hex) -> set[Hex]:

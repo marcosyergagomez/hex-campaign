@@ -135,7 +135,7 @@ def leave_campaign(game: Game, actor: str, rng: random.Random, now: datetime) ->
 
 def promote_player(game: Game, actor: str, target_id: str) -> Game:
     require_staff(game, actor)
-    require_phase(game, "placing", "orders", "battles", "finished")
+    require_phase(game, "placing", "preparing", "orders", "battles", "finished")
     target = find_member(game, target_id)
     if target is None or target.status == "expelled":
         raise DomainError("forbidden")
@@ -532,7 +532,7 @@ def _release(game: Game, player_id: str) -> None:
 
 
 def _campaign_over(game: Game) -> bool:
-    if game.phase in {"recruiting", "placing", "finished"}:
+    if game.phase in {"recruiting", "placing", "preparing", "finished"}:
         return False
     return len([member for member in seated(game) if member.status != "eliminated"]) <= 1
 

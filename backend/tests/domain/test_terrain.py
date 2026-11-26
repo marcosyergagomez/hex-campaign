@@ -8,16 +8,18 @@ from datetime import UTC, datetime
 
 import pytest
 
-from hexcampaign.domain.balance import arrival_times, balance_problems, local_roads, road_masses
+from hexcampaign.domain.balance import arrival_times, balance_problems
 from hexcampaign.domain.clock_march import Walker, walk
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import from_dict, to_dict
 from hexcampaign.domain.hexes import Hex, angle, disk, distance, neighbors
-from hexcampaign.domain.land import owned, rotate
+from hexcampaign.domain.land import home_radius, owned, rotate
 from hexcampaign.domain.landscape import _problems, _spread
+from hexcampaign.domain.game import seated
 from hexcampaign.domain.lobby import accept_seat, begin, change_rules, create_game
 from hexcampaign.domain.map_document import dump_template, load_template
 from hexcampaign.domain.maps import Template, generate, lay
+from hexcampaign.domain.roads import finish_roads, road_budget
 from hexcampaign.domain.rules import rules_from
 from hexcampaign.domain.sight import remember_fort
 from hexcampaign.domain.terrain import (
@@ -30,7 +32,18 @@ from hexcampaign.domain.terrain import (
     terrain_groups,
 )
 from hexcampaign.domain.turn import lock_orders
-from hexcampaign.domain.view import project
+from hexcampaign.domain.view import project, project_roads_delta
+
+NOW = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _finish_prep(game, now=NOW):
+    if game.phase != "preparing":
+        return game
+    for member in seated(game):
+        if member.status == "active" and member.player_id not in game.road_ready:
+            finish_roads(game, member.player_id, now)
+    return game
 
 
 def test_territory_owners_are_only_sent_for_known_cells_and_respect_the_saved_area() -> None:
@@ -182,10 +195,20 @@ def test_leaving_by_a_road_pays_for_one_more_plain() -> None:
     first = Hex(0, 0)
     second = Hex(1, 0)
     third = Hex(2, 0)
-    plots = {first: Plot("llanura", road=True), second: Plot("llanura"), third: Plot("llanura")}
+    plots = {first: Plot("bosque", road=True), second: Plot("llanura"), third: Plot("llanura")}
     walker = Walker("a", "p", first, [second, third], budget=1, paid=0)
     moved = walk([walker], plots, set(plots))
     assert moved.positions["a"] == third
+
+
+def test_an_open_track_does_not_repay_movement() -> None:
+    first = Hex(0, 0)
+    second = Hex(1, 0)
+    third = Hex(2, 0)
+    plots = {first: Plot("llanura", road=True), second: Plot("llanura"), third: Plot("llanura")}
+    walker = Walker("a", "p", first, [second, third], budget=1, paid=0)
+    moved = walk([walker], plots, set(plots))
+    assert moved.positions["a"] == second
 
 
 @pytest.mark.parametrize("budget", [1, 2, 3])
@@ -216,12 +239,12 @@ def test_arrival_estimates_match_the_movement_engine_with_refunds_and_carried_pa
 def test_local_roads_must_not_turn_a_long_geometric_separation_into_a_rush() -> None:
     plots = {cell: Plot("llanura") for cell in disk(271)}
     forts = (Hex(7, 0), Hex(-7, 0))
-    plots[Hex(6, 0)] = Plot("llanura", road=True)
-    plots[Hex(5, 0)] = Plot("llanura", road=True)
-    plots[Hex(-6, 0)] = Plot("llanura", road=True)
+    plots[Hex(6, 0)] = Plot("bosque", road=True)
+    plots[Hex(5, 0)] = Plot("bosque", road=True)
+    plots[Hex(-6, 0)] = Plot("bosque", road=True)
     assert _turns(plots, *forts) == 4
     assert "rush" in balance_problems(plots, forts)
-    plots[Hex(0, 0)] = Plot("llanura", road=True)
+    plots[Hex(0, 0)] = Plot("bosque", road=True)
     assert "road_outside_home" in balance_problems(plots, forts)
 
 
@@ -296,17 +319,7 @@ def test_natural_contours_preserve_generated_geography(size: int, seats: int) ->
             }
             assert len(gates) >= 3
             assert any(gaze_from(template.cells[cell]) >= 3 for cell in gates)
-            roads = {cell for cell in home if template.cells[cell].road}
-            assert 0 < len(roads) < len(home) / 2
-            assert fort not in roads
-            assert roads <= times.keys()
-            for mass in road_masses({cell: template.cells[cell] for cell in home - {fort}}):
-                path = roads & mass
-                assert path
-                assert _mass({cell: Plot("llanura") for cell in path}, {"llanura"}) == len(path)
-                degrees = [sum(other in path for other in neighbors(cell)) for cell in path]
-                assert max(degrees) <= 2
-                assert sum(degrees) == 2 * (len(path) - 1)
+            assert all(not template.cells[cell].road for cell in home)
             times = arrival_times(template.cells, fort)
             assert all(
                 5 <= times[other] <= math.ceil(distance(fort, other) / 3) + 2
@@ -315,11 +328,7 @@ def test_natural_contours_preserve_generated_geography(size: int, seats: int) ->
             nearest.append(min(times[other] for other in template.anchors if other != fort))
         assert min(nearest) >= 5
         assert max(nearest) - min(nearest) <= 1
-        for cell, plot in template.cells.items():
-            if plot.road:
-                assert cell in homes
-                assert plot.ground not in {"llanura", "campo", "mina", "desierto"}
-                assert checked_plot(plot.ground, plot.road, plot.bridge) == plot
+        assert all(not plot.road for plot in template.cells.values())
 
 
 @pytest.mark.parametrize(("size", "seats"), [(331, 3), (469, 4), (631, 4)])
@@ -439,28 +448,66 @@ def test_old_map_and_campaign_documents_keep_their_original_territory() -> None:
     assert len(game.discovered["ana"]) == 19
 
 
-def test_one_corridor_crosses_a_compact_mass_without_paving_it_or_entering_neutral_land() -> None:
-    plots = {cell: Plot("llanura") for cell in disk(817)}
-    fort = Hex(12, 0)
-    centre = Hex(10, 0)
-    forest = {centre, *neighbors(centre)}
-    for cell in forest:
-        plots[cell] = Plot("bosque_profundo" if cell == centre else "bosque")
-    mountains = {Hex(13, -2), Hex(14, -2), Hex(15, -2)}
-    for cell in mountains:
-        plots[cell] = Plot("montana")
-    rock = Hex(14, -1)
-    neutral = Hex(7, 0)
-    plots[rock] = Plot("montana_rocosa")
-    plots[neutral] = Plot("bosque")
-    assert local_roads(plots, (fort,), random.Random(0))
-    path = {cell for cell in forest if plots[cell].road}
-    assert 2 <= len(path) <= 4
-    assert all(sum(other in path for other in neighbors(cell)) <= 2 for cell in path)
-    assert any(plots[cell].road for cell in mountains)
-    assert not plots[rock].road
-    assert not plots[neutral].road
-    assert all(not plot.road or distance(cell, fort) <= 4 for cell, plot in plots.items())
+def test_preparation_lets_each_player_lay_roads_from_their_fortress() -> None:
+    from hexcampaign.domain.roads import clear_road, finish_roads, place_road, road_budget
+
+    game = create_game("Norte", _table(map_size=271, visibility="total"), "ana", "Ana")
+    lay(game, generate(271, 2, random.Random(2)), surveyor="ana")
+    accept_seat(game, "boa", "Boa")
+    begin(game, "ana", [], NOW)
+    assert game.phase == "preparing"
+    fort = next(item.at() for item in game.fortresses if item.player_id == "ana")
+    home = owned(fort, home_radius(271), set(game.hexes), count=game.home_size)
+    assert road_budget(game, "ana") == 2 * max(distance(cell, fort) for cell in home)
+    first = next(cell for cell in neighbors(fort) if cell in game.plots and passable(game.plots[cell]))
+    place_road(game, "ana", first)
+    assert game.plots[first].road
+    with pytest.raises(DomainError):
+        place_road(game, "ana", Hex(0, 0))
+    clear_road(game, "ana", first)
+    assert not game.plots[first].road
+    place_road(game, "ana", first)
+    finish_roads(game, "ana", NOW)
+    assert "ana" in game.road_ready
+    assert game.phase == "preparing"
+    finish_roads(game, "boa", NOW)
+    assert game.phase == "orders"
+    assert game.turn == 1
+
+
+def test_roads_delta_ships_only_the_changed_hex_and_road_counters() -> None:
+    import json
+
+    from hexcampaign.domain.roads import finish_roads, place_road
+
+    game = create_game("Norte", _table(map_size=271, visibility="total"), "ana", "Ana")
+    lay(game, generate(271, 2, random.Random(2)), surveyor="ana")
+    accept_seat(game, "boa", "Boa")
+    begin(game, "ana", [], NOW)
+    fort = next(item.at() for item in game.fortresses if item.player_id == "ana")
+    first = next(cell for cell in neighbors(fort) if cell in game.plots and passable(game.plots[cell]))
+    place_road(game, "ana", first)
+
+    full = project(game, "ana", NOW)
+    delta = project_roads_delta(game, "ana", [first])
+    assert delta["kind"] == "roads_delta"
+    assert delta["phase"] == "preparing"
+    assert delta["revision"] == game.revision
+    assert delta["roads"] == full["roads"]
+    assert delta["road_ready"] == full["road_ready"]
+    assert len(delta["hexes"]) == 1
+    assert delta["hexes"][0]["q"] == first.q
+    assert delta["hexes"][0]["r"] == first.r
+    assert delta["hexes"][0]["road"] is True
+    assert "members" not in delta
+    assert "fortresses" not in delta
+    assert len(json.dumps(delta, sort_keys=True)) < len(json.dumps(full, sort_keys=True)) // 5
+
+    finish_roads(game, "ana", NOW)
+    ready = project_roads_delta(game, "ana", [])
+    assert ready["hexes"] == []
+    assert ready["roads"]["ready"] is True
+    assert "ana" in ready["road_ready"]
 
 
 def test_a_player_who_looked_at_the_generated_map_knows_every_hex() -> None:
@@ -468,13 +515,14 @@ def test_a_player_who_looked_at_the_generated_map_knows_every_hex() -> None:
     lay(game, generate(271, 2, random.Random(2)), surveyor="ana")
     accept_seat(game, "boa", "Boa")
     begin(game, "ana", [], NOW)
+    assert game.phase == "preparing"
     assert game.discovered["ana"] == set(game.hexes)
     assert len(game.discovered["boa"]) < len(game.hexes)
 
 
 def test_a_road_keeps_paying_for_the_hexes_after_the_eighth() -> None:
     cells = [Hex(index, 0) for index in range(10)]
-    plots = {cell: Plot("llanura", road=True) for cell in cells}
+    plots = {cell: Plot("bosque", road=True) for cell in cells}
     walker = Walker("a", "p", cells[0], cells[1:], budget=1, paid=0)
     moved = walk([walker], plots, set(plots))
     assert moved.positions["a"] == cells[-1]
@@ -498,6 +546,7 @@ def test_two_armies_of_one_player_cannot_lock_the_same_hex() -> None:
     lay(game, generate(271, 2, random.Random(1)), surveyor=None)
     accept_seat(game, "boa", "Boa")
     begin(game, "ana", [], NOW)
+    _finish_prep(game)
     own = [army for army in game.armies if army.player_id == "ana"]
     fort = next(item for item in game.fortresses if item.player_id == "ana").at()
     assert game.plots is not None
@@ -573,12 +622,11 @@ def _turns(plots: dict[Hex, Plot], start: Hex, goal: Hex) -> int:
                     seen.add(carried)
                     heapq.heappush(queue, (turn + 1, cell, budget, paid + left))
                 continue
-            remain = left - need + (1 if plots[cell].road else 0)
+            remain = left - need + (
+                1 if plots[cell].road and plots[cell].ground not in {"llanura", "playa", "rio"} else 0
+            )
             state = (nxt, remain, 0, turn)
             if state not in seen:
                 seen.add(state)
                 heapq.heappush(queue, (turn, nxt, remain, 0))
     return 5
-
-
-NOW = datetime(2026, 1, 1, tzinfo=UTC)

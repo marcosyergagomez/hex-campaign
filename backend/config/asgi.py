@@ -4,7 +4,11 @@ import os
 
 from django.core.asgi import get_asgi_application
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.local")
+# Production must set DJANGO_SETTINGS_MODULE explicitly (or APP_ENV=production).
+if "DJANGO_SETTINGS_MODULE" not in os.environ:
+    if os.environ.get("APP_ENV") == "production":
+        raise RuntimeError("DJANGO_SETTINGS_MODULE must be set when APP_ENV=production")
+    os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings.local"
 
 
 def _applications():

@@ -38,12 +38,14 @@ export function HexBoard({
   size = SIZE,
   players = NO_PLAYERS,
   unknown = NO_SPOTS,
+  onCellClick,
 }: {
   cells: OwnedCell[]
   anchors: Spot[]
   size?: number
   players?: TerritoryPlayer[]
   unknown?: Spot[]
+  onCellClick?: (cell: OwnedCell) => void
 }) {
   const { t } = useI18n()
   const [zoom, setZoom] = useState(1)
@@ -233,10 +235,11 @@ export function HexBoard({
               key={`${cell.q},${cell.r}`}
               points={points}
               transform={`translate(${cell.x} ${cell.y})`}
-              className={`hex-edge${forts.has(`${cell.q},${cell.r}`) ? " is-fort" : ""}`}
+              className={`hex-edge${forts.has(`${cell.q},${cell.r}`) ? " is-fort" : ""}${onCellClick ? " is-pick" : ""}`}
               style={{ strokeWidth: size / SIZE * (forts.has(`${cell.q},${cell.r}`) ? 1.6 : .45) }}
               onMouseEnter={() => onHover(cell)}
               onMouseLeave={() => onHover(null)}
+              onClick={onCellClick ? () => onCellClick(cell) : undefined}
             >
               <title>{terrainName(cell)}</title>
             </polygon>
@@ -250,20 +253,44 @@ export function HexBoard({
 }
 
 function Bridge({ cell, cells }: { cell: Placed; cells: Placed[] }) {
-  const water = STEPS.map(([q, r]) => cells.find((other) =>
-    other.q === cell.q + q && other.r === cell.r + r && ["rio", "lago"].includes(other.ground),
-  )).filter((other) => other !== undefined)
-  const start = water[0]
-  const end = water[1]
-  const angle = start
-    ? Math.atan2((end?.y ?? cell.y) - start.y, (end?.x ?? cell.x) - start.x) * 180 / Math.PI + 90
+  // Span bank to bank: opposite dry neighbours, never along the channel.
+  const banks = STEPS.map(([q, r], index) => {
+    const other = cells.find((spot) => spot.q === cell.q + q && spot.r === cell.r + r)
+    if (!other || other.ground === "rio" || other.ground === "lago") return null
+    return { index, other }
+  }).filter((item): item is { index: number; other: Placed } => item !== null)
+  let start = banks[0]?.other
+  let end: Placed | undefined
+  for (const left of banks) {
+    const right = banks.find((item) => item.index === (left.index + 3) % 6)
+    if (right) {
+      start = left.other
+      end = right.other
+      break
+    }
+  }
+  if (!end && banks.length >= 2) {
+    let best = 0
+    for (const left of banks) {
+      for (const right of banks) {
+        const gap = Math.min((right.index - left.index + 6) % 6, (left.index - right.index + 6) % 6)
+        if (gap > best) {
+          best = gap
+          start = left.other
+          end = right.other
+        }
+      }
+    }
+  }
+  const angle = start && end
+    ? Math.atan2(end.y - start.y, end.x - start.x) * 180 / Math.PI
     : 0
   return (
     <g className="hex-bridge" transform={`rotate(${angle})`}>
-      <rect x="-14" y="-4" width="28" height="10" rx="1" fill="#343d32" opacity=".35" />
-      <rect x="-14" y="-5" width="28" height="8" rx="1" fill="#b19a6b" stroke="#5e513b" />
-      {[-10, -5, 0, 5, 10].map((x) => <path key={x} d={`M${x}-5V3`} stroke="#786447" strokeWidth=".8" />)}
-      <path d="M-15-6H15M-15 4H15" stroke="#ddcba0" strokeWidth="1.5" />
+      <rect x="-18" y="-4" width="36" height="10" rx="1" fill="#343d32" opacity=".35" />
+      <rect x="-18" y="-5" width="36" height="8" rx="1" fill="#b19a6b" stroke="#5e513b" />
+      {[-12, -6, 0, 6, 12].map((x) => <path key={x} d={`M${x}-5V3`} stroke="#786447" strokeWidth=".8" />)}
+      <path d="M-19-6H19M-19 4H19" stroke="#ddcba0" strokeWidth="1.5" />
     </g>
   )
 }

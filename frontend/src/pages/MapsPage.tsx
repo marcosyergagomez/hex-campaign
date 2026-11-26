@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 
 import {
   ApiError,
+  deleteMap,
   generateMap,
   getMap,
   listMapScales,
@@ -19,6 +20,7 @@ import { presentError } from "../presentError"
 import "../game/hex/board.css"
 
 const TABLE_LABELS = { small: "tableSmall", medium: "tableMedium", large: "tableLarge" } as const
+const SIZE_WORDS = { small: "sizeSmall", medium: "sizeMedium", large: "sizeLarge" } as const
 
 export function MapsPage() {
   const { t } = useI18n()
@@ -53,6 +55,11 @@ export function MapsPage() {
     }
   }, [])
 
+  function sizeWord(mapSize: MapSize): string {
+    const key = tables.find(table => table.size === mapSize)?.key
+    return key ? t(SIZE_WORDS[key]) : String(mapSize)
+  }
+
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
     setPending(true)
@@ -62,7 +69,7 @@ export function MapsPage() {
         throw new ApiError(422, {})
       }
       const created = await generateMap(name.trim(), size, seats)
-      setMaps((current) => [created, ...current.filter((item) => item.id !== created.id)])
+      setMaps(current => [created, ...current.filter(item => item.id !== created.id)])
       setChart(null)
       setName("")
     } catch (error) {
@@ -88,6 +95,24 @@ export function MapsPage() {
     }
   }
 
+  async function removeMap(id: string, label: string) {
+    if (pending || !window.confirm(t("mapDeleteConfirm", { name: label }))) {
+      return
+    }
+    openTicket.current += 1
+    setPending(true)
+    setErrors({})
+    try {
+      await deleteMap(id)
+      setMaps(current => current.filter(item => item.id !== id))
+      setChart(current => (current?.id === id ? null : current))
+    } catch (error) {
+      setErrors(presentError(error, "mapUnknown"))
+    } finally {
+      setPending(false)
+    }
+  }
+
   return (
     <section className="map-studio">
       <header className="stage stage-short">
@@ -103,7 +128,7 @@ export function MapsPage() {
       </header>
       <div className="map-studio-body">
         <form className="wizard-panel map-studio-form" onSubmit={onSubmit}>
-          <Banner errors={errors} fields={["form", "map", "rules", "name"]} />
+          <Banner errors={errors} fields={["form", "map", "rules", "name", "origin", "csrf", "session"]} />
           <Field label={t("mapName")} name="map-name" value={name} onChange={setName} />
           <SelectField
             label={t("mapSeats")}
@@ -145,7 +170,6 @@ export function MapsPage() {
                     ) : null}
                     <small>{t("mapHomeArea", { count: String(table.home_size) })}</small>
                   </span>
-                  <strong>{table.size}</strong>
                 </button>
               )
             })}
@@ -163,24 +187,40 @@ export function MapsPage() {
               <p className="hex-caption">{t("mapsLead")}</p>
             </div>
           )}
-          <ul className="map-strip">
-            {maps.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className={chart?.id === item.id ? "map-chip is-selected" : "map-chip"}
-                  onClick={() => openMap(item.id)}
-                >
-                  <span>{item.name}</span>
-                  <small>
-                    {item.size}
-                    {item.seats ? ` · ${item.seats}` : ""}
-                  </small>
-                </button>
-              </li>
-            ))}
-          </ul>
         </div>
+        <aside className="map-studio-saved" aria-labelledby="saved-maps-title">
+          <h2 id="saved-maps-title">{t("mapsSaved")}</h2>
+          {maps.length === 0 ? (
+            <p className="quiet">{t("mapsSavedEmpty")}</p>
+          ) : (
+            <ul className="map-saved-list">
+              {maps.map((item) => (
+                <li key={item.id}>
+                  <div className={chart?.id === item.id ? "map-saved-card is-selected" : "map-saved-card"}>
+                    <button
+                      type="button"
+                      className="map-saved-open"
+                      onClick={() => { void openMap(item.id) }}
+                    >
+                      <span className="map-saved-name">{item.name}</span>
+                      <small className="map-saved-meta">
+                        {sizeWord(item.size)}
+                        {item.seats ? ` · ${t("mapSeatsCount", { count: String(item.seats) })}` : ""}
+                      </small>
+                    </button>
+                    <button
+                      type="button"
+                      className="map-saved-delete"
+                      onClick={() => { void removeMap(item.id, item.name) }}
+                    >
+                      {t("mapDeleteAction")}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </aside>
       </div>
     </section>
   )

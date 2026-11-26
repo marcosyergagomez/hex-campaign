@@ -81,15 +81,24 @@ def _write(client, path: str, body: dict):
     return client.post(path, json=body, headers=_headers(client, write=True))
 
 
+def _delete(client, path: str):
+    return client.delete(path, headers=_headers(client, write=True))
+
+
 def _read(client, path: str):
     return client.get(path, headers=_headers(client, write=False))
 
 
-def _table(ana, boa, *, blind: bool, map_id: str, size: int = 271) -> dict:
+def _preparing(ana, boa, *, blind: bool, map_id: str, size: int = 271) -> dict:
     created = _write(
         ana,
         "/api/campaigns",
-        {"name": "Norte", "rules": {**RULES, "map_size": size}, "map_id": map_id, "blind": blind},
+        {
+            "name": "Norte",
+            "rules": {**RULES, "map_size": size, "placement": "app"},
+            "map_id": map_id,
+            "blind": blind,
+        },
     )
     assert created.status_code == 201, created.text
     campaign = created.json()
@@ -115,7 +124,22 @@ def _table(ana, boa, *, blind: bool, map_id: str, size: int = 271) -> dict:
         {"revision": chosen.json()["revision"], "admins": []},
     )
     assert started.status_code == 200, started.text
-    return started.json()
+    view = started.json()
+    assert view["phase"] == "preparing"
+    return view
+
+
+def _table(ana, boa, *, blind: bool, map_id: str, size: int = 271) -> dict:
+    view = _preparing(ana, boa, blind=blind, map_id=map_id, size=size)
+    campaign_id = view["id"]
+    for client in (ana, boa):
+        view = _write(
+            client,
+            f"/api/campaigns/{campaign_id}/roads/ready",
+            {"revision": view["revision"]},
+        ).json()
+    assert view["phase"] == "orders"
+    return _read(ana, f"/api/campaigns/{campaign_id}").json()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -133,7 +157,7 @@ def test_a_generated_map_stays_hidden_when_the_owner_does_not_look(clients, size
     assert chart.json()["home_size"] == home
     grounds = {item["ground"] for item in chart.json()["cells"]}
     assert {"rio", "lago", "bosque", "montana"} <= grounds
-    assert any(item["road"] for item in chart.json()["cells"])
+    assert all(not item["road"] for item in chart.json()["cells"])
     assert _read(boa, f"/api/maps/{created.json()['id']}").status_code == 404
 
     hidden = _table(ana, boa, blind=True, map_id=created.json()["id"], size=size)
@@ -142,10 +166,110 @@ def test_a_generated_map_stays_hidden_when_the_owner_does_not_look(clients, size
     assert len(hidden["hexes"]) == size
     assert all("ground" in item for item in known)
     assert all("ground" not in item for item in hidden["hexes"] if not item["known"])
-    assert any(item["road"] for item in known)
+    assert all(not item["road"] for item in known)
     assert all("road" not in item for item in hidden["hexes"] if not item["known"])
     assert all(item["owner_id"] == str(owner.pk) for item in known)
     assert all("owner_id" not in item for item in hidden["hexes"] if not item["known"])
+
+
+@pytest.mark.django_db(transaction=True)
+def test_road_mutations_return_a_delta_until_preparation_ends(clients) -> None:
+    from hexcampaign.domain.hexes import Hex, neighbors
+    from hexcampaign.domain.terrain import IMPASSABLE
+
+    ana, boa = clients
+    owner = _player("ana-roads@example.com", "AnaCaminos")
+    _player("boa-roads@example.com", "BoaCaminos")
+    _login(ana, owner.email)
+    _login(boa, "boa-roads@example.com")
+    created = _write(ana, "/api/maps", {"name": "Caminos", "size": 271, "seats": 2})
+    assert created.status_code == 201, created.text
+    view = _preparing(ana, boa, blind=False, map_id=created.json()["id"])
+    full_size = len(json.dumps(view, sort_keys=True))
+    fort = next(item for item in view["fortresses"] if item["player_id"] == str(owner.pk))
+    near = {(cell.q, cell.r) for cell in neighbors(Hex(fort["q"], fort["r"]))}
+    spot = next(
+        cell for cell in view["hexes"]
+        if (cell["q"], cell["r"]) in near
+        and cell.get("known")
+        and cell.get("ground") not in IMPASSABLE
+        and not cell.get("road")
+    )
+
+    placed = _write(
+        ana,
+        f"/api/campaigns/{view['id']}/roads",
+        {"revision": view["revision"], "q": spot["q"], "r": spot["r"]},
+    )
+    assert placed.status_code == 200, placed.text
+    delta = placed.json()
+    assert delta["kind"] == "roads_delta"
+    assert delta["phase"] == "preparing"
+    assert delta["id"] == view["id"]
+    assert len(delta["hexes"]) == 1
+    assert delta["hexes"][0]["q"] == spot["q"]
+    assert delta["hexes"][0]["r"] == spot["r"]
+    assert delta["hexes"][0]["road"] is True
+    assert delta["roads"]["laid"] == 1
+    assert "members" not in delta
+    assert len(json.dumps(delta, sort_keys=True)) < full_size // 5
+
+    cleared = _write(
+        ana,
+        f"/api/campaigns/{view['id']}/roads/clear",
+        {"revision": delta["revision"], "q": spot["q"], "r": spot["r"]},
+    )
+    assert cleared.status_code == 200, cleared.text
+    cleared_body = cleared.json()
+    assert cleared_body["kind"] == "roads_delta"
+    assert cleared_body["hexes"][0]["road"] is False
+    assert cleared_body["roads"]["laid"] == 0
+
+    ready = _write(
+        ana,
+        f"/api/campaigns/{view['id']}/roads/ready",
+        {"revision": cleared_body["revision"]},
+    )
+    assert ready.status_code == 200, ready.text
+    waiting = ready.json()
+    assert waiting["kind"] == "roads_delta"
+    assert waiting["phase"] == "preparing"
+    assert waiting["roads"]["ready"] is True
+    assert waiting["hexes"] == []
+
+    done = _write(
+        boa,
+        f"/api/campaigns/{view['id']}/roads/ready",
+        {"revision": waiting["revision"]},
+    )
+    assert done.status_code == 200, done.text
+    opened = done.json()
+    assert opened.get("kind") != "roads_delta"
+    assert opened["phase"] == "orders"
+    assert opened["turn"] == 1
+    assert "members" in opened
+    assert len(opened["hexes"]) == 271
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_owner_can_delete_a_saved_map_and_a_rival_cannot(clients) -> None:
+    ana, boa = clients
+    owner = _player("ana-drop@example.com", "AnaBorra")
+    _player("boa-drop@example.com", "BoaBorra")
+    _login(ana, owner.email)
+    _login(boa, "boa-drop@example.com")
+    created = _write(ana, "/api/maps", {"name": "Viejo", "size": 271, "seats": 2})
+    assert created.status_code == 201, created.text
+    map_id = created.json()["id"]
+    assert _delete(boa, f"/api/maps/{map_id}").status_code == 404
+    assert _read(ana, f"/api/maps/{map_id}").status_code == 200
+    gone = _delete(ana, f"/api/maps/{map_id}")
+    assert gone.status_code == 204, gone.text
+    assert _read(ana, f"/api/maps/{map_id}").status_code == 404
+    assert _delete(ana, f"/api/maps/{map_id}").status_code == 404
+    listed = _read(ana, "/api/maps")
+    assert listed.status_code == 200
+    assert all(item["id"] != map_id for item in listed.json())
 
 
 @pytest.mark.django_db(transaction=True)

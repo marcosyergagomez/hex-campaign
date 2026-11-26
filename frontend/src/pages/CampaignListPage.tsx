@@ -10,6 +10,7 @@ import type { MessageKey } from "../i18n/catalog"
 const PHASE_KEYS: Record<CampaignSummary["phase"], MessageKey> = {
   recruiting: "phaseRecruiting",
   placing: "phasePlacing",
+  preparing: "phasePreparing",
   orders: "phaseOrders",
   battles: "phaseBattles",
   finished: "phaseFinished",
@@ -60,7 +61,7 @@ export function CampaignListPage() {
           </Link>
         </div>
       </header>
-      <Banner errors={errors} fields={["form", "session", "campaign"]} />
+      <Banner errors={errors} fields={["form", "session", "campaign", "origin", "csrf"]} />
       {rows && rows.length === 0 ? (
         <div className="empty-panel">
           <img className="empty-photo" src="/campaign-seal.jpg" alt="" />

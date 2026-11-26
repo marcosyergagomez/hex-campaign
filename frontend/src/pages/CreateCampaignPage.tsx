@@ -40,9 +40,10 @@ export function CreateCampaignPage() {
           setMaps(rows)
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (current) {
           setMaps([])
+          setErrors(presentError(error, "campaignLoadFailed"))
         }
       })
     return () => {
