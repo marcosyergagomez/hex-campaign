@@ -295,6 +295,71 @@ def test_new_scale_configuration_is_published_and_generated(clients, monkeypatch
 
 
 @pytest.mark.django_db(transaction=True)
+def test_a_player_can_save_and_update_an_irregular_drawn_map(clients) -> None:
+    from hexcampaign.domain.hexes import disk
+
+    ana, _ = clients
+    owner = _player("ana-draw@example.com", "AnaDibuja")
+    _login(ana, owner.email)
+    board = list(disk(271))[:30]
+    cells = [
+        {"q": cell.q, "r": cell.r, "ground": "bosque", "road": False, "bridge": False}
+        for cell in board
+    ]
+    cells[0]["ground"] = "llanura"
+    cells[1]["ground"] = "llanura"
+    created = _write(
+        ana,
+        "/api/maps",
+        {
+            "name": "Costa rota",
+            "size": 271,
+            "cells": cells,
+            "anchors": [
+                {"q": board[0].q, "r": board[0].r},
+                {"q": board[1].q, "r": board[1].r},
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["seats"] == 2
+    assert created.json()["generated"] is False
+    map_id = created.json()["id"]
+    chart = _read(ana, f"/api/maps/{map_id}")
+    assert chart.status_code == 200
+    assert len(chart.json()["cells"]) == 30
+
+    cells[2]["ground"] = "rio"
+    updated = ana.put(
+        f"/api/maps/{map_id}",
+        json={
+            "name": "Costa rota",
+            "size": 271,
+            "cells": cells,
+            "anchors": [
+                {"q": board[0].q, "r": board[0].r},
+                {"q": board[1].q, "r": board[1].r},
+            ],
+        },
+        headers=_headers(ana, write=True),
+    )
+    assert updated.status_code == 200, updated.text
+    assert _read(ana, f"/api/maps/{map_id}").json()["cells"][2]["ground"] == "rio"
+
+    generated = _write(ana, "/api/maps", {"name": "Semilla", "size": 271, "seats": 2})
+    assert generated.status_code == 201, generated.text
+    clone = _write(ana, f"/api/maps/{generated.json()['id']}/copy", {"name": "Semilla editable"})
+    assert clone.status_code == 201, clone.text
+    assert clone.json()["generated"] is False
+    blocked = ana.put(
+        f"/api/maps/{generated.json()['id']}",
+        json={"name": "X", "size": 271, "cells": cells, "anchors": []},
+        headers=_headers(ana, write=True),
+    )
+    assert blocked.status_code == 422
+
+
+@pytest.mark.django_db(transaction=True)
 def test_the_largest_drawn_map_fits_the_request_limit_and_is_saved(clients) -> None:
     ana, _ = clients
     owner = _player("ana-large@example.com", "AnaGrande")
