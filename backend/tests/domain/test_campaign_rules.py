@@ -20,8 +20,9 @@ from hexcampaign.domain.lobby import (
     place_armies,
 )
 from hexcampaign.domain.march import march
-from hexcampaign.domain.rules import campaign_name, roster_text, rules_from
+from hexcampaign.domain.rules import campaign_description, campaign_name, roster_text, rules_from
 from hexcampaign.domain.sight import known_hex
+from hexcampaign.domain.terrain import Plot
 from hexcampaign.domain.turn import (
     close_orders,
     deactivate_player,
@@ -511,6 +512,32 @@ def test_a_placed_army_discovers_the_hex_it_stands_on() -> None:
     assert known_hex(game, "2", Hex(1, 0))
 
 
+def test_players_place_forts_inside_pre_marked_home_land() -> None:
+    game = create_game(
+        "Hogares",
+        rules_from(_rules(placement="players", visibility="home", map_size=37)),
+        "1",
+        "ana",
+    )
+    game = accept_seat(game, "2", "boa")
+    game.plots = {cell: Plot("llanura") for cell in game.hexes}
+    game.home_size = 7
+    game = begin(game, "1", [], NOW)
+    assert game.phase == "placing"
+    assert len(game.anchors) == 2
+    home_one = set(game.discovered["1"])
+    home_two = set(game.discovered["2"])
+    assert home_one and home_two and home_one.isdisjoint(home_two)
+    outsider = next(cell for cell in game.hexes if cell not in home_one)
+    own = next(army for army in game.armies if army.player_id == "1")
+    with pytest.raises(DomainError, match="order_illegal"):
+        place_armies(game, "1", outsider, {own.id: next(iter(home_one))})
+    fort = next(iter(home_one))
+    army_spot = next(cell for cell in home_one if cell != fort)
+    game = place_armies(game, "1", fort, {own.id: army_spot})
+    assert next(item for item in game.fortresses if item.player_id == "1").at() == fort
+
+
 def test_a_name_rejects_a_null_and_a_hidden_direction_mark() -> None:
     with pytest.raises(DomainError) as nul:
         campaign_name("Norte\x00")
@@ -523,6 +550,19 @@ def test_a_name_rejects_a_null_and_a_hidden_direction_mark() -> None:
     with pytest.raises(DomainError) as hidden:
         roster_text("a\x00b")
     assert hidden.value.code == "text_invalid"
+
+
+def test_campaign_description_keeps_paragraphs_and_caps_length() -> None:
+    lore = "En el Imperio\n\nhubo una guerra."
+    assert campaign_description(lore) == lore
+    assert campaign_description(None) == ""
+    assert campaign_description("  ") == ""
+    with pytest.raises(DomainError) as long:
+        campaign_description("x" * 15001)
+    assert long.value.code == "rules_invalid"
+    game = create_game("Cronica", rules_from(_rules()), "1", "ana", lore)
+    assert game.description == lore
+    assert from_dict(to_dict(game)).description == lore
 
 
 def test_orders_are_due_a_full_day_count_after_they_open(now=NOW) -> None:

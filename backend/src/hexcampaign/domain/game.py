@@ -6,7 +6,7 @@ from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.identity import checked_identity
 from hexcampaign.domain.land import checked_home_size
-from hexcampaign.domain.rules import Rules, rules_from
+from hexcampaign.domain.rules import Rules, campaign_description, rules_from
 from hexcampaign.domain.terrain import Plot, checked_plot
 
 VERSION = 2
@@ -78,6 +78,7 @@ class Game:
     turn: int
     rules: Rules
     hexes: list[Hex]
+    description: str = ""
     members: list[Member] = field(default_factory=list)
     armies: list[Army] = field(default_factory=list)
     fortresses: list[Fortress] = field(default_factory=list)
@@ -177,6 +178,7 @@ def to_dict(game: Game) -> dict[str, object]:
         "version": VERSION,
         "revision": game.revision,
         "name": game.name,
+        "description": game.description,
         "phase": game.phase,
         "turn": game.turn,
         "rules": _rules_dict(game.rules),
@@ -235,6 +237,7 @@ def from_dict(data: object) -> Game:
         turn=_whole(data["turn"]),
         rules=rules_from(data["rules"], floor=0),
         hexes=[_cell(item) for item in _list(data["hexes"])],
+        description=campaign_description(data["description"] if "description" in data else ""),
         orders_opened_at=opened,
         previous=previous,
         winners=[str(item) for item in _list(data["winners"])],

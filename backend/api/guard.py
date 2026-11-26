@@ -16,8 +16,8 @@ from api.pages import result_page
 from apps.accounts.throttle import account_posts
 
 _ACCOUNT_BODY = 4096
-# Army rosters can reach 2000 chars; leave headroom for paths and metadata.
-_CAMPAIGN_BODY = 16384
+# Campaign create may carry a 15000-char lore blurb plus rules JSON.
+_CAMPAIGN_BODY = 65536
 # Drawn maps send every hex, including previously saved 817-cell boards.
 _MAP_BODY = 98304
 _BODY_LIMITED = {
@@ -25,6 +25,7 @@ _BODY_LIMITED = {
     "/api/users/verify-email",
     "/api/session",
     "/api/session/logout",
+    "/api/profile",
 }
 # Auth signup/confirm stay tightly capped. Gameplay posts (roads, orders) are
 # frequent, so they use a separate higher ceiling instead of the account budget.

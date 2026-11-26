@@ -20,6 +20,7 @@ from api.maps import router as map_router
 from api.pages import confirm_page, result_page
 from api.player_session import ORIGIN_MESSAGE, same_origin
 from api.player_session import router as player_session_router
+from api.profile import router as profile_router
 from apps.accounts.languages import normalize
 from apps.accounts.registration import (
     ACCEPTED_DETAIL,
@@ -41,6 +42,7 @@ api = FastAPI(
 )
 api.add_middleware(AccountGuard)
 api.include_router(player_session_router)
+api.include_router(profile_router)
 api.include_router(campaign_router)
 api.include_router(map_router)
 

@@ -1,8 +1,10 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -17,6 +19,7 @@ import {
   type Language,
   type MessageKey,
 } from "./catalog"
+import { LanguageFlag } from "./flags"
 
 const STORAGE_KEY = "hex-campaign-language"
 const COOKIE = "hex_lang"
@@ -100,24 +103,67 @@ export function useI18n(): I18n {
 
 export function LanguageSelect() {
   const { language, setLanguage, t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    function onPointer(event: MouseEvent) {
+      if (!root.current?.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", onPointer)
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("mousedown", onPointer)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [open])
+
   return (
-    <div className="language">
-      <select
-        value={language}
+    <div className="circle-menu language" ref={root}>
+      <button
+        type="button"
+        className="circle-trigger flag-trigger"
         aria-label={t("language")}
-        onChange={(event) => {
-          const next = event.target.value
-          if (isLanguage(next)) {
-            setLanguage(next)
-          }
-        }}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => setOpen((value) => !value)}
       >
-        {languages.map((code) => (
-          <option key={code} value={code} lang={code}>
-            {languageNames[code]}
-          </option>
-        ))}
-      </select>
+        <LanguageFlag code={language} className="circle-flag" />
+      </button>
+      {open ? (
+        <ul className="circle-panel" role="listbox" aria-label={t("language")}>
+          {languages.map((code) => (
+            <li key={code} role="none">
+              <button
+                type="button"
+                role="option"
+                aria-selected={code === language}
+                lang={code}
+                className={code === language ? "is-active" : undefined}
+                onClick={() => {
+                  setLanguage(code)
+                  setOpen(false)
+                }}
+              >
+                <span className="circle-flag-chip">
+                  <LanguageFlag code={code} className="circle-flag" />
+                </span>
+                {languageNames[code]}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   )
 }

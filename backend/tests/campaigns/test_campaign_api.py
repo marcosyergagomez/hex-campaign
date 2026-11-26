@@ -212,16 +212,22 @@ def test_closing_the_account_leaves_the_seat_inactive(clients) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_campaign_post_can_carry_sixteen_kilobytes_but_not_more(clients) -> None:
+def test_a_campaign_post_can_carry_a_lore_blurb_but_not_an_oversized_body(clients) -> None:
     ana, _boa = clients
     _player("ana@example.com", "ana_one")
     _login(ana, "ana@example.com")
-    allowed = _write(ana, "/api/campaigns", {"name": "Norte", "rules": RULES, "pad": "x" * 12000})
+    allowed = _write(
+        ana,
+        "/api/campaigns",
+        {"name": "Norte", "rules": RULES, "description": "x" * 15000},
+    )
     assert allowed.status_code != 413
+    assert allowed.status_code == 201, allowed.text
+    assert len(allowed.json()["description"]) == 15000
 
     rejected = ana.post(
         "/api/campaigns",
-        content=b'{"name":"' + b"x" * 17000 + b'"}',
+        content=b'{"name":"' + b"x" * 70000 + b'"}',
         headers={**_headers(ana, write=True), "content-type": "application/json"},
     )
     assert rejected.status_code == 413
@@ -245,22 +251,34 @@ def test_a_stranger_cannot_probe_a_campaign_by_id(clients) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_player_stops_at_three_open_campaigns(clients) -> None:
-    ana, _boa = clients
-    user = _player("tope@example.com", "tope_one")
-    _login(ana, "tope@example.com")
-    for name in ("Uno", "Dos", "Tres"):
-        create_campaign(user, name, RULES)
-
-    refused = _write(ana, "/api/campaigns", {"name": "Cuatro", "rules": RULES})
-    assert refused.status_code == 422
-    assert refused.json()["errors"]["campaign"] == ["Ya tienes tres campañas abiertas."]
-
+def test_a_player_may_prepare_many_but_only_three_running() -> None:
     from apps.campaigns.models import Campaign
+    from apps.campaigns.records import play
+    from hexcampaign.domain.game import bump
 
-    Campaign.objects.filter(created_by=user, name="Uno").update(phase="finished")
-    allowed = _write(ana, "/api/campaigns", {"name": "Cuatro", "rules": RULES})
-    assert allowed.status_code == 201, allowed.text
+    owner = _player("tope@example.com", "tope_one")
+    prepared = []
+    for name in ("Uno", "Dos", "Tres", "Cuatro"):
+        campaign, game = create_campaign(owner, name, RULES)
+        prepared.append((campaign, game))
+    assert Campaign.objects.filter(created_by=owner).count() == 4
+
+    Campaign.objects.filter(created_by=owner).exclude(name="Cuatro").update(phase="orders")
+    fourth, game = prepared[3]
+
+    def enter_orders(current):
+        current.phase = "orders"
+        current.turn = 1
+        return bump(current)
+
+    with pytest.raises(CampaignError) as refused:
+        play(owner, fourth.id, game.revision, enter_orders)
+    assert refused.value.code == "campaign_limit"
+
+    Campaign.objects.filter(created_by=owner, name="Uno").update(phase="finished")
+    campaign, updated = play(owner, fourth.id, game.revision, enter_orders)
+    assert updated.phase == "orders"
+    assert campaign.phase == "orders"
 
 
 @pytest.mark.django_db(transaction=True)

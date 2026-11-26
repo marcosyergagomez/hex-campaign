@@ -29,6 +29,12 @@ const PHASE_KEYS: Record<CampaignDetail["phase"], MessageKey> = {
   finished: "phaseFinished",
 }
 
+function statusKey(phase: CampaignDetail["phase"]): MessageKey {
+  if (phase === "finished") return "statusFinished"
+  if (phase === "orders" || phase === "battles") return "statusRunning"
+  return "statusPrepared"
+}
+
 export function CampaignDetailPage() {
   const { t } = useI18n()
   const { id = "" } = useParams()
@@ -131,7 +137,12 @@ export function CampaignDetailPage() {
           <div>
             <p className="mark">{t("campaignDetail")}</p>
             <h1>{campaign?.name ?? t("campaignDetail")}</h1>
-            {campaign ? <p>{t(PHASE_KEYS[campaign.phase])}</p> : null}
+            {campaign ? (
+              <p>
+                {t(statusKey(campaign.phase))}
+                {campaign.phase !== "finished" ? ` · ${t(PHASE_KEYS[campaign.phase])}` : ""}
+              </p>
+            ) : null}
           </div>
           <Link className="text-link" to="/campanas">
             {t("backToCampaigns")}
@@ -140,6 +151,10 @@ export function CampaignDetailPage() {
       </header>
 
       <Banner errors={errors} fields={["form", "session", "campaign", "origin", "csrf", "revision"]} />
+
+      {campaign?.description ? (
+        <p className="campaign-blurb">{campaign.description}</p>
+      ) : null}
 
       {campaign?.you && options ? (
         <PlayerIdentity key={campaign.id} campaign={campaign} options={options} onSave={saveBanner} />

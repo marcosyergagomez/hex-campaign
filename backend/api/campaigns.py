@@ -69,7 +69,7 @@ _MESSAGES = {
     "unknown_player": "No hay ningún jugador con ese alias.",
     "invitation_invalid": "La invitación no es válida.",
     "revision_conflict": "La campaña ha cambiado. Vuelve a leerla.",
-    "campaign_limit": "Ya tienes tres campañas abiertas.",
+    "campaign_limit": "Ya tienes tres campañas en curso.",
     "map_unknown": "No hay ningún mapa con ese identificador.",
     "faction_invalid": "Elige una raza de The Old World.",
     "color_invalid": "Elige un color de la paleta.",
@@ -101,6 +101,7 @@ class RulesBody(BaseModel):
 class CreateBody(BaseModel):
     name: str
     rules: RulesBody
+    description: str = ""
     map_id: str | None = None
     blind: bool = False
 
@@ -118,6 +119,7 @@ class RulesChange(BaseModel):
     revision: int
     name: str
     rules: RulesBody
+    description: str | None = None
 
 
 class AliasBody(BaseModel):
@@ -271,6 +273,7 @@ def post_campaign(payload: CreateBody, request: Request) -> JSONResponse:
             payload.rules.model_dump(),
             template,
             payload.blind,
+            payload.description,
         )
         return _view(user, campaign, game, 201)
 
@@ -317,7 +320,7 @@ def post_rules(campaign_id: str, payload: RulesChange, request: Request) -> JSON
         rules = _rules(payload.rules)
 
         def command(game):
-            return change_rules(game, str(user.pk), payload.name, rules)
+            return change_rules(game, str(user.pk), payload.name, rules, payload.description)
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
 

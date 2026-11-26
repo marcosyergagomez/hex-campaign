@@ -21,6 +21,7 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
     body = {
         "revision": game.revision,
         "name": game.name,
+        "description": game.description,
         "phase": game.phase,
         "turn": game.turn,
         "rules": {

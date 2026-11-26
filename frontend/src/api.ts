@@ -11,6 +11,18 @@ export type Player = {
   alias: string
 }
 
+export type Profile = Player & {
+  sex: Sex
+  birth_date: string
+}
+
+export type ProfileUpdate = {
+  alias: string
+  sex: Sex
+  password?: string
+  current_password?: string
+}
+
 export class ApiError extends Error {
   readonly status: number
   readonly errors: FieldErrors
@@ -47,6 +59,12 @@ function isErrorBody(value: unknown): value is { errors: FieldErrors } {
   })
 }
 
+const SEXES: readonly Sex[] = ["woman", "man", "other", "undisclosed"]
+
+function isSex(value: unknown): value is Sex {
+  return typeof value === "string" && (SEXES as readonly string[]).includes(value)
+}
+
 function readPlayer(value: unknown): Player | null {
   if (!value || typeof value !== "object") {
     return null
@@ -63,6 +81,22 @@ function readPlayer(value: unknown): Player | null {
     return null
   }
   return { email, alias }
+}
+
+function readProfile(value: unknown): Profile | null {
+  const player = readPlayer(value)
+  if (!player || !value || typeof value !== "object") {
+    return null
+  }
+  const record = value as Record<string, unknown>
+  const { sex, birth_date: birthDate } = record
+  if (!isSex(sex)) {
+    return null
+  }
+  if (typeof birthDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
+    return null
+  }
+  return { ...player, sex, birth_date: birthDate }
 }
 
 function readDetail(value: unknown): string | null {
@@ -145,6 +179,40 @@ export async function logout(): Promise<void> {
     method: "POST",
     headers: token ? { "X-CSRF-Token": token } : {},
   })
+}
+
+export async function loadProfile(): Promise<Profile> {
+  const profile = readProfile(await request("/api/profile", { method: "GET" }))
+  if (!profile) {
+    throw new ApiError(200, {})
+  }
+  return profile
+}
+
+export async function saveProfile(payload: ProfileUpdate): Promise<Profile> {
+  const token = readCookie("__Host-csrf")
+  const body: Record<string, string> = {
+    alias: payload.alias,
+    sex: payload.sex,
+  }
+  if (payload.password) {
+    body.password = payload.password
+    body.current_password = payload.current_password ?? ""
+  }
+  const profile = readProfile(
+    await request("/api/profile", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { "X-CSRF-Token": token } : {}),
+      },
+      body: JSON.stringify(body),
+    }),
+  )
+  if (!profile) {
+    throw new ApiError(200, {})
+  }
+  return profile
 }
 
 export type Registration = {
@@ -266,6 +334,7 @@ export type ChronicleEntry = {
 export type CampaignDetail = {
   id: string
   name: string
+  description: string
   phase: CampaignPhase
   revision: number
   turn: number
@@ -283,7 +352,7 @@ export type CampaignDetail = {
 export const DEFAULT_CAMPAIGN_RULES: CampaignRules = {
   seats: 2,
   armies: 1,
-  movement: 1,
+  movement: 3,
   map_size: 19,
   visibility: "full",
   victory: "armies",
@@ -349,7 +418,7 @@ function readRules(value: unknown): CampaignRules | null {
   const record = value as Record<string, unknown>
   const seats = readInt(record.seats, 2, 4)
   const armies = readInt(record.armies, 1, 2)
-  const movement = readInt(record.movement, 1, 3)
+  const movement = readInt(record.movement, 1, 5)
   const hold_turns = readInt(record.hold_turns, 1, 999)
   const order_days = readInt(record.order_days, 1, 30)
   const battle_days = readInt(record.battle_days, 1, 30)
@@ -472,6 +541,9 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
     record.name.length === 0 ||
     record.name.length > 120 ||
     CONTROL.test(record.name) ||
+    typeof record.description !== "string" ||
+    record.description.length > 15000 ||
+    CONTROL.test(record.description.replaceAll("\n", "").replaceAll("\t", "")) ||
     !isPhase(record.phase) ||
     revision === null ||
     turn === null ||
@@ -522,6 +594,7 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
   return {
     id: record.id,
     name: record.name,
+    description: record.description,
     phase: record.phase,
     revision,
     turn,
@@ -688,6 +761,7 @@ export async function createCampaign(
   name: string,
   rules: CampaignRules,
   map?: { id: string; blind: boolean },
+  description = "",
 ): Promise<CampaignDetail> {
   const campaign = readDetailCampaign(
     await request("/api/campaigns", {
@@ -698,6 +772,7 @@ export async function createCampaign(
       },
       body: JSON.stringify({
         name,
+        description,
         rules,
         map_id: map?.id ?? null,
         blind: map?.blind ?? false,
