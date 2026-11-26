@@ -7,13 +7,12 @@ import { useI18n } from "../i18n/language"
 import { presentError } from "../presentError"
 import type { MessageKey } from "../i18n/catalog"
 
-const PHASE_KEYS: Record<CampaignSummary["phase"], MessageKey> = {
-  recruiting: "phaseRecruiting",
-  placing: "phasePlacing",
-  preparing: "phasePreparing",
-  orders: "phaseOrders",
-  battles: "phaseBattles",
-  finished: "phaseFinished",
+const CARD_PHOTOS = ["/campaign-hall.jpg", "/campaign-seal.jpg", "/campaign-fortress.jpg"] as const
+
+function statusKey(phase: CampaignSummary["phase"]): MessageKey {
+  if (phase === "finished") return "statusFinished"
+  if (phase === "orders" || phase === "battles") return "statusRunning"
+  return "statusPrepared"
 }
 
 export function CampaignListPage() {
@@ -46,47 +45,54 @@ export function CampaignListPage() {
     return <p className="quiet">{t("loadingCampaigns")}</p>
   }
 
+  const empty = Boolean(rows && rows.length === 0)
+
   return (
     <section className="campaign-list">
-      <header className="stage">
-        <img className="stage-photo" src="/campaign-hall.jpg" alt="" />
-        <div className="stage-copy">
-          <div>
-            <p className="mark">{t("campaignsNav")}</p>
-            <h1>{t("yourCampaigns")}</h1>
-            <p>{t("campaignsLead")}</p>
-          </div>
-          <Link className="button-link" to="/campanas/nueva">
-            {t("newCampaign")}
-          </Link>
-        </div>
-      </header>
       <Banner errors={errors} fields={["form", "session", "campaign", "origin", "csrf"]} />
-      {rows && rows.length === 0 ? (
-        <div className="empty-panel">
-          <img className="empty-photo" src="/campaign-seal.jpg" alt="" />
-          <p>{t("noCampaigns")}</p>
-          <Link className="button-link" to="/campanas/nueva">
-            {t("createFirstCampaign")}
-          </Link>
-        </div>
+      {empty ? (
+        <header className="stage stage-hero">
+          <img className="stage-photo" src="/campaign-hall.jpg" alt="" />
+          <div className="stage-copy">
+            <div>
+              <p className="mark">{t("campaignsNav")}</p>
+              <h1>{t("yourCampaigns")}</h1>
+              <p>{t("noCampaigns")}</p>
+            </div>
+            <Link className="button-link" to="/campanas/nueva">
+              {t("createFirstCampaign")}
+            </Link>
+          </div>
+        </header>
       ) : null}
       {rows && rows.length > 0 ? (
-        <ul className="campaign-cards">
-          {rows.map((row, index) => (
-            <li key={row.id}>
-              <Link className={`campaign-card crop-${index % 3}`} to={`/campanas/${row.id}`}>
-                <img src="/campaign-hall.jpg" alt="" />
-                <span className="campaign-card-body">
-                  <span className="campaign-card-name">{row.name}</span>
-                  <span className="campaign-card-meta">
-                    {t(PHASE_KEYS[row.phase])} · {row.role}
+        <>
+          <header className="campaigns-head">
+            <div>
+              <p className="mark">{t("campaignsNav")}</p>
+              <h1>{t("yourCampaigns")}</h1>
+              <p className="quiet">{t("campaignsLead")}</p>
+            </div>
+            <Link className="button-link" to="/campanas/nueva">
+              {t("newCampaign")}
+            </Link>
+          </header>
+          <ul className="campaign-cards">
+            {rows.map((row, index) => (
+              <li key={row.id}>
+                <Link className={`campaign-card crop-${index % 3}`} to={`/campanas/${row.id}`}>
+                  <img src={CARD_PHOTOS[index % CARD_PHOTOS.length]} alt="" />
+                  <span className="campaign-card-body">
+                    <span className="campaign-card-name">{row.name}</span>
+                    <span className="campaign-card-meta">
+                      {t(statusKey(row.phase))} · {row.role}
+                    </span>
                   </span>
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </>
       ) : null}
     </section>
   )

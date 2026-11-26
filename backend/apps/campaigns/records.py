@@ -39,8 +39,9 @@ class RevisionConflict(CampaignError):
         super().__init__("revision_conflict")
 
 
-OPEN_PHASES = ("recruiting", "placing", "preparing", "orders", "battles")
-OPEN_CAMPAIGN_LIMIT = 3
+# Visible lifecycle: prepared (recruiting/placing/preparing), running, finished.
+RUNNING_PHASES = ("orders", "battles")
+RUNNING_CAMPAIGN_LIMIT = 3
 
 
 def create_campaign(
@@ -49,6 +50,7 @@ def create_campaign(
     rules: dict,
     template=None,
     blind: bool = False,
+    description: str = "",
 ) -> tuple[Campaign, Game]:
     try:
         parsed = rules_from(rules)
@@ -56,11 +58,8 @@ def create_campaign(
         raise CampaignError(exc.code) from exc
     with transaction.atomic():
         account = _actor(user)
-        open_campaigns = Campaign.objects.filter(created_by=account, phase__in=OPEN_PHASES).count()
-        if open_campaigns >= OPEN_CAMPAIGN_LIMIT:
-            raise CampaignError("campaign_limit")
         try:
-            game = create_game(name, parsed, str(account.pk), account.alias)
+            game = create_game(name, parsed, str(account.pk), account.alias, description)
             game.identity_required = True
             if template is not None:
                 from hexcampaign.domain.maps import lay
@@ -92,13 +91,29 @@ def play(
         if game.revision != revision:
             raise RevisionConflict()
         before = game.revision
+        was_running = campaign.phase in RUNNING_PHASES
         try:
             updated = command(game)
         except DomainError as exc:
             raise CampaignError(exc.code) from exc
         if updated.revision != before:
+            if updated.phase in RUNNING_PHASES and not was_running:
+                _assert_running_capacity(campaign.created_by, campaign.pk)
             _save(campaign, updated)
         return campaign, updated
+
+
+def _assert_running_capacity(owner, campaign_id) -> None:
+    """A creator may keep at most three campaigns in orders or battles."""
+    if owner is None:
+        return
+    running = (
+        Campaign.objects.filter(created_by=owner, phase__in=RUNNING_PHASES)
+        .exclude(pk=campaign_id)
+        .count()
+    )
+    if running >= RUNNING_CAMPAIGN_LIMIT:
+        raise CampaignError("campaign_limit")
 
 
 def invite_alias(user, campaign_id, revision: int, alias: str) -> tuple[Campaign, Game]:

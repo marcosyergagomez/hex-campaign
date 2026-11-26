@@ -5,9 +5,11 @@ import { currentPlayer, logout, type Player } from "./api"
 import { Banner } from "./form"
 import { LanguageSelect, useI18n } from "./i18n/language"
 import { presentError } from "./presentError"
+import { UserMenu } from "./UserMenu"
 
 export type AppOutletContext = {
   player: Player
+  setPlayer: (player: Player) => void
 }
 
 export function AppShell() {
@@ -93,28 +95,18 @@ export function AppShell() {
         <div className="app-brand">
           <p className="mark">Hex Campaign</p>
           <nav className="app-nav" aria-label={t("campaignsNav")}>
-            <NavLink to="/campanas" end>
-              {t("campaignsNav")}
-            </NavLink>
+            <NavLink to="/campanas">{t("campaignsNav")}</NavLink>
             <NavLink to="/mapas">{t("mapsNav")}</NavLink>
-            <NavLink to="/campanas/nueva">{t("newCampaign")}</NavLink>
           </nav>
         </div>
         <div className="app-user">
           <LanguageSelect />
-          <p className="quiet">
-            {t("signedInAs").split("{alias}")[0]}
-            <strong>{player.alias}</strong>
-            {t("signedInAs").split("{alias}")[1] ?? ""}
-          </p>
-          <button type="button" className="button-quiet" onClick={onLogout} disabled={pending}>
-            {pending ? t("loggingOut") : t("logOut")}
-          </button>
+          <UserMenu alias={player.alias} pending={pending} onLogout={onLogout} />
         </div>
       </header>
       <Banner errors={errors} fields={["form", "origin", "csrf", "session"]} />
       <main className="app-body">
-        <Outlet context={{ player } satisfies AppOutletContext} />
+        <Outlet context={{ player, setPlayer } satisfies AppOutletContext} />
       </main>
     </div>
   )

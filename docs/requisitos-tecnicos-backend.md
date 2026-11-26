@@ -8,9 +8,9 @@ Las reglas puras viven en `hexcampaign.domain` y no importan Django ni FastAPI. 
 
 El reglamento y la partida van en el JSON de la campaña. Una tabla de plazas permite buscar las campañas de una cuenta sin recorrer todos los documentos. La plaza guarda la cuenta, el papel, el estado y el alias con el que entró.
 
-El buscador acepta el id exacto. El nombre puede repetirse y no busca.
+El buscador acepta el id exacto. El nombre puede repetirse y no busca. La descripción es opcional, hasta 15 000 caracteres Unicode normalizados, admite saltos de línea y se guarda en el documento de la campaña.
 
-Crear cuenta las campañas abiertas de esa cuenta: reclutamiento, colocación, preparación, órdenes o batallas. A la cuarta la API responde 422 con «Ya tienes tres campañas abiertas.» y no crea nada. Una fase terminada no cuenta. El creador queda en la fila, así que ceder el puesto no abre otra plaza.
+El límite de tres aplica a campañas en curso del creador (fases órdenes o batallas). Crear o dejar una campaña en preparación no cuenta. Al pasar a órdenes, si ya hay tres en curso, la API responde 422 con «Ya tienes tres campañas en curso.» y no guarda el cambio. Una finalizada libera plaza. El creador queda en la fila, así que ceder el puesto no abre otra plaza.
 
 Invitar es otra cosa. El propietario busca por alias y envía un aviso dentro de la aplicación, o genera un enlace. El enlace lleva un token distinto del id. En la base solo se guarda su resumen, igual que el enlace de confirmación del correo. Quien tiene el enlace ocupa una plaza libre antes de empezar.
 

@@ -23,6 +23,8 @@ export function Field({
   value,
   hint,
   error,
+  disabled = false,
+  required,
   onChange,
 }: {
   label: string
@@ -32,6 +34,8 @@ export function Field({
   value: string
   hint?: string
   error?: string[]
+  disabled?: boolean
+  required?: boolean
   onChange: (value: string) => void
 }) {
   const { text } = useI18n()
@@ -40,6 +44,7 @@ export function Field({
   const describedBy = [hintId, errorId].filter((id) => id).join(" ")
   const shown = error?.map(text)
   const suppressAssist = type === "email" || type === "password"
+  const isRequired = required ?? !disabled
   return (
     <div className="field">
       <label className="label-text" htmlFor={name}>
@@ -54,7 +59,62 @@ export function Field({
         autoCorrect={suppressAssist ? "off" : undefined}
         spellCheck={suppressAssist ? false : undefined}
         value={value}
-        required
+        required={isRequired}
+        disabled={disabled}
+        readOnly={disabled}
+        aria-invalid={Boolean(shown?.length)}
+        aria-describedby={describedBy || undefined}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {hint ? (
+        <p id={hintId} className="hint">
+          {hint}
+        </p>
+      ) : null}
+      {shown?.length ? (
+        <p id={errorId} className="field-error">
+          {shown.join(" ")}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+export function TextAreaField({
+  label,
+  name,
+  value,
+  hint,
+  error,
+  rows = 8,
+  maxLength,
+  onChange,
+}: {
+  label: string
+  name: string
+  value: string
+  hint?: string
+  error?: string[]
+  rows?: number
+  maxLength?: number
+  onChange: (value: string) => void
+}) {
+  const { text } = useI18n()
+  const hintId = hint ? `${name}-hint` : undefined
+  const errorId = error?.length ? `${name}-error` : undefined
+  const describedBy = [hintId, errorId].filter((id) => id).join(" ")
+  const shown = error?.map(text)
+  return (
+    <div className="field">
+      <label className="label-text" htmlFor={name}>
+        {label}
+      </label>
+      <textarea
+        id={name}
+        name={name}
+        value={value}
+        rows={rows}
+        maxLength={maxLength}
         aria-invalid={Boolean(shown?.length)}
         aria-describedby={describedBy || undefined}
         onChange={(event) => onChange(event.target.value)}

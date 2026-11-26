@@ -22,12 +22,18 @@ from hexcampaign.domain.hexes import DISK_RADIUS, Hex, angle, disk, distance, ne
 from hexcampaign.domain.identity import checked_identity
 from hexcampaign.domain.land import home_radius, owned
 from hexcampaign.domain.phases import open_first_turn, open_preparation
-from hexcampaign.domain.rules import Rules, campaign_name, label, roster_text
+from hexcampaign.domain.rules import Rules, campaign_description, campaign_name, label, roster_text
 from hexcampaign.domain.terrain import passable
 from hexcampaign.domain.territory import home_land
 
 
-def create_game(name: str, rules: Rules, owner_id: str, alias: str) -> Game:
+def create_game(
+    name: str,
+    rules: Rules,
+    owner_id: str,
+    alias: str,
+    description: object = "",
+) -> Game:
     game = Game(
         revision=1,
         name=campaign_name(name),
@@ -35,13 +41,20 @@ def create_game(name: str, rules: Rules, owner_id: str, alias: str) -> Game:
         turn=0,
         rules=rules,
         hexes=list(disk(rules.map_size)),
+        description=campaign_description(description),
     )
     game.members.append(Member(owner_id, alias, "owner", "active"))
     remember(game, "opened", player_id=owner_id)
     return game
 
 
-def change_rules(game: Game, actor: str, name: str, rules: Rules) -> Game:
+def change_rules(
+    game: Game,
+    actor: str,
+    name: str,
+    rules: Rules,
+    description: object | None = None,
+) -> Game:
     require_owner(game, actor)
     require_phase(game, "recruiting")
     if rules.seats > game.rules.seats or rules.seats < len(seated(game)):
@@ -54,6 +67,8 @@ def change_rules(game: Game, actor: str, name: str, rules: Rules) -> Game:
         if game.anchors and rules.seats != len(game.anchors):
             raise DomainError("rules_invalid")
     game.name = campaign_name(name)
+    if description is not None:
+        game.description = campaign_description(description)
     game.rules = rules
     if game.plots is None:
         game.hexes = list(disk(rules.map_size))
@@ -132,6 +147,8 @@ def begin(game: Game, actor: str, admin_ids: list[str], now: datetime) -> Game:
             open_first_turn(game, now)
     else:
         _blank_armies(game)
+        if game.plots is not None:
+            _open_player_homes(game)
         game.phase = "placing"
     return bump(game)
 
@@ -149,7 +166,12 @@ def place_armies(game: Game, actor: str, fortress: Hex, spots: dict[str, Hex]) -
         not _standable(game, fortress) or any(not _standable(game, spot) for spot in spots.values())
     ):
         raise DomainError("order_illegal")
+    home = _player_home_zone(game, actor) if game.plots is not None else None
+    if home is not None and fortress not in home:
+        raise DomainError("order_illegal")
     if game.plots is not None and _disks_overlap(game, actor, fortress):
+        raise DomainError("order_illegal")
+    if home is not None and any(spot not in home for spot in spots.values()):
         raise DomainError("order_illegal")
     if len({fortress, *spots.values()}) != 1 + len(spots):
         raise DomainError("order_illegal")
@@ -218,21 +240,53 @@ def _reject_overlap(game: Game, actor: str, cells: set[Hex]) -> None:
             raise DomainError("order_illegal")
 
 
+def _open_player_homes(game: Game) -> None:
+    """Carve each seat a pre-set home disk; players must place inside it."""
+    players = seated(game)
+    centers = _seat_centers(game, players)
+    game.anchors = list(centers)
+    board = set(game.hexes)
+    radius = home_radius(game.rules.map_size)
+    for member, center in zip(players, centers, strict=True):
+        zone = owned(center, radius, board, count=game.home_size)
+        if center not in zone or not any(_standable(game, cell) for cell in zone):
+            raise DomainError("rules_invalid")
+        game.discovered[member.player_id] = set(zone)
+
+
+def _player_home_zone(game: Game, actor: str) -> set[Hex]:
+    zone = game.discovered.get(actor)
+    if zone:
+        return set(zone)
+    players = seated(game)
+    if len(game.anchors) != len(players):
+        raise DomainError("rules_invalid")
+    index = next(i for i, member in enumerate(players) if member.player_id == actor)
+    return owned(
+        game.anchors[index],
+        home_radius(game.rules.map_size),
+        set(game.hexes),
+        count=game.home_size,
+    )
+
+
+def _seat_centers(game: Game, players: list[Member]) -> list[Hex]:
+    if game.anchors and len(game.anchors) == len(players):
+        return list(game.anchors)
+    radius = DISK_RADIUS[game.rules.map_size]
+    border = [cell for cell in game.hexes if distance(cell, Hex(0, 0)) == radius]
+    border.sort(key=lambda cell: (angle(cell), cell.q, cell.r))
+    if game.plots is not None:
+        border = [cell for cell in border if _standable(game, cell)]
+    if not border:
+        raise DomainError("rules_invalid")
+    return [border[(index * len(border)) // len(players)] for index in range(len(players))]
+
+
 def _deploy(game: Game) -> None:
     players = seated(game)
-    if game.anchors:
-        if len(game.anchors) != len(players):
-            raise DomainError("rules_invalid")
-        chosen = list(game.anchors)
-    else:
-        radius = DISK_RADIUS[game.rules.map_size]
-        border = [cell for cell in game.hexes if distance(cell, Hex(0, 0)) == radius]
-        border.sort(key=lambda cell: (angle(cell), cell.q, cell.r))
-        if game.plots is not None:
-            border = [cell for cell in border if _standable(game, cell)]
-        if not border:
-            raise DomainError("rules_invalid")
-        chosen = [border[(index * len(border)) // len(players)] for index in range(len(players))]
+    chosen = _seat_centers(game, players)
+    game.anchors = list(chosen)
     taken = set(chosen)
     for member, fort in zip(players, chosen, strict=True):
         if game.plots is not None and not _standable(game, fort):
