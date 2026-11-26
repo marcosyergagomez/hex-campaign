@@ -25,6 +25,7 @@ class Rules:
     order_days: int
     battle_days: int
     missed_turns: int
+    roster_required: bool = False
 
 
 def rules_from(data: object, *, floor: int = 2) -> Rules:
@@ -44,6 +45,7 @@ def rules_from(data: object, *, floor: int = 2) -> Rules:
             order_days=_span(data["order_days"], 1, 30),
             battle_days=_span(data["battle_days"], 1, 30),
             missed_turns=_span(data["missed_turns"], 1, 5),
+            roster_required=_flag(data.get("roster_required", False)),
         )
     except (KeyError, TypeError, ValueError):
         raise DomainError("rules_invalid") from None
@@ -97,6 +99,12 @@ def _hidden(text: str, *, allow_breaks: bool) -> bool:
         if unicodedata.category(char) in {"Cc", "Cf"}:
             return True
     return False
+
+
+def _flag(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError
+    return value
 
 
 def _span(value: object, low: int, high: int) -> int:

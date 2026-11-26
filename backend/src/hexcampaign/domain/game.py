@@ -102,6 +102,9 @@ class Game:
     identity_required: bool = False
     road_ready: set[str] = field(default_factory=set)
     lobby_ready: set[str] = field(default_factory=set)
+    naming: bool = False
+    fort_open: bool = False
+    prep_done: set[str] = field(default_factory=set)
 
 
 def find_member(game: Game, player_id: str) -> Member | None:
@@ -217,6 +220,9 @@ def to_dict(game: Game) -> dict[str, object]:
         "identity_required": game.identity_required,
         "road_ready": sorted(game.road_ready),
         "lobby_ready": sorted(game.lobby_ready),
+        "naming": game.naming,
+        "fort_open": game.fort_open,
+        "prep_done": sorted(game.prep_done),
         "fort_memory": {
             player_id: [
                 {"q": int(key.split(",")[0]), "r": int(key.split(",")[1]), "owner": owner}
@@ -291,7 +297,40 @@ def from_dict(data: object) -> Game:
     if not isinstance(lobby, list) or any(not isinstance(item, str) for item in lobby):
         raise DomainError("rules_invalid")
     game.lobby_ready = set(lobby)
+    naming = data.get("naming", False)
+    if not isinstance(naming, bool):
+        raise DomainError("rules_invalid")
+    game.naming = naming
+    if "fort_open" in data:
+        fort_open = data["fort_open"]
+        if not isinstance(fort_open, bool):
+            raise DomainError("rules_invalid")
+        game.fort_open = fort_open
+    else:
+        game.fort_open = game.phase == "preparing" and not game.naming and not game.road_ready
+    done = data.get("prep_done", [])
+    if not isinstance(done, list) or any(not isinstance(item, str) for item in done):
+        raise DomainError("rules_invalid")
+    game.prep_done = set(done)
+    _absorb_preparation(game)
     return game
+
+
+def _absorb_preparation(game: Game) -> None:
+    """Old saves waited between steps. Each seat now continues as far as it had reached."""
+    if game.plots is None:
+        return
+    if game.phase == "placing":
+        game.phase = "preparing"
+        game.fort_open = True
+    if game.phase != "preparing":
+        return
+    active = {member.player_id for member in game.members if member.status == "active"}
+    if not game.fort_open:
+        game.lobby_ready.update(active)
+    if game.naming:
+        game.road_ready.update(active)
+        game.naming = False
 
 
 def _rules_dict(rules: Rules) -> dict[str, object]:
@@ -307,6 +346,7 @@ def _rules_dict(rules: Rules) -> dict[str, object]:
         "order_days": rules.order_days,
         "battle_days": rules.battle_days,
         "missed_turns": rules.missed_turns,
+        "roster_required": rules.roster_required,
     }
 
 

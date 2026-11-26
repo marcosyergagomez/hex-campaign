@@ -509,6 +509,31 @@ button:disabled {
   font-size: 0.85rem;
 }
 
+.invite-status {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.invite-status li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.invite-status-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.invite-status button {
+  width: auto;
+}
+
 .invite-panel {
   display: grid;
   gap: 10px;
@@ -1464,6 +1489,325 @@ button:disabled {
   margin: 8px 0 14px;
 }
 
+.army-sheets {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 12px;
+}
+
+.army-sheets h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.army-sheet {
+  display: grid;
+  gap: 10px;
+  max-width: 36rem;
+}
+
+.army-sheet h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.prep-stage {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 18px 18px 16px;
+  border: 1px solid rgba(192, 160, 98, 0.55);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(192, 160, 98, 0.16), transparent 46%),
+    rgba(16, 12, 9, 0.92);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+.prep-stage-kicker {
+  margin: 0;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  color: var(--gold);
+}
+
+.prep-stage h2 {
+  margin: 0;
+  font-family: Cinzel, Palatino, serif;
+  font-size: clamp(1.4rem, 2.4vw, 2rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.prep-stage p {
+  margin: 0;
+  max-width: 42rem;
+}
+
+.prep-alert {
+  color: #e7b4a8;
+  border-left: 3px solid #9d1c1c;
+  padding: 6px 0 6px 10px;
+}
+
+.prep-stage > button,
+.prep-stage .roads-prep button {
+  width: auto;
+  justify-self: start;
+}
+
+.play-board {
+  display: contents;
+}
+
+.play-board.has-tray {
+  display: grid;
+  grid-template-columns: 7.2rem minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.deploy-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 10px 8px;
+  list-style: none;
+  position: sticky;
+  top: 12px;
+  border: 1px solid rgba(192, 160, 98, 0.45);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(192, 160, 98, 0.14), transparent 55%),
+    rgba(16, 12, 9, 0.94);
+}
+
+.deploy-piece {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 4px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink, #f3e6c8);
+  letter-spacing: 0.03em;
+  text-transform: none;
+  cursor: grab;
+}
+
+.deploy-piece:hover:not(:disabled) {
+  background: rgba(243, 226, 176, 0.08);
+}
+
+.deploy-piece svg {
+  width: 68px;
+  height: 72px;
+  overflow: visible;
+}
+
+.deploy-piece span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+}
+
+.deploy-piece.is-selected {
+  border-color: rgba(243, 226, 176, 0.75);
+  background: rgba(243, 226, 176, 0.08);
+}
+
+.deploy-piece.is-loose {
+  opacity: 0.92;
+}
+
+.deploy-piece.is-loose svg {
+  filter: drop-shadow(0 0 6px rgba(243, 226, 176, 0.28));
+}
+
+.deploy-ghost {
+  position: fixed;
+  z-index: 40;
+  width: 68px;
+  height: 72px;
+  margin: -36px 0 0 -34px;
+  pointer-events: none;
+}
+
+.deploy-ghost svg {
+  width: 68px;
+  height: 72px;
+  overflow: visible;
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.45));
+}
+
+@media (max-width: 800px) {
+  .play-board.has-tray {
+    grid-template-columns: 1fr;
+  }
+
+  .deploy-tray {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    position: static;
+  }
+
+  .deploy-piece {
+    width: 5.4rem;
+  }
+}
+
+.prep-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.prep-steps li {
+  color: var(--muted);
+}
+
+.prep-steps li.is-current {
+  color: var(--gold);
+}
+
+.prep-steps li.is-done {
+  color: var(--ink, #efe6d4);
+}
+
+.army-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 6, 4, 0.66);
+}
+
+.army-dialog {
+  width: min(40rem, 100%);
+  padding: 0 0 18px;
+  overflow: hidden;
+  background: #1a140f;
+  color: #f3e6c8;
+  border: 1px solid #8d6b3e;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.55);
+}
+
+.army-dialog-art {
+  display: block;
+  width: 100%;
+  height: 220px;
+  object-fit: cover;
+  object-position: center 60%;
+}
+
+.army-dialog-body {
+  padding: 20px 32px 4px;
+}
+
+.army-dialog-kicker,
+.army-dialog h2,
+.army-dialog-lead,
+.army-dialog-name,
+.army-dialog-list {
+  margin: 0;
+}
+
+.army-dialog-kicker {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  color: #8a6230;
+}
+
+.army-dialog h2 {
+  margin-top: 4px;
+  font-family: Cinzel, Palatino, serif;
+}
+
+.army-dialog-lead,
+.army-dialog-list {
+  margin-top: 8px;
+  line-height: 1.45;
+}
+
+.army-dialog-name {
+  margin-top: 14px;
+  font-size: 1.15rem;
+}
+
+.army-dialog-list {
+  white-space: pre-wrap;
+}
+
+.army-dialog .field,
+.army-dialog .label-text,
+.army-dialog .hint {
+  color: #f3e6c8;
+}
+
+.army-dialog .label-text,
+.army-dialog .field > span {
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-size: 0.95rem;
+}
+
+.army-dialog input,
+.army-dialog textarea {
+  background: rgba(255, 250, 240, 0.9);
+  color: #241c14;
+  border-color: #c4a574;
+}
+
+.army-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.army-dialog-actions button {
+  width: auto;
+}
+
+.army-sheet textarea {
+  min-height: 6rem;
+}
+
+.army-sheet button {
+  width: auto;
+  justify-self: start;
+}
+
+.army-roster {
+  white-space: pre-wrap;
+  margin: 4px 0 0;
+}
+
+.check-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.check-row input {
+  width: auto;
+  margin-top: 4px;
+}
+
 .roads-prep p {
   margin: 0;
 }
@@ -1477,6 +1821,31 @@ button:disabled {
   display: grid;
   gap: 8px;
   justify-items: start;
+}
+
+.orders-dock {
+  position: sticky;
+  bottom: 10px;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-top: 8px;
+  padding: 10px 14px;
+  border: 1px solid rgba(192, 160, 98, 0.35);
+  background: rgba(16, 12, 9, 0.92);
+}
+
+.orders-dock .hint,
+.orders-dock .quiet {
+  margin: 0;
+}
+
+.orders-dock button {
+  width: auto;
+  margin-left: auto;
 }
 
 .territory-legend {

@@ -19,16 +19,21 @@ from apps.campaigns.records import (
     campaign_pulse,
     create_campaign,
     inbox,
+    decline_invitation,
     invite_alias,
     invite_link,
     list_campaigns,
+    list_invitations,
     list_notifications,
     mark_notification_read,
     play,
     present,
+    present_fort_delta,
     present_roads_delta,
     preview_link,
     read_campaign,
+    resend_invitation,
+    revoke_invitation,
     scrap_campaign,
     search_players,
 )
@@ -41,7 +46,10 @@ from hexcampaign.domain.lobby import (
     choose_identity,
     claim_color,
     close_placement,
+    confirm_placement,
     describe_army,
+    stand_token,
+    clear_ready,
     mark_ready,
     place_armies,
 )
@@ -108,6 +116,7 @@ class RulesBody(BaseModel):
     order_days: int
     battle_days: int
     missed_turns: int
+    roster_required: bool = False
 
 
 class CreateBody(BaseModel):
@@ -120,6 +129,12 @@ class CreateBody(BaseModel):
 
 class RevisionBody(BaseModel):
     revision: int
+
+
+class IdentityBody(RevisionBody):
+    faction: str
+class ReadyBody(RevisionBody):
+    ready: bool = True
 
 
 class IdentityBody(RevisionBody):
@@ -229,7 +244,8 @@ def _play(user, campaign_id: str, revision: int, command) -> JSONResponse:
 def _road_play(user, campaign_id: str, revision: int, command, changed: list[Hex]) -> JSONResponse:
     """Preparing stays on a delta; leaving preparation returns the full table view."""
     campaign, game = play(user, campaign_id, revision, command)
-    if game.phase != "preparing":
+    # Finishing roads moves this seat on to its armies, so the token list has to come back whole.
+    if game.phase != "preparing" or not changed:
         return _view(user, campaign, game)
     return JSONResponse(present_roads_delta(campaign, game, user, changed))
 
@@ -292,10 +308,12 @@ def post_color(campaign_id: str, payload: ColorBody, request: Request) -> JSONRe
 
 @router.post("/api/campaigns/{campaign_id}/ready")
 @django_sync
-def post_ready(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
+def post_ready(campaign_id: str, payload: ReadyBody, request: Request) -> JSONResponse:
     def action(user):
         def command(game):
-            return mark_ready(game, str(user.pk))
+            if payload.ready:
+                return mark_ready(game, str(user.pk))
+            return clear_ready(game, str(user.pk))
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
 
@@ -435,6 +453,48 @@ def post_invitation(campaign_id: str, payload: AliasBody, request: Request) -> J
 
 @router.post("/api/campaigns/{campaign_id}/links", status_code=201)
 @django_sync
+@router.get("/api/campaigns/{campaign_id}/invitations")
+@django_sync
+def get_campaign_invitations(campaign_id: str, request: Request) -> JSONResponse:
+    user = _reader(request)
+    if isinstance(user, JSONResponse):
+        return user
+    try:
+        return JSONResponse(list_invitations(user, campaign_id))
+    except CampaignError as exc:
+        return _failure(exc)
+
+
+@router.post("/api/campaigns/{campaign_id}/invitations/{invitation_id}/revoke")
+@django_sync
+def post_revoke_invitation(campaign_id: str, invitation_id: str, request: Request) -> Response:
+    def action(user):
+        revoke_invitation(user, campaign_id, invitation_id)
+        return Response(status_code=204)
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/invitations/{invitation_id}/resend")
+@django_sync
+def post_resend_invitation(campaign_id: str, invitation_id: str, request: Request) -> Response:
+    def action(user):
+        resend_invitation(user, campaign_id, invitation_id)
+        return Response(status_code=204)
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/invitations/decline")
+@django_sync
+def post_decline_invitation(campaign_id: str, request: Request) -> Response:
+    def action(user):
+        decline_invitation(user, campaign_id)
+        return Response(status_code=204)
+
+    return _run(request, action)
+
+
 def post_link(campaign_id: str, request: Request) -> JSONResponse:
     def action(user):
         return JSONResponse({"token": invite_link(user, campaign_id)}, status_code=201)
@@ -472,6 +532,18 @@ def post_start(campaign_id: str, payload: StartBody, request: Request) -> JSONRe
     return _run(request, action)
 
 
+@router.post("/api/campaigns/{campaign_id}/placement/ready")
+@django_sync
+def post_placement_ready(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return confirm_placement(game, str(user.pk), timezone.now())
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
 @router.post("/api/campaigns/{campaign_id}/placement")
 @django_sync
 def post_placement(campaign_id: str, payload: PlaceBody, request: Request) -> JSONResponse:
@@ -482,7 +554,8 @@ def post_placement(campaign_id: str, payload: PlaceBody, request: Request) -> JS
             fortress = Hex(payload.fortress.q, payload.fortress.r)
             return place_armies(game, str(user.pk), fortress, spots)
 
-        return _view(user, *play(user, campaign_id, payload.revision, command))
+        campaign, game = play(user, campaign_id, payload.revision, command)
+        return JSONResponse(present_fort_delta(campaign, game, user))
 
     return _run(request, action)
 
@@ -544,6 +617,18 @@ def post_roads_ready(campaign_id: str, payload: RevisionBody, request: Request) 
             lambda game: finish_roads(game, str(user.pk), timezone.now()),
             [],
         )
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/armies/{army_id}/stand")
+@django_sync
+def post_stand(campaign_id: str, army_id: str, payload: RoadBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return stand_token(game, str(user.pk), army_id, Hex(payload.q, payload.r), timezone.now())
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
 
     return _run(request, action)
 

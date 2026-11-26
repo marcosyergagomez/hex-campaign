@@ -1,7 +1,7 @@
 """Recruiting, the start button, and where the armies stand before the first order."""
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 
 from hexcampaign.domain.chronicle import remember
 from hexcampaign.domain.errors import DomainError
@@ -19,13 +19,14 @@ from hexcampaign.domain.game import (
     require_staff,
     seated,
 )
-from hexcampaign.domain.hexes import DISK_RADIUS, Hex, angle, disk, distance, neighbors
+from hexcampaign.domain.hexes import DISK_RADIUS, Hex, angle, deploy_reach, disk, distance, neighbors
 from hexcampaign.domain.identity import checked_color, checked_identity
 from hexcampaign.domain.land import home_radius, owned
 from hexcampaign.domain.phases import open_first_turn, open_preparation
 from hexcampaign.domain.rules import Rules, campaign_description, campaign_name, label, roster_text
+from hexcampaign.domain.units import is_fighter
 from hexcampaign.domain.terrain import passable
-from hexcampaign.domain.territory import home_land
+from hexcampaign.domain.territory import assigned_homes, home_land
 
 
 def create_game(
@@ -169,6 +170,18 @@ def mark_ready(game: Game, actor: str) -> Game:
     return bump(game)
 
 
+def clear_ready(game: Game, actor: str) -> Game:
+    """Unchecking ready puts the seat back in drafting. The banner stays."""
+    require_phase(game, "recruiting")
+    member = require_player(game, actor)
+    if member.status != "active":
+        raise DomainError("forbidden")
+    if actor not in game.lobby_ready:
+        return game
+    game.lobby_ready.discard(actor)
+    return bump(game)
+
+
 def begin(game: Game, actor: str, admin_ids: list[str], now: datetime) -> Game:
     require_owner(game, actor)
     require_phase(game, "recruiting")
@@ -194,42 +207,52 @@ def begin(game: Game, actor: str, admin_ids: list[str], now: datetime) -> Game:
         _note_deployment(game)
         if game.plots is not None:
             open_preparation(game)
+            game.fort_open = True
         else:
             open_first_turn(game, now)
     else:
         _blank_armies(game)
         if game.plots is not None:
             _open_player_homes(game)
-        game.phase = "placing"
+            open_preparation(game)
+            game.fort_open = True
+        else:
+            game.phase = "placing"
     return bump(game)
 
 
 def place_armies(game: Game, actor: str, fortress: Hex, spots: dict[str, Hex]) -> Game:
-    require_phase(game, "placing")
+    moving_fort = game.phase == "preparing" and game.fort_open
+    if game.phase != "placing" and not moving_fort:
+        raise DomainError("phase_invalid")
     require_player(game, actor)
+    if moving_fort and actor in game.lobby_ready:
+        raise DomainError("phase_invalid")
     own = [army for army in game.armies if army.player_id == actor and not army.destroyed]
     board = set(game.hexes)
     if set(spots) != {army.id for army in own}:
         raise DomainError("order_illegal")
     if fortress not in board or any(spot not in board for spot in spots.values()):
         raise DomainError("order_illegal")
-    if game.plots is not None and (
-        not _standable(game, fortress) or any(not _standable(game, spot) for spot in spots.values())
-    ):
-        raise DomainError("order_illegal")
     home = _player_home_zone(game, actor) if game.plots is not None else None
     if home is not None and fortress not in home:
         raise DomainError("order_illegal")
-    if game.plots is not None and _disks_overlap(game, actor, fortress):
+    if game.plots is not None and not _standable(game, fortress):
         raise DomainError("order_illegal")
-    if home is not None and any(spot not in home for spot in spots.values()):
+    if game.plots is not None and home is None and _disks_overlap(game, actor, fortress):
+        raise DomainError("order_illegal")
+    if game.plots is not None:
+        # A keep may sit beside a lake or a cliff. Tokens still need passable ground.
+        spots = _park_on_standable(game, actor, fortress, spots, home)
+    elif home is not None and any(spot not in home for spot in spots.values()):
         raise DomainError("order_illegal")
     fighters = [army for army in own if army.kind == "army"]
     explorers = [army for army in own if army.kind == "explorer"]
     fighter_cells = [spots[army.id] for army in fighters]
     if len(set(fighter_cells)) != len(fighter_cells):
         raise DomainError("order_illegal")
-    forts = {fortress, *(fort.at() for fort in game.fortresses)}
+    # The keep is about to leave its old hex, so that cell is no longer a fortress.
+    forts = {fortress, *(fort.at() for fort in game.fortresses if fort.player_id != actor)}
     if any(spots[army.id] in forts for army in explorers):
         raise DomainError("order_illegal")
     _reject_overlap(
@@ -261,6 +284,48 @@ def close_placement(game: Game, actor: str, now: datetime) -> Game:
             raise DomainError("phase_invalid")
     if any(army.at() is None for army in game.armies if not army.destroyed):
         raise DomainError("phase_invalid")
+    return _open_after_placement(game, actor, now)
+
+
+def confirm_placement(game: Game, actor: str, now: datetime) -> Game:
+    """A seat locks its fortress and goes on to roads. The others keep placing."""
+    if game.phase == "preparing" and game.fort_open:
+        return _confirm_opened_fort(game, actor, now)
+    require_phase(game, "placing")
+    member = require_player(game, actor)
+    if member.status != "active":
+        raise DomainError("forbidden")
+    if not any(fort.player_id == actor for fort in game.fortresses):
+        raise DomainError("phase_invalid")
+    if any(
+        army.player_id == actor and not army.destroyed and army.at() is None
+        for army in game.armies
+    ):
+        raise DomainError("phase_invalid")
+    if actor in game.lobby_ready:
+        return game
+    game.lobby_ready.add(actor)
+    active = {item.player_id for item in seated(game) if item.status == "active"}
+    if not active <= game.lobby_ready:
+        return bump(game)
+    game.lobby_ready = set()
+    return _open_after_placement(game, actor, now)
+
+
+def _confirm_opened_fort(game: Game, actor: str, now: datetime) -> Game:
+    member = require_player(game, actor)
+    if member.status != "active":
+        raise DomainError("forbidden")
+    if not any(fort.player_id == actor for fort in game.fortresses):
+        raise DomainError("phase_invalid")
+    if actor in game.lobby_ready:
+        return game
+    game.lobby_ready.add(actor)
+    settle_preparation(game, now)
+    return bump(game)
+
+
+def _open_after_placement(game: Game, actor: str, now: datetime) -> Game:
     if game.plots is not None and not _frontier(game):
         raise DomainError("phase_invalid")
     _territory(game)
@@ -269,6 +334,9 @@ def close_placement(game: Game, actor: str, now: datetime) -> Game:
     if game.plots is not None:
         open_preparation(game)
     else:
+        for member in seated(game):
+            if member.status == "active" and not army_sheets_ready(game, member.player_id):
+                raise DomainError("sheet_incomplete")
         open_first_turn(game, now)
     return bump(game)
 
@@ -281,17 +349,128 @@ def describe_army(
     commander: str,
     race: str,
     roster: str,
+    now: datetime | None = None,
 ) -> Game:
-    require_phase(game, "placing", "preparing", "orders", "battles")
+    """Commander and list are written once this seat has finished its roads."""
+    naming_step = _army_step(game, actor)
+    bare_table = game.phase == "placing" and game.plots is None
+    if not naming_step and not bare_table:
+        raise DomainError("phase_invalid")
     found = next((army for army in game.armies if army.id == army_id), None)
     if found is None or found.player_id != actor or found.destroyed:
         raise DomainError("forbidden")
-    found.name = label(name, required=True)
-    found.commander = label(commander, required=False)
     found.race = label(race, required=False)
-    found.roster = roster_text(roster)
+    if is_fighter(found):
+        commander_text = label(commander, required=True)
+        roster_body = roster_text(roster)
+        if game.rules.roster_required and not roster_body.strip():
+            raise DomainError("sheet_incomplete")
+        _reject_duplicate_commander(game, actor, found.id, commander_text)
+        found.commander = commander_text
+        found.name = commander_text
+        found.roster = roster_body
+    else:
+        found.name = label(name, required=True)
+        found.commander = label(commander, required=False)
+        found.roster = roster_text(roster)
     remember(game, "named", player_id=actor, army_id=found.id, name=found.name)
+    if naming_step:
+        _close_seat(game, actor, now)
     return bump(game)
+
+
+def stand_token(game: Game, actor: str, army_id: str, cell: Hex, now: datetime | None = None) -> Game:
+    """During this seat's army step, a piece stands inside the ring around its keep."""
+    require_phase(game, "preparing")
+    if not _army_step(game, actor):
+        raise DomainError("phase_invalid")
+    require_player(game, actor)
+    army = next((item for item in game.armies if item.id == army_id), None)
+    if army is None or army.player_id != actor or army.destroyed:
+        raise DomainError("forbidden")
+    fort = next((item.at() for item in game.fortresses if item.player_id == actor), None)
+    if fort is None:
+        raise DomainError("phase_invalid")
+    board = set(game.hexes)
+    reach = deploy_reach(game.rules.map_size)
+    allowed = {cell for cell in board if distance(cell, fort) <= reach}
+    if game.plots is not None:
+        allowed = {spot for spot in allowed if _standable(game, spot)}
+    if cell not in allowed:
+        raise DomainError("order_illegal")
+    if is_fighter(army):
+        for other in game.armies:
+            if other.id == army.id or other.player_id != actor or other.destroyed or not is_fighter(other):
+                continue
+            if other.at() == cell:
+                raise DomainError("order_illegal")
+    army.q = cell.q
+    army.r = cell.r
+    _close_seat(game, actor, now)
+    return bump(game)
+
+
+def settle_preparation(game: Game, now: datetime) -> None:
+    """Close the fort stage or the match once every active seat has reached that point."""
+    if game.phase != "preparing" or game.plots is None:
+        return
+    active = {member.player_id for member in seated(game) if member.status == "active"}
+    if game.fort_open and active and active <= game.lobby_ready:
+        game.fort_open = False
+        _territory(game)
+    if active and active <= game.prep_done:
+        game.naming = False
+        game.fort_open = False
+        _territory(game)
+        open_first_turn(game, now)
+        remember(game, "preparation_closed")
+
+
+def _army_step(game: Game, actor: str) -> bool:
+    """True while this seat may still stand tokens and write its sheets."""
+    if game.phase != "preparing" or actor in game.prep_done:
+        return False
+    return game.naming or actor in game.road_ready
+
+
+def _close_seat(game: Game, actor: str, now: datetime | None) -> None:
+    if actor in game.prep_done or not _seat_ready(game, actor):
+        return
+    game.prep_done.add(actor)
+    settle_preparation(game, now or datetime.now(UTC))
+
+
+def _seat_ready(game: Game, actor: str) -> bool:
+    standing = [
+        army for army in game.armies
+        if army.player_id == actor and not army.destroyed
+    ]
+    if any(army.at() is None for army in standing):
+        return False
+    return army_sheets_ready(game, actor)
+
+
+def army_sheets_ready(game: Game, actor: str) -> bool:
+    """True when every living army of this seat has a unique commander and, if required, a list."""
+    names: list[str] = []
+    for army in game.armies:
+        if army.player_id != actor or army.destroyed or not is_fighter(army):
+            continue
+        if not army.commander.strip():
+            return False
+        if game.rules.roster_required and not army.roster.strip():
+            return False
+        names.append(army.commander.casefold())
+    return len(names) == len(set(names))
+
+
+def _reject_duplicate_commander(game: Game, actor: str, army_id: str, commander: str) -> None:
+    folded = commander.casefold()
+    for army in game.armies:
+        if army.id == army_id or army.player_id != actor or army.destroyed or not is_fighter(army):
+            continue
+        if army.commander.casefold() == folded:
+            raise DomainError("commander_taken")
 
 
 def _reject_overlap(
@@ -332,6 +511,10 @@ def _open_player_homes(game: Game) -> None:
 
 
 def _player_home_zone(game: Game, actor: str) -> set[Hex]:
+    if game.phase == "placing" or game.fort_open:
+        zone = assigned_homes(game).get(actor)
+        if zone:
+            return set(zone)
     zone = game.discovered.get(actor)
     if zone:
         return set(zone)
@@ -370,25 +553,37 @@ def _deploy(game: Game) -> None:
         if game.plots is not None and not _standable(game, fort):
             raise DomainError("rules_invalid")
         game.fortresses.append(Fortress(member.player_id, fort.q, fort.r))
-        army_spot = fort
-        explorer_spot = _beside(fort, taken, board)
-        taken.add(explorer_spot)
-        race = member.faction
-        game.armies.append(_army(game, member.player_id, "1", army_spot, kind="army", race=race))
-        game.armies.append(
-            _army(game, member.player_id, "Explorador", explorer_spot, kind="explorer", race=race)
-        )
+        _seat_tokens(game, member.player_id, member.faction, fort, taken, board)
     _territory(game)
     _home_notice(game)
 
 
 def _blank_armies(game: Game) -> None:
     for member in seated(game):
-        race = member.faction
-        game.armies.append(_army(game, member.player_id, "1", None, kind="army", race=race))
-        game.armies.append(
-            _army(game, member.player_id, "Explorador", None, kind="explorer", race=race)
-        )
+        _seat_tokens(game, member.player_id, member.faction, None, set(), set())
+
+
+def _seat_tokens(
+    game: Game,
+    player_id: str,
+    race: str,
+    fort: Hex | None,
+    taken: set[Hex],
+    board: set[Hex],
+) -> None:
+    """One explorer, plus as many fighting armies as the table asked for."""
+    for index in range(game.rules.armies):
+        spot = None
+        if fort is not None:
+            spot = fort if index == 0 else _beside(fort, taken, board)
+            taken.add(spot)
+        game.armies.append(_army(game, player_id, str(index + 1), spot, kind="army", race=race))
+    explorer_spot = _beside(fort, taken, board) if fort is not None else None
+    if explorer_spot is not None:
+        taken.add(explorer_spot)
+    game.armies.append(
+        _army(game, player_id, "Explorador", explorer_spot, kind="explorer", race=race)
+    )
 
 
 def _army(
@@ -491,6 +686,54 @@ def _stand_board(game: Game) -> set[Hex]:
     if game.plots is None:
         return set(game.hexes)
     return {cell for cell in game.hexes if _standable(game, cell)}
+
+
+def _park_on_standable(
+    game: Game,
+    actor: str,
+    fortress: Hex,
+    spots: dict[str, Hex],
+    home: set[Hex] | None,
+) -> dict[str, Hex]:
+    """Move any token that was left on impassable ground onto a passable home hex."""
+    zone = set(game.hexes) if home is None else home
+    other_forts = {fort.at() for fort in game.fortresses if fort.player_id != actor}
+    ordered = sorted(zone, key=lambda cell: (distance(cell, fortress), cell.q, cell.r))
+    taken: set[Hex] = set()
+    parked: dict[str, Hex] = {}
+    own = [army for army in game.armies if army.player_id == actor and not army.destroyed]
+
+    def claim(preferred: Hex | None, *, fighter: bool) -> Hex:
+        for cell in ((preferred,) if preferred is not None else ()):
+            if _free(cell, fighter=fighter):
+                if fighter:
+                    taken.add(cell)
+                return cell
+        for cell in ordered:
+            if _free(cell, fighter=fighter):
+                if fighter:
+                    taken.add(cell)
+                return cell
+        raise DomainError("order_illegal")
+
+    def _free(cell: Hex, *, fighter: bool) -> bool:
+        if cell not in zone or not _standable(game, cell) or cell in other_forts:
+            return False
+        if fighter and cell in taken:
+            return False
+        if not fighter and (cell == fortress or cell in taken):
+            return False
+        return True
+
+    fighters = [army for army in own if army.kind == "army"]
+    for index, army in enumerate(fighters):
+        preferred = fortress if index == 0 else spots.get(army.id)
+        parked[army.id] = claim(preferred, fighter=True)
+    for army in own:
+        if army.kind != "explorer":
+            continue
+        parked[army.id] = claim(spots.get(army.id), fighter=False)
+    return parked
 
 
 def _standable(game: Game, cell: Hex) -> bool:

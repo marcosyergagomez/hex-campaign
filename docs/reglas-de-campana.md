@@ -33,7 +33,7 @@ Queda fijo en ese momento:
 - Visibilidad de los ejércitos enemigos: todo el mapa, solo los adyacentes, o una ficha sin nombre ni composición. Con un mapa de terrenos, esta elección pasa a ser la de «Mapa y terrenos»: total, mapa conocido con niebla, o solo el territorio propio.
 - Victoria: destruir todos los ejércitos rivales, retener una fortaleza enemiga un número de turnos seguidos, o cualquiera de las dos.
 - Turnos seguidos de retención: un entero de al menos 1.
-- Quién coloca fortalezas y zonas de salida: los jugadores o la aplicación.
+- Quién coloca fortalezas y zonas de salida: los jugadores o el predeterminado.
 - Días máximos para cerrar las órdenes de un turno: un entero de 1 a 30.
 - Días máximos para anotar una batalla: un entero de 1 a 30.
 - Qué considera inactivo, además de la regla de la aplicación que va más abajo.
@@ -42,15 +42,17 @@ Cada jugador tiene una fortaleza. Al empezar, sus ejércitos iniciales ya están
 
 ## Preparación de caminos
 
-Si la campaña lleva mapa de terrenos, tras empezar —o tras cerrar la colocación, si colocan los jugadores— la partida entra en preparación antes del primer turno. Sin mapa de terrenos, el primer turno de órdenes se abre al instante.
+Si la campaña lleva mapa de terrenos, cada jugador recorre la preparación por su cuenta y en orden: fortaleza, caminos y ejércitos. No espera al resto en cada paso. Si las fortalezas las colocan los jugadores, elige la casilla dentro del territorio que se le marcó al principio y la confirma; a partir de ahí su territorio se mide desde esa fortaleza. Luego traza sus caminos y, al guardarlos, coloca cada ficha dentro del anillo de la fortaleza: una casilla alrededor en el mapa pequeño, dos en el mediano y tres en el grande. Si tiene dos ejércitos, o dos exploradores, ve un número en sus fichas; el rival no lo ve. El comandante (y la lista, si la campaña la pide) se escribe con un doble clic. Cuando ha terminado esos pasos, espera. El primer turno se abre cuando todos los asientos activos han acabado la suya. Durante la partida, un doble clic en un ejército abre esa misma ficha, ya fija. Sin mapa de terrenos, el primer turno de órdenes se abre al instante.
 
-En preparación, todos los asientos activos colocan a la vez. Cada uno dispone de un presupuesto de piezas igual al doble de la distancia máxima, en hexágonos, desde su fortaleza hasta el borde de su territorio. Solo puede poner camino en casillas transitables de su territorio, nunca en la fortaleza. Cada pieza nueva tiene que tocar la fortaleza o una pieza ya puesta, de modo que la red quede conectada. Poner camino sobre un río completo añade puente. Puede quitar una pieza propia mientras el resto siga unido a la fortaleza. Quien ha terminado se marca listo; cuando todos los asientos activos lo están, se abre el turno 1 de órdenes. Los mapas generados salen sin caminos locales: las piezas las pone cada jugador en esta fase. Un mapa dibujado a mano puede traer caminos o puentes ya puestos.
+En preparación, todos los asientos activos colocan a la vez. Cada uno dispone de un presupuesto de piezas igual al doble de la distancia máxima, en hexágonos, desde su fortaleza hasta el borde de su territorio. Solo puede poner camino en casillas transitables de su territorio, nunca en la fortaleza. Cada pieza nueva tiene que tocar la fortaleza o una pieza ya puesta, de modo que la red quede conectada. Poner camino sobre un río completo añade puente. Puede quitar una pieza propia mientras el resto siga unido a la fortaleza. Quien ha terminado sus caminos sigue con sus ejércitos, sin esperar a los demás. El turno 1 se abre cuando todos los asientos activos han acabado la preparación entera. Los mapas generados salen sin caminos locales: las piezas las pone cada jugador en esta fase. Un mapa dibujado a mano puede traer caminos o puentes ya puestos.
 
 ## Ejército y explorador
 
-Al empezar, cada jugador recibe dos fichas: un ejército y un explorador. El aspecto de cada ficha sigue la raza del estandarte y toma el color elegido.
+Al empezar, cada jugador recibe uno o dos ejércitos, según lo elegido al crear la campaña, y un explorador. El aspecto de cada ficha sigue la raza del estandarte y toma el color elegido.
 
 Un ejército es la ficha de combate: puede pelear, ocupar fortalezas y cuenta para la victoria por destrucción. Dos ejércitos del mismo jugador no comparten hexágono. Cada uno gasta su propio movimiento; no se transfiere de uno a otro.
+
+Cada ejército lleva el nombre de su comandante. Ese nombre es obligatorio, distingue unas fichas de otras y no se puede repetir entre los ejércitos del mismo jugador. La lista se escribe en texto, hasta 2000 caracteres. Por defecto es opcional. Al crear la campaña se puede marcar que la lista sea obligatoria. Comandante y lista solo se editan en la preparación (o en la colocación, si esa es la última fase antes de la guerra) y quedan fijos al abrirse el primer turno. El explorador no lleva comandante ni lista.
 
 El explorador es un jinete que no lucha. Se mueve 4 puntos más que el ejército y mira 5 casillas más lejos. Las reglas de coste del terreno le afectan igual. Puede compartir casilla con cualquier ejército o explorador, propio o ajeno, y no provoca batalla. No puede entrar en ninguna fortaleza.
 

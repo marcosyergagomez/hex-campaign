@@ -93,6 +93,8 @@ class Invitation(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     accepted_at = models.DateTimeField(null=True, blank=True)
+    declined_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self) -> str:
         return f"{self.campaign_id} {self.created_at:%Y-%m-%d}"

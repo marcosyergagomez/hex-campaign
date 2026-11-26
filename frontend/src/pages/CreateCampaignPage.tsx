@@ -348,10 +348,25 @@ export function CreateCampaignPage() {
         {step === 2 ? (
           <div className="wizard-fields">
             <h2>{t("stepWar")}</h2>
-            <p className="field-note">
-              <strong>{t("ruleArmies")}</strong>
-              <span>{t("ruleArmiesHint")}</span>
-            </p>
+            <SelectField
+              label={t("ruleArmies")}
+              name="armies"
+              value={String(rules.armies)}
+              hint={t("ruleArmiesHint")}
+              options={[1, 2].map((n) => ({ value: String(n), label: String(n) }))}
+              onChange={(value) => patchRules({ armies: Number(value) })}
+            />
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={rules.roster_required}
+                onChange={(event) => patchRules({ roster_required: event.target.checked })}
+              />
+              <span>
+                <strong>{t("ruleRosterRequired")}</strong>
+                <span className="field-note">{t("ruleRosterRequiredHint")}</span>
+              </span>
+            </label>
             <SelectField
               label={t("ruleMovement")}
               name="movement"
@@ -491,9 +506,9 @@ function sizeLabel(
 }
 
 function recommendedMovement(key: MapScale["key"] | "small"): number {
-  if (key === "medium") return 3
-  if (key === "large") return 4
-  return 2
+  if (key === "medium") return 4
+  if (key === "large") return 5
+  return 3
 }
 
 function visibilityKey(value: Visibility) {

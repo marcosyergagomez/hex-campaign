@@ -32,7 +32,7 @@ from hexcampaign.domain.turn import (
     restore_player,
     withdraw_player,
 )
-from hexcampaign.domain.view import project, project_roads_delta
+from hexcampaign.domain.view import project, project_fort_delta, project_roads_delta
 
 from .live import live_bus
 from .models import Campaign, Invitation, Notification, Seat
@@ -250,7 +250,13 @@ def invite_alias(user, campaign_id, revision: int, alias: str) -> tuple[Campaign
         campaign = _locked(campaign_id)
         pending = (
             Invitation.objects.select_for_update()
-            .filter(campaign=campaign, invited_user=invited, accepted_at__isnull=True)
+            .filter(
+                campaign=campaign,
+                invited_user=invited,
+                accepted_at__isnull=True,
+                declined_at__isnull=True,
+                revoked_at__isnull=True,
+            )
             .first()
         )
         if pending is not None:
@@ -263,6 +269,25 @@ def invite_alias(user, campaign_id, revision: int, alias: str) -> tuple[Campaign
             except DomainError as exc:
                 raise CampaignError(exc.code) from exc
             return campaign, game
+        closed = (
+            Invitation.objects.select_for_update()
+            .filter(campaign=campaign, invited_user=invited, accepted_at__isnull=True)
+            .order_by("-created_at")
+            .first()
+        )
+        if closed is not None:
+            game = _document(campaign)
+            if game.revision != revision:
+                raise RevisionConflict()
+            try:
+                require_staff(game, str(user.pk))
+            except DomainError as exc:
+                raise CampaignError(exc.code) from exc
+            closed.declined_at = None
+            closed.revoked_at = None
+            closed.save(update_fields=["declined_at", "revoked_at"])
+            _notify_campaign_invite(invited, campaign, game.revision)
+            return campaign, game
         campaign, game = play(user, campaign_id, revision, command)
         Invitation.objects.create(
             campaign=campaign,
@@ -271,6 +296,122 @@ def invite_alias(user, campaign_id, revision: int, alias: str) -> tuple[Campaign
         )
         _notify_campaign_invite(invited, campaign, game.revision)
         return campaign, game
+
+
+def list_invitations(user, campaign_id) -> list[dict[str, str]]:
+    """Staff see each alias invite: pending, accepted, declined by the player, or revoked."""
+    campaign = _readable_campaign(user, campaign_id)
+    game = _document(campaign)
+    try:
+        require_staff(game, str(user.pk))
+    except DomainError as exc:
+        raise CampaignError(exc.code) from exc
+    rows = (
+        Invitation.objects.filter(campaign=campaign, invited_user__isnull=False)
+        .select_related("invited_user")
+        .order_by("-created_at")
+    )
+    shown: list[dict[str, str]] = []
+    for row in rows:
+        account = row.invited_user
+        shown.append(
+            {
+                "id": str(row.pk),
+                "alias": account.alias if account is not None else "",
+                "status": _invitation_status(row),
+            }
+        )
+    return shown
+
+
+def revoke_invitation(user, campaign_id, invitation_id: object) -> None:
+    row, campaign = _staff_invitation(user, campaign_id, invitation_id)
+    if row.accepted_at is not None or row.revoked_at is not None:
+        raise CampaignError("invitation_invalid")
+    row.revoked_at = timezone.now()
+    row.save(update_fields=["revoked_at"])
+    _close_invite_notices(row)
+
+
+def resend_invitation(user, campaign_id, invitation_id: object) -> None:
+    row, campaign = _staff_invitation(user, campaign_id, invitation_id)
+    if row.accepted_at is not None or row.invited_user is None:
+        raise CampaignError("invitation_invalid")
+    row.declined_at = None
+    row.revoked_at = None
+    row.save(update_fields=["declined_at", "revoked_at"])
+    game = _document(campaign)
+    _notify_campaign_invite(row.invited_user, campaign, game.revision)
+
+
+def decline_invitation(user, campaign_id) -> None:
+    """The invited player turns the offer down. Staff can see that it was declined."""
+    row = (
+        Invitation.objects.filter(
+            campaign_id=campaign_id,
+            invited_user=user,
+            accepted_at__isnull=True,
+            revoked_at__isnull=True,
+            declined_at__isnull=True,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if row is None:
+        raise CampaignError("invitation_invalid")
+    row.declined_at = timezone.now()
+    row.save(update_fields=["declined_at"])
+    _close_invite_notices(row)
+
+
+def _staff_invitation(user, campaign_id, invitation_id: object):
+    try:
+        key = int(invitation_id)
+    except (TypeError, ValueError):
+        raise CampaignError("invitation_invalid") from None
+    campaign = _readable_campaign(user, campaign_id)
+    game = _document(campaign)
+    try:
+        require_staff(game, str(user.pk))
+    except DomainError as exc:
+        raise CampaignError(exc.code) from exc
+    row = Invitation.objects.filter(pk=key, campaign=campaign).first()
+    if row is None:
+        raise CampaignError("invitation_invalid")
+    return row, campaign
+
+
+def _invitation_status(row) -> str:
+    if row.accepted_at is not None:
+        return "accepted"
+    if row.revoked_at is not None:
+        return "revoked"
+    if row.declined_at is not None:
+        return "declined"
+    return "pending"
+
+
+def _close_invite_notices(row) -> None:
+    from .models import Notification
+
+    if row.invited_user_id is None:
+        return
+    Notification.objects.filter(
+        user_id=row.invited_user_id,
+        kind=Notification.KIND_CAMPAIGN_INVITE,
+        payload__campaign_id=str(row.campaign_id),
+    ).update(read_at=timezone.now())
+
+
+def _readable_campaign(user, campaign_id):
+    campaign = Campaign.objects.filter(pk=campaign_id).first()
+    if campaign is None:
+        raise CampaignError("not_found")
+    game = _document(campaign)
+    member = find_member(game, str(user.pk))
+    if member is None or member.status == "expelled":
+        raise CampaignError("forbidden")
+    return campaign
 
 
 def search_players(user, query: object) -> list[dict[str, str]]:
@@ -388,7 +529,12 @@ def invite_link(user, campaign_id) -> str:
 def accept_link(user, token: str, revision: int) -> tuple[Campaign, Game]:
     if not isinstance(token, str) or not token or len(token) > 128:
         raise CampaignError("invitation_invalid")
-    found = Invitation.objects.filter(token_hash=_digest(token), accepted_at__isnull=True).first()
+    found = Invitation.objects.filter(
+        token_hash=_digest(token),
+        accepted_at__isnull=True,
+        declined_at__isnull=True,
+        revoked_at__isnull=True,
+    ).first()
     if found is None or found.invited_user_id not in {None, user.pk}:
         raise CampaignError("invitation_invalid")
     return _accept(user, found.pk, revision)
@@ -472,8 +618,12 @@ def list_campaigns(user) -> list[dict[str, object]]:
 
 
 def inbox(user) -> list[dict[str, object]]:
-    pending = Invitation.objects.filter(invited_user=user, accepted_at__isnull=True)
-    pending = pending.select_related("campaign")
+    pending = Invitation.objects.filter(
+        invited_user=user,
+        accepted_at__isnull=True,
+        declined_at__isnull=True,
+        revoked_at__isnull=True,
+    ).select_related("campaign")
     rows: list[dict[str, object]] = []
     for item in pending:
         state = item.campaign.state if isinstance(item.campaign.state, dict) else {}
@@ -490,7 +640,12 @@ def inbox(user) -> list[dict[str, object]]:
 def preview_link(user, token: str) -> dict[str, object]:
     if not isinstance(token, str) or not token or len(token) > 128:
         raise CampaignError("invitation_invalid")
-    found = Invitation.objects.filter(token_hash=_digest(token), accepted_at__isnull=True).first()
+    found = Invitation.objects.filter(
+        token_hash=_digest(token),
+        accepted_at__isnull=True,
+        declined_at__isnull=True,
+        revoked_at__isnull=True,
+    ).first()
     if found is None or found.invited_user_id not in {None, user.pk}:
         raise CampaignError("invitation_invalid")
     return _card(found.campaign, _document(found.campaign))
@@ -498,6 +653,14 @@ def preview_link(user, token: str) -> dict[str, object]:
 
 def present(campaign: Campaign, game: Game, user, now) -> dict[str, object]:
     body = project(game, str(user.pk), now)
+    body["id"] = str(campaign.id)
+    body["joined"] = True
+    return body
+
+
+def present_fort_delta(campaign: Campaign, game: Game, user) -> dict[str, object]:
+    del user
+    body = project_fort_delta(game)
     body["id"] = str(campaign.id)
     body["joined"] = True
     return body

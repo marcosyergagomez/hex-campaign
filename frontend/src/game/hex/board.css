@@ -32,12 +32,55 @@
   stroke-dasharray: 2.5 1.7;
 }
 
+.hex-token-alert {
+  pointer-events: none;
+}
+
+.hex-token-alert circle {
+  fill: #9d1c1c;
+  stroke: #fff4e4;
+  stroke-width: 0.7;
+}
+
+.hex-token-alert text {
+  fill: #fff8ee;
+  font-size: 8px;
+  font-family: Palatino, serif;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.hex-token-index {
+  pointer-events: none;
+}
+
+.hex-token-index circle {
+  fill: #2a2116;
+  stroke: #f6e7b2;
+  stroke-width: 0.55;
+}
+
+.hex-token-index text {
+  fill: #f6e7b2;
+  font-size: 5.5px;
+  font-family: Cinzel, Palatino, serif;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
 .hex-tokens {
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
 }
 
+.hex-tokens.is-quiet,
+.hex-tokens.is-quiet .hex-token-hit {
+  pointer-events: none;
+}
+
 .hex-token-slide {
-  transition: transform 480ms linear;
+  transition: transform 640ms cubic-bezier(0.22, 0.7, 0.2, 1);
+  will-change: transform;
 }
 
 .hex-token-hit {
@@ -120,6 +163,24 @@
   stroke: rgba(55, 48, 30, 0.32);
   stroke-width: 0.65;
   pointer-events: all;
+}
+
+.hex-edge.is-placeable,
+.hex-edge.is-placeable:hover {
+  fill: var(--mark-fill, rgba(230, 197, 106, 0.22));
+  stroke: var(--mark, #f3d78a);
+}
+
+.hex-mark-cross {
+  fill: none;
+  stroke: var(--mark, #f6e7b2);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+.hex-mark-cross.is-shadow {
+  stroke: #2a2116;
+  stroke-width: 3.2;
 }
 
 .hex-edge:hover {
@@ -297,6 +358,7 @@
   color: var(--muted);
   letter-spacing: 0.04em;
   text-transform: none;
+  white-space: pre-wrap;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 0.72rem;
   line-height: 1.35;

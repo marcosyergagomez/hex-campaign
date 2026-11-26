@@ -22,7 +22,7 @@ Hasta que el propietario pulsa empezar puede cambiar las reglas y bajar el núme
 
 Sin mapa de terrenos, el tablero sigue midiendo 19, 37 o 61 hexágonos axiales y no hay casillas infranqueables. Con un mapa guardado o generado, el tamaño es el del mapa (hoy 271, 397 o 547 en los preajustes) y el dominio aplica el catálogo de terrenos. El documento dibujado puede ser un subconjunto del disco: `game.hexes` copia esas casillas. `/api/map-scales` publica los preajustes. `POST /api/maps` con `cells` guarda un dibujo; `PUT /api/maps/{id}` actualiza solo dibujos; `POST /api/maps/{id}/copy` clona uno (también generado) a dibujo editable; `DELETE /api/maps/{id}` borra el atlas.
 
-Tras empezar o cerrar la colocación, si la campaña tiene terrenos, la fase pasa a preparación. Ahí viven `POST .../roads`, `POST .../roads/clear` y `POST .../roads/ready`. Mientras la partida sigue en preparación, esas escrituras responden un delta (`kind: roads_delta`): revisión, fase, contadores de camino, `road_ready` y solo las casillas tocadas. Al abrirse el primer turno, `roads/ready` del último asiento devuelve la vista completa.
+Tras empezar, si la campaña tiene terrenos, la fase pasa a preparación. Cada asiento avanza por su cuenta: fortaleza, caminos, ejércitos. Ahí viven `POST .../roads`, `POST .../roads/clear` y `POST .../roads/ready`. Poner o quitar un camino responde un delta (`kind: roads_delta`): revisión, fase, contadores de camino, `road_ready` y solo las casillas tocadas. Guardar los caminos de un asiento lo pasa a sus ejércitos y devuelve la vista completa. El primer turno se abre cuando todos los asientos activos han terminado la preparación, no al cerrar los caminos.
 
 ## Órdenes, vista y escrituras
 

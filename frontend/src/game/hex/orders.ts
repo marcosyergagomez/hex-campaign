@@ -34,18 +34,26 @@ const EXIT: Record<string, number> = {
   campo: 1,
 }
 
+export const EXPLORER_MOVE_BONUS = 4
+export const EXPLORER_GAZE_BONUS = 5
+
 export function spotKey(spot: Spot): string {
   return `${spot.q},${spot.r}`
 }
 
 export function moveBudget(movement: number, kind: "army" | "explorer"): number {
-  return movement + (kind === "explorer" ? 2 : 0)
+  return movement + (kind === "explorer" ? EXPLORER_MOVE_BONUS : 0)
 }
 
 /** How far a token sees from the ground it stands on. Mirrors the server. */
 export function gazeReach(ground: string | undefined, explorer: boolean): number {
   const base = ground === "colina" ? 3 : ground === "montana" ? 4 : ground === "bosque_profundo" ? 0 : 2
-  return base + (explorer ? 1 : 0)
+  return base + (explorer ? EXPLORER_GAZE_BONUS : 0)
+}
+
+/** Points to leave this hex. Unknown ground is treated as plain. */
+export function exitCostOf(plot: OrderPlot | undefined): number {
+  return exitCost(plot)
 }
 
 export function hexDistance(left: Spot, right: Spot): number {
@@ -69,6 +77,7 @@ export function routeTo(input: {
   if (back >= 0) return input.path.slice(0, back)
   const walked = walk(input.origin, input.path, input.budget, input.paid, input.plots)
   if (!walked) return null
+  if (walked.stuck) return null
   const extra = search(walked.at, walked.budget, walked.paid, input.target, input)
   if (!extra) return null
   return [...input.path, ...extra]
@@ -115,14 +124,19 @@ function walk(
   budget: number,
   paid: number,
   plots: Map<string, OrderPlot>,
-): { at: Spot; budget: number; paid: number } | null {
+): { at: Spot; budget: number; paid: number; stuck: boolean } | null {
   let at = origin
-  for (const step of path) {
+  for (let index = 0; index < path.length; index += 1) {
+    const step = path[index]
     if (!adjacent(at, step)) return null
     const stood = plots.get(spotKey(at))
     const cost = exitCost(stood)
+    const last = index === path.length - 1
     while (paid < cost) {
-      if (budget <= 0) return null
+      if (budget <= 0) {
+        // Server keeps the intent and the partial abono; the army has not left yet.
+        return last ? { at, budget: 0, paid, stuck: true } : null
+      }
       budget -= 1
       paid += 1
     }
@@ -130,7 +144,7 @@ function walk(
     paid = 0
     at = step
   }
-  return { at, budget, paid }
+  return { at, budget, paid, stuck: false }
 }
 
 function search(
@@ -162,16 +176,19 @@ function search(
       const cost = exitCost(stood)
       let left = node.budget
       let progress = node.paid
-      while (progress < cost) {
-        if (left <= 0) {
-          left = -1
-          break
-        }
+      if (left <= 0 && progress < cost) continue
+      while (progress < cost && left > 0) {
         left -= 1
         progress += 1
       }
-      if (left < 0) continue
       const path = [...node.path, next]
+      if (progress < cost) {
+        // Partial abono toward leaving: only valid as the final click this turn.
+        if (next.q === target.q && next.r === target.r && (node.budget > 0 || node.paid > 0)) {
+          return path
+        }
+        continue
+      }
       if (next.q === target.q && next.r === target.r) return path
       if (input.blocked.has(spotKey(next))) continue
       const after = left + refund(stood)

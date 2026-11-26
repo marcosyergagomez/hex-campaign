@@ -59,6 +59,8 @@ export function UnitToken({
   y,
   size,
   label,
+  mark,
+  attention = false,
 }: {
   boardId: string
   faction: string
@@ -68,6 +70,8 @@ export function UnitToken({
   y: number
   size: number
   label: string
+  mark?: number
+  attention?: boolean
 }) {
   const known = isFaction(faction)
   const clipId = useId().replaceAll(":", "")
@@ -100,6 +104,18 @@ export function UnitToken({
       ) : (
         <use href={`#${boardId}-token-generic`} x="-16" y="-16" width="32" height="32" />
       )}
+      {attention ? (
+        <g className="hex-token-alert" transform="translate(10 -11)">
+          <circle r="5.4" />
+          <text y="0.6">!</text>
+        </g>
+      ) : null}
+      {mark != null ? (
+        <g className="hex-token-index" transform="translate(0 10.6)">
+          <circle r="3.8" />
+          <text y="0.4">{mark}</text>
+        </g>
+      ) : null}
     </g>
   )
 }

@@ -4,11 +4,11 @@ from datetime import datetime
 
 from hexcampaign.domain.clock import overdue
 from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.game import Game, find_member, living
+from hexcampaign.domain.game import Army, Game, find_member, living
 from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.roads import road_progress
 from hexcampaign.domain.sight import gazed_cells, in_home, known_hex, sees_army
-from hexcampaign.domain.territory import homes_by_player
+from hexcampaign.domain.territory import assigned_homes, disk_at, homes_by_player
 from hexcampaign.domain.units import unit_gaze
 
 
@@ -16,7 +16,14 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
     member = find_member(game, viewer)
     staff = member is not None and member.role in {"owner", "admin"} and member.status == "active"
     board = set(game.hexes)
-    homes = homes_by_player(game, board=board) if game.plots is not None else None
+    # Keep the starting disk fixed while the fortress can still be moved.
+    if game.plots is not None and (game.phase == "placing" or game.fort_open):
+        homes = assigned_homes(game, board=board)
+        for fort in game.fortresses:
+            if fort.player_id in game.lobby_ready:
+                homes[fort.player_id] = disk_at(game, fort.at(), board=board)
+    else:
+        homes = homes_by_player(game, board=board) if game.plots is not None else None
     home = homes.get(viewer, set()) if homes is not None else set()
     owners = _territorial_owners(game, board, homes=homes)
     body = {
@@ -37,6 +44,7 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
             "order_days": game.rules.order_days,
             "battle_days": game.rules.battle_days,
             "missed_turns": game.rules.missed_turns,
+            "roster_required": game.rules.roster_required,
         },
         "you": None if member is None else _you(member, game),
         "members": [
@@ -72,10 +80,33 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
         "orders_due": game.phase == "orders"
         and overdue(game.orders_opened_at, game.rules.order_days, now),
         "road_ready": sorted(game.road_ready),
-        "lobby_ready": sorted(game.lobby_ready) if game.phase == "recruiting" else [],
+        "lobby_ready": sorted(game.lobby_ready)
+        if game.phase in {"recruiting", "placing"} or game.fort_open
+        else [],
+        "naming": game.naming,
+        "fort_open": game.fort_open,
+        "prep_done": sorted(game.prep_done) if game.phase in {"placing", "preparing"} else [],
+        "prep": preparation_stage(game, viewer),
         "roads": _roads_view(game, viewer),
     }
     return body
+
+
+def project_fort_delta(game: Game) -> dict[str, object]:
+    """The fortress moved. The atlas did not, so the client only needs the new spots."""
+    return {
+        "kind": "fort_delta",
+        "revision": game.revision,
+        "phase": game.phase,
+        "fortresses": [
+            {"player_id": fort.player_id, "q": fort.q, "r": fort.r}
+            for fort in game.fortresses
+        ],
+        "armies": [
+            {"id": army.id, "q": army.q, "r": army.r}
+            for army in game.armies
+        ],
+    }
 
 
 def project_roads_delta(
@@ -94,6 +125,10 @@ def project_roads_delta(
         "phase": game.phase,
         "turn": game.turn,
         "road_ready": sorted(game.road_ready),
+        "naming": game.naming,
+        "fort_open": game.fort_open,
+        "prep_done": sorted(game.prep_done),
+        "prep": preparation_stage(game, viewer),
         "roads": _roads_view(game, viewer),
         "hexes": [
             _hex_view(game, viewer, cell, owners.get(cell), home=home, board=board)
@@ -101,6 +136,22 @@ def project_roads_delta(
             if cell in board
         ],
     }
+
+
+def preparation_stage(game: Game, viewer: str) -> str | None:
+    """The step this seat is on. Others may be on a different step."""
+    if game.phase not in {"placing", "preparing"} or game.plots is None:
+        return None
+    member = find_member(game, viewer)
+    if member is None or member.status != "active":
+        return None
+    if (game.phase == "placing" or game.fort_open) and viewer not in game.lobby_ready:
+        return "fort"
+    if viewer in game.prep_done:
+        return "waiting"
+    if game.naming or viewer in game.road_ready:
+        return "armies"
+    return "roads"
 
 
 def _roads_view(game: Game, viewer: str) -> dict[str, object] | None:
@@ -375,6 +426,19 @@ def _hex_view(
     return shown
 
 
+def _token_spot(game: Game, army: Army) -> tuple[int | None, int | None]:
+    """Hide pieces until that seat is preparing its armies. The coordinates stay on the game."""
+    if (
+        game.plots is not None
+        and game.phase in {"placing", "preparing"}
+        and not game.naming
+        and army.player_id not in game.road_ready
+        and army.player_id not in game.prep_done
+    ):
+        return None, None
+    return army.q, army.r
+
+
 def _armies(
     game: Game,
     viewer: str,
@@ -386,12 +450,13 @@ def _armies(
     for army in game.armies:
         if not sees_army(game, viewer, army, home=home, board=board):
             continue
+        q, r = _token_spot(game, army)
         if army.player_id != viewer and game.rules.visibility == "anonymous":
             shown.append(
                 {
                     "id": army.id,
-                    "q": army.q,
-                    "r": army.r,
+                    "q": q,
+                    "r": r,
                     "kind": army.kind,
                     "anonymous": True,
                 }
@@ -405,8 +470,8 @@ def _armies(
                 "commander": army.commander,
                 "race": army.race,
                 "roster": army.roster,
-                "q": army.q,
-                "r": army.r,
+                "q": q,
+                "r": r,
                 "destroyed": army.destroyed,
                 "kind": army.kind,
                 "anonymous": False,

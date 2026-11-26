@@ -7,24 +7,32 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.game import find_member, from_dict, to_dict
-from hexcampaign.domain.hexes import Hex, disk, distance, neighbors
+from hexcampaign.domain.game import Army, find_member, from_dict, to_dict
+from hexcampaign.domain.hexes import Hex, deploy_reach, disk, distance, neighbors
 from hexcampaign.domain.identity import COLORS
 from hexcampaign.domain.lobby import (
     accept_seat,
+    army_sheets_ready,
     begin,
+    clear_ready,
     choose_identity,
     claim_color,
     close_placement,
+    confirm_placement,
     create_game,
+    describe_army,
+    stand_token,
     invite_player,
     mark_ready,
     place_armies,
 )
+from hexcampaign.domain.roads import finish_roads, place_road
 from hexcampaign.domain.march import march
 from hexcampaign.domain.rules import campaign_description, campaign_name, roster_text, rules_from
 from hexcampaign.domain.sight import known_hex
 from hexcampaign.domain.terrain import Plot
+from hexcampaign.domain.view import project, project_fort_delta
+from hexcampaign.domain.units import unit_gaze
 from hexcampaign.domain.turn import (
     close_orders,
     deactivate_player,
@@ -33,7 +41,6 @@ from hexcampaign.domain.turn import (
     report_battle,
     revert_turn,
 )
-from hexcampaign.domain.view import project
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -54,6 +61,10 @@ def test_player_identity_is_persisted_and_required_before_a_new_campaign_starts(
     with pytest.raises(DomainError, match="lobby_not_ready"):
         begin(restored, "1", [], NOW)
     mark_ready(restored, "1")
+    mark_ready(restored, "2")
+    clear_ready(restored, "2")
+    with pytest.raises(DomainError, match="lobby_not_ready"):
+        begin(restored, "1", [], NOW)
     mark_ready(restored, "2")
     begin(restored, "1", [], NOW)
     assert restored.rules == game.rules
@@ -571,6 +582,8 @@ def test_a_placed_army_discovers_the_hex_it_stands_on() -> None:
     other_scout = _explorer(game, "2")
     game = place_armies(game, "1", first, {own.id: Hex(0, 0), scout.id: Hex(0, 0)})
     game = place_armies(game, "2", second, {other.id: Hex(1, 0), other_scout.id: Hex(1, 0)})
+    game = describe_army(game, "1", own.id, own.name, "Ana", "", "")
+    game = describe_army(game, "2", other.id, other.name, "Boa", "", "")
     game = close_placement(game, "1", NOW)
 
     assert known_hex(game, "1", Hex(0, 0))
@@ -588,25 +601,149 @@ def test_players_place_forts_inside_pre_marked_home_land() -> None:
     game.plots = {cell: Plot("llanura") for cell in game.hexes}
     game.home_size = 7
     game = begin(_ready_table(game), "1", [], NOW)
-    assert game.phase == "placing"
+    assert game.phase == "preparing"
+    assert game.fort_open is True
     assert len(game.anchors) == 2
     home_one = set(game.discovered["1"])
     home_two = set(game.discovered["2"])
     assert home_one and home_two and home_one.isdisjoint(home_two)
+    shown = project(game, "1", NOW)
+    painted = {Hex(cell["q"], cell["r"]) for cell in shown["hexes"] if cell.get("owner_id") == "1"}
+    assert painted == home_one
+    assert all(cell["known"] for cell in shown["hexes"] if Hex(cell["q"], cell["r"]) in home_one)
     outsider = next(cell for cell in game.hexes if cell not in home_one)
     own = _army(game, "1")
     scout = _explorer(game, "1")
     home_cell = next(iter(home_one))
     with pytest.raises(DomainError, match="order_illegal"):
         place_armies(game, "1", outsider, {own.id: home_cell, scout.id: home_cell})
-    fort = next(iter(home_one))
+    fort = next(cell for cell in home_one if cell != game.anchors[0])
     army_spot = next(cell for cell in home_one if cell != fort)
     game = place_armies(game, "1", fort, {own.id: army_spot, scout.id: army_spot})
     assert next(item for item in game.fortresses if item.player_id == "1").at() == fort
+    delta = project_fort_delta(game)
+    assert delta["kind"] == "fort_delta"
+    assert "hexes" not in delta
+    assert {"player_id": "1", "q": fort.q, "r": fort.r} in delta["fortresses"]
+    again = project(game, "1", NOW)
+    still = {Hex(cell["q"], cell["r"]) for cell in again["hexes"] if cell.get("owner_id") == "1"}
+    assert still == home_one
+    game = confirm_placement(game, "1", NOW)
+    from hexcampaign.domain.territory import disk_at
+
+    fixed = project(game, "1", NOW)
+    adapted = {Hex(cell["q"], cell["r"]) for cell in fixed["hexes"] if cell.get("owner_id") == "1"}
+    assert adapted == disk_at(game, fort, board=set(game.hexes))
+    assert fixed["prep"] == "roads"
+    assert project(game, "2", NOW)["prep"] == "fort"
+
+
+def test_a_fortress_may_stand_beside_an_impassable_hex() -> None:
+    game = create_game(
+        "Orilla",
+        rules_from(_rules(placement="players", visibility="home", map_size=37)),
+        "1",
+        "ana",
+    )
+    game = accept_seat(game, "2", "boa")
+    game.plots = {cell: Plot("llanura") for cell in game.hexes}
+    game.home_size = 7
+    game = begin(_ready_table(game), "1", [], NOW)
+    home = set(game.discovered["1"])
+    fort = next(cell for cell in home if any(other in home for other in neighbors(cell)))
+    blocked = next(other for other in neighbors(fort) if other in home)
+    game.plots[blocked] = Plot("lago")
+    army = _army(game, "1")
+    scout = _explorer(game, "1")
+    game = place_armies(game, "1", fort, {army.id: fort, scout.id: blocked})
+    assert next(item for item in game.fortresses if item.player_id == "1").at() == fort
+    assert scout.at() != blocked
+    assert scout.at() != fort
+    assert game.plots[scout.at()].ground != "lago"
+    nxt = next(cell for cell in neighbors(fort) if cell in home and cell != blocked)
+    game = place_armies(game, "1", nxt, {army.id: nxt, scout.id: fort})
+    assert next(item for item in game.fortresses if item.player_id == "1").at() == nxt
+    assert scout.at() != nxt
+
+
+def test_a_player_finishes_preparation_without_waiting_for_the_table() -> None:
+    game = create_game(
+        "Hogares",
+        rules_from(_rules(placement="players", visibility="home", map_size=37)),
+        "1",
+        "ana",
+    )
+    game = accept_seat(game, "2", "boa")
+    game.plots = {cell: Plot("llanura") for cell in game.hexes}
+    game.home_size = 7
+    game = begin(_ready_table(game), "1", [], NOW)
+    assert project(game, "1", NOW)["prep"] == "fort"
+    home = set(game.discovered["1"])
+    fort = next(cell for cell in home if cell != game.anchors[0])
+    army = _army(game, "1")
+    scout = _explorer(game, "1")
+    spot = next(cell for cell in home if cell != fort)
+    with pytest.raises(DomainError, match="phase_invalid"):
+        place_road(game, "1", next(cell for cell in neighbors(fort) if cell in home))
+    game = place_armies(game, "1", fort, {army.id: spot, scout.id: spot})
+    game = confirm_placement(game, "1", NOW)
+    road = next(cell for cell in neighbors(fort) if cell in set(game.hexes))
+    game = place_road(game, "1", road)
+    game = finish_roads(game, "1", NOW)
+    assert game.phase == "preparing"
+    assert project(game, "1", NOW)["prep"] == "armies"
+    assert project(game, "2", NOW)["prep"] == "fort"
+    assert army.at() is None
+    beside = next(cell for cell in neighbors(fort) if cell in set(game.hexes))
+    game = stand_token(game, "1", army.id, fort, NOW)
+    game = stand_token(game, "1", scout.id, beside, NOW)
+    game = describe_army(game, "1", army.id, army.name, "Ana", "", "", NOW)
+    assert "1" in game.prep_done
+    assert project(game, "1", NOW)["prep"] == "waiting"
+    assert game.phase == "preparing"
+    home_two = set(game.discovered["2"])
+    other = _army(game, "2")
+    other_scout = _explorer(game, "2")
+    other_fort = next(cell for cell in home_two if cell != game.anchors[1])
+    other_spot = next(cell for cell in home_two if cell != other_fort)
+    game = place_armies(game, "2", other_fort, {other.id: other_spot, other_scout.id: other_spot})
+    game = confirm_placement(game, "2", NOW)
+    game = finish_roads(game, "2", NOW)
+    game = stand_token(game, "2", other.id, other_fort, NOW)
+    beside_two = next(cell for cell in neighbors(other_fort) if cell in set(game.hexes))
+    game = stand_token(game, "2", other_scout.id, beside_two, NOW)
+    game = describe_army(game, "2", other.id, other.name, "Boa", "", "", NOW)
+    assert game.phase == "orders"
+    assert game.turn == 1
+
+
+def test_armies_deploy_inside_a_ring_that_grows_with_the_map() -> None:
+    assert deploy_reach(19) == 1
+    assert deploy_reach(271) == 1
+    assert deploy_reach(397) == 2
+    assert deploy_reach(547) == 3
+    game = create_game(
+        "Anillo",
+        rules_from(_rules(map_size=397, placement="app", visibility="full")),
+        "1",
+        "ana",
+    )
+    game = accept_seat(game, "2", "boa")
+    game.plots = {cell: Plot("llanura") for cell in game.hexes}
+    game = begin(_ready_table(game), "1", [], NOW)
+    game.naming = True
+    army = _army(game, "1")
+    fort = next(item.at() for item in game.fortresses if item.player_id == "1")
+    near = next(cell for cell in game.hexes if distance(cell, fort) == 2)
+    far = next(cell for cell in game.hexes if distance(cell, fort) == 3)
+    game = stand_token(game, "1", army.id, near, NOW)
+    assert army.at() == near
+    with pytest.raises(DomainError, match="order_illegal"):
+        stand_token(game, "1", army.id, far, NOW)
 
 
 def test_an_enemy_who_walks_out_of_sight_leaves_a_trace_and_far_hexes_stay_dim() -> None:
-    game = _opened(map_size=61, visibility="home", movement=4)
+    game = _opened(map_size=271, visibility="home", movement=4)
     board = set(game.hexes)
     game.plots = {cell: Plot("llanura") for cell in board}
     game.discovered["1"] = set(board)
@@ -630,9 +767,11 @@ def test_an_enemy_who_walks_out_of_sight_leaves_a_trace_and_far_hexes_stay_dim()
     mover_scout = _explorer(game, "2")
     watcher.q, watcher.r = line[0].q, line[0].r
     mover.q, mover.r = line[1].q, line[1].r
+    # Explorers see base gaze + 5; keep them outside that ring so only the army watches.
+    scout_reach = unit_gaze(watcher_scout, Plot("llanura"))
     parked = [
         cell for cell in board
-        if cell not in forts and min(distance(cell, step) for step in line) >= 4
+        if cell not in forts and min(distance(cell, step) for step in line) > scout_reach
     ]
     assert len(parked) >= 2
     watcher_scout.q, watcher_scout.r = parked[0].q, parked[0].r
@@ -653,6 +792,77 @@ def test_an_enemy_who_walks_out_of_sight_leaves_a_trace_and_far_hexes_stay_dim()
     dark = next(cell for cell in view["hexes"] if cell["q"] == line[-1].q and cell["r"] == line[-1].r)
     assert lit["known"] is True and lit["sight"] is True
     assert dark["known"] is True and dark["sight"] is False
+
+
+def test_a_commander_is_required_in_preparation_and_the_list_stays_optional() -> None:
+    assert rules_from(_rules()).roster_required is False
+    game = _opened()
+    army = _army(game, "1")
+    game.phase = "orders"
+    with pytest.raises(DomainError, match="phase_invalid"):
+        describe_army(game, "1", army.id, army.name, "Karl", "", "")
+    game.phase = "preparing"
+    with pytest.raises(DomainError, match="phase_invalid"):
+        describe_army(game, "1", army.id, army.name, "Karl", "", "")
+    game.naming = True
+    with pytest.raises(DomainError, match="text_invalid"):
+        describe_army(game, "1", army.id, army.name, "  ", "", "")
+    assert army_sheets_ready(game, "1") is False
+    named = describe_army(game, "1", army.id, army.name, "Karl Franz", "", "")
+    sheet = _army(named, "1")
+    assert sheet.commander == "Karl Franz"
+    assert sheet.name == "Karl Franz"
+    assert sheet.roster == ""
+    assert army_sheets_ready(named, "1") is True
+    assert named.phase == "preparing"
+    assert "1" in named.prep_done
+    fresh = _opened()
+    fresh.phase = "preparing"
+    waiting = finish_roads(fresh, "1", NOW)
+    assert waiting.phase == "preparing"
+    assert waiting.naming is False
+    assert "1" in waiting.road_ready
+
+
+def test_two_armies_each_need_a_commander_and_stand_apart() -> None:
+    game = _opened(armies=2)
+    own = [army for army in game.armies if army.player_id == "1" and army.kind == "army"]
+    explorers = [army for army in game.armies if army.player_id == "1" and army.kind == "explorer"]
+    assert len(own) == 2
+    assert len(explorers) == 1
+    assert own[0].at() != own[1].at()
+    game.phase = "preparing"
+    game.naming = True
+    assert army_sheets_ready(game, "1") is False
+    named = describe_army(game, "1", own[0].id, own[0].name, "Karl", "", "")
+    assert army_sheets_ready(named, "1") is False
+    both = describe_army(named, "1", own[1].id, own[1].name, "Volkmar", "", "")
+    assert army_sheets_ready(both, "1") is True
+
+
+def test_a_required_list_must_be_written_before_the_war() -> None:
+    game = _opened(roster_required=True)
+    game.phase = "preparing"
+    game.naming = True
+    army = _army(game, "1")
+    twin = Army(
+        id="extra",
+        player_id="1",
+        name="2",
+        commander="",
+        race="",
+        roster="",
+        q=0,
+        r=1,
+        kind="army",
+    )
+    game.armies.append(twin)
+    with pytest.raises(DomainError, match="sheet_incomplete"):
+        describe_army(game, "1", army.id, army.name, "Karl", "", "   ")
+    named = describe_army(game, "1", army.id, army.name, "Karl", "", "20 lanzas")
+    assert _army(named, "1").roster == "20 lanzas"
+    with pytest.raises(DomainError, match="commander_taken"):
+        describe_army(named, "1", twin.id, twin.name, "Karl", "", "10 arcos")
 
 
 def test_a_name_rejects_a_null_and_a_hidden_direction_mark() -> None:

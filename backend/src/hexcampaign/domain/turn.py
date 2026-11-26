@@ -22,7 +22,7 @@ from hexcampaign.domain.game import (
     seated,
 )
 from hexcampaign.domain.hexes import Hex
-from hexcampaign.domain.lobby import drop_seat_count
+from hexcampaign.domain.lobby import drop_seat_count, settle_preparation
 from hexcampaign.domain.march import check_order, march
 from hexcampaign.domain.sight import gazed_cells, remember_fort
 from hexcampaign.domain.units import is_fighter, move_budget, unit_gaze
@@ -560,6 +560,10 @@ def _after_exit(game: Game, player_id: str, now: datetime, rng: random.Random) -
         _settle(game, now, rng)
     elif game.phase == "orders" and _ready(game):
         return _resolve(game, now, set(), rng)
+    elif game.phase == "preparing":
+        game.road_ready.discard(player_id)
+        game.prep_done.discard(player_id)
+        settle_preparation(game, now)
     elif _campaign_over(game):
         game.phase = "finished"
         game.winners = _winners(game) or []

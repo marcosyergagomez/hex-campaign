@@ -37,12 +37,78 @@ from hexcampaign.domain.view import project, project_roads_delta
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
+def _leave_forts(game, now=NOW):
+    if game.plots is None or not game.fort_open:
+        return game
+    from hexcampaign.domain.lobby import confirm_placement, place_armies
+
+    players = seated(game)
+    for index, member in enumerate(players):
+        if member.status != "active" or member.player_id in game.lobby_ready:
+            continue
+        if not any(fort.player_id == member.player_id for fort in game.fortresses):
+            fort = game.anchors[index]
+            board = set(game.hexes)
+            blocked = {item.at() for item in game.fortresses}
+            blocked.add(fort)
+            ring = [
+                cell for cell in neighbors(fort)
+                if cell in board and cell not in blocked and passable(game.plots[cell])
+            ]
+            own = [
+                army for army in game.armies
+                if army.player_id == member.player_id and not army.destroyed
+            ]
+            spots = {}
+            cursor = 0
+            for army in own:
+                if army.kind == "army" and fort not in spots.values():
+                    spots[army.id] = fort
+                else:
+                    spots[army.id] = ring[cursor]
+                    cursor += 1
+            place_armies(game, member.player_id, fort, spots)
+        confirm_placement(game, member.player_id, now)
+    return game
+
+
 def _finish_prep(game, now=NOW):
     if game.phase != "preparing":
+        return game
+    from hexcampaign.domain.lobby import describe_army
+
+    _leave_forts(game, now)
+    if game.plots is None or game.phase != "preparing":
         return game
     for member in seated(game):
         if member.status == "active" and member.player_id not in game.road_ready:
             finish_roads(game, member.player_id, now)
+    if game.phase != "preparing":
+        return game
+    for army in game.armies:
+        if army.destroyed or army.at() is not None:
+            continue
+        fort = next(item for item in game.fortresses if item.player_id == army.player_id)
+        army.q, army.r = fort.q, fort.r
+    for member in seated(game):
+        if member.status != "active" or member.player_id in game.prep_done:
+            continue
+        for army in list(game.armies):
+            if army.player_id != member.player_id or army.kind != "army" or army.destroyed:
+                continue
+            if army.commander:
+                continue
+            roster = "lista" if game.rules.roster_required else ""
+            describe_army(
+                game,
+                member.player_id,
+                army.id,
+                army.name,
+                f"{member.alias} {army.id}",
+                army.race,
+                roster,
+                now,
+            )
     return game
 
 
@@ -227,6 +293,22 @@ def test_a_saved_payment_finishes_the_exit_on_the_next_turn() -> None:
     moved = walk([walker], plots, set(plots))
     assert moved.positions["a"] == plains
     assert moved.paid["a"] == 0
+
+
+def test_movement_two_needs_two_turns_to_leave_deep_woods() -> None:
+    deep = Hex(0, 0)
+    plains = Hex(1, 0)
+    plots = {deep: Plot("bosque_profundo"), plains: Plot("llanura")}
+    first = walk([Walker("a", "p", deep, [plains], budget=2, paid=0)], plots, set(plots))
+    assert first.positions["a"] == deep
+    assert first.paid["a"] == 2
+    second = walk(
+        [Walker("a", "p", deep, [plains], budget=2, paid=first.paid["a"])],
+        plots,
+        set(plots),
+    )
+    assert second.positions["a"] == plains
+    assert second.paid["a"] == 0
 
 
 def test_leaving_by_a_road_pays_for_one_more_plain() -> None:
@@ -534,6 +616,8 @@ def test_preparation_lets_each_player_lay_roads_from_their_fortress() -> None:
     lay(game, generate(271, 2, random.Random(2)), surveyor="ana")
     accept_seat(game, "boa", "Boa")
     begin(_ready_table(game), "ana", [], NOW)
+    assert game.fort_open is True
+    _leave_forts(game)
     assert game.phase == "preparing"
     fort = next(item.at() for item in game.fortresses if item.player_id == "ana")
     home = owned(fort, home_radius(271), set(game.hexes), count=game.home_size)
@@ -549,7 +633,13 @@ def test_preparation_lets_each_player_lay_roads_from_their_fortress() -> None:
     finish_roads(game, "ana", NOW)
     assert "ana" in game.road_ready
     assert game.phase == "preparing"
+    assert project(game, "ana", NOW)["prep"] == "armies"
+    assert project(game, "boa", NOW)["prep"] == "roads"
     finish_roads(game, "boa", NOW)
+    assert game.naming is False
+    assert game.phase == "preparing"
+    assert project(game, "boa", NOW)["prep"] == "armies"
+    _finish_prep(game, NOW)
     assert game.phase == "orders"
     assert game.turn == 1
 
@@ -563,6 +653,7 @@ def test_roads_delta_ships_only_the_changed_hex_and_road_counters() -> None:
     lay(game, generate(271, 2, random.Random(2)), surveyor="ana")
     accept_seat(game, "boa", "Boa")
     begin(_ready_table(game), "ana", [], NOW)
+    _leave_forts(game)
     fort = next(item.at() for item in game.fortresses if item.player_id == "ana")
     first = next(cell for cell in neighbors(fort) if cell in game.plots and passable(game.plots[cell]))
     place_road(game, "ana", first)
@@ -594,6 +685,7 @@ def test_fog_binds_owner_and_guest_the_same_way() -> None:
     lay(game, generate(271, 2, random.Random(2)), surveyor="ana")
     accept_seat(game, "boa", "Boa")
     begin(_ready_table(game), "ana", [], NOW)
+    _leave_forts(game)
     assert game.phase == "preparing"
     board = set(game.hexes)
     forts = {fort.player_id: fort.at() for fort in game.fortresses}

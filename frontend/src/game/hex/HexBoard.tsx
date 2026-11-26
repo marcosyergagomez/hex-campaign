@@ -11,6 +11,22 @@ import { useHexPaint } from "./useHexPaint"
 import "./board.css"
 
 const SIZE = 28
+const ZOOMS = [0.5, 0.75, 1, 1.5, 2, 2.5, 3]
+
+function markTint(color: string, alpha: number): string {
+  const hex = color.trim().replace("#", "")
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return color
+  const r = Number.parseInt(hex.slice(0, 2), 16)
+  const g = Number.parseInt(hex.slice(2, 4), 16)
+  const b = Number.parseInt(hex.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function adjacentZoom(current: number, direction: -1 | 1): number {
+  const index = ZOOMS.findIndex((step) => step >= current - 0.001)
+  const at = index === -1 ? ZOOMS.length - 1 : index
+  return ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, at + direction))]
+}
 
 type Spot = { q: number; r: number }
 
@@ -25,6 +41,8 @@ export type BoardToken = {
   faction: string
   color: string
   label: string
+  mark?: number
+  attention?: boolean
 }
 const NO_PLAYERS: TerritoryPlayer[] = []
 const NO_SPOTS: Spot[] = []
@@ -58,6 +76,10 @@ export function HexBoard({
   clashes = NO_CLASHES,
   ghosts = NO_SPOTS,
   tokens = NO_TOKENS,
+  tokensQuiet = false,
+  marks = NO_SPOTS,
+  markColor,
+  tokenNotes,
   onCellClick,
   onPaint,
   orderPaths = NO_PATHS,
@@ -67,6 +89,10 @@ export function HexBoard({
   sliding = false,
   mapTools = true,
   onOrderToken,
+  onTokenOpen,
+  onTokenInspect,
+  onTokenDrop,
+  spotAtRef,
 }: {
   cells: OwnedCell[]
   anchors: Spot[]
@@ -78,6 +104,10 @@ export function HexBoard({
   clashes?: { from: Spot; to: Spot }[]
   ghosts?: Spot[]
   tokens?: BoardToken[]
+  tokensQuiet?: boolean
+  marks?: Spot[]
+  markColor?: string
+  tokenNotes?: Record<string, string>
   onCellClick?: (cell: OwnedCell) => void
   onPaint?: (cells: Array<OwnedCell | Spot>) => void
   orderPaths?: { spots: Spot[]; selected?: boolean }[]
@@ -87,6 +117,10 @@ export function HexBoard({
   sliding?: boolean
   mapTools?: boolean
   onOrderToken?: (id: string, spot: Spot, phase: "down" | "move") => void
+  onTokenOpen?: (id: string) => void
+  onTokenInspect?: (id: string) => void
+  onTokenDrop?: (id: string, spot: Spot) => void
+  spotAtRef?: { current: ((clientX: number, clientY: number) => Spot | null) | null }
 }) {
   const { t } = useI18n()
   const [zoom, setZoom] = useState(1)
@@ -94,6 +128,8 @@ export function HexBoard({
   const [showTerritories, setShowTerritories] = useState(mapTools)
   const svgRef = useRef<SVGSVGElement>(null)
   const dragToken = useRef<string | null>(null)
+  const tokenPress = useRef<{ id: string; x: number; y: number; armed: boolean } | null>(null)
+  const tokenTap = useRef<{ id: string; at: number } | null>(null)
   const [dragging, setDragging] = useState(false)
   const viewportRef = useRef<HTMLDivElement>(null)
   const byKey = useRef(new Map<string, OwnedCell | Spot>())
@@ -110,6 +146,27 @@ export function HexBoard({
     const local = point.matrixTransform(matrix.inverse())
     return axialFromPixel(local.x, local.y, size)
   }
+  useEffect(() => {
+    if (!spotAtRef) return
+    spotAtRef.current = (clientX, clientY) => {
+      const svg = svgRef.current
+      if (!svg) return null
+      const rect = svg.getBoundingClientRect()
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+        return null
+      }
+      const point = svg.createSVGPoint()
+      point.x = clientX
+      point.y = clientY
+      const matrix = svg.getScreenCTM()
+      if (!matrix) return null
+      const local = point.matrixTransform(matrix.inverse())
+      return axialFromPixel(local.x, local.y, sizeRef.current)
+    }
+    return () => {
+      spotAtRef.current = null
+    }
+  }, [spotAtRef])
   const { beginPaint } = useHexPaint(onPaint, svgRef, byKey, sizeRef)
   const caption = useRef<HTMLParagraphElement>(null)
   const playersById = useMemo(
@@ -147,6 +204,23 @@ export function HexBoard({
     const tip = document.createElement("span")
     tip.className = "hex-caption-tip"
     tip.textContent = terrainEffect(cell)
+    node.replaceChildren(title, tip)
+  }
+  const showTokenNote = useRef<(token: BoardToken | null) => void>(() => {})
+  showTokenNote.current = (token) => {
+    const node = caption.current
+    if (!node) return
+    const note = token ? tokenNotes?.[token.id] : undefined
+    if (!token || !note) {
+      node.replaceChildren()
+      return
+    }
+    const title = document.createElement("span")
+    title.className = "hex-caption-title"
+    title.textContent = token.label
+    const tip = document.createElement("span")
+    tip.className = "hex-caption-tip"
+    tip.textContent = note
     node.replaceChildren(title, tip)
   }
   const onHover = useCallback((cell: OwnedCell | null) => {
@@ -227,9 +301,11 @@ export function HexBoard({
   const minY = Math.min(...extent.map((cell) => cell.y)) - pad
   const width = Math.max(...extent.map((cell) => cell.x)) - minX + pad
   const height = Math.max(...extent.map((cell) => cell.y)) - minY + pad
+  const marked = new Set(marks.map((mark) => `${mark.q},${mark.r}`))
   const tokenStacks = new Map<string, BoardToken[]>()
   for (const token of tokens) {
-    const key = `${token.q},${token.r}`
+    const placed = tokenSpots?.[token.id] ?? token
+    const key = `${placed.q},${placed.r}`
     const row = tokenStacks.get(key)
     if (row) row.push(token)
     else tokenStacks.set(key, [token])
@@ -239,9 +315,9 @@ export function HexBoard({
     <div className="hex-stage">
       {extent.length > 8 ? (
         <div className="hex-tools">
-          <button type="button" onClick={() => setZoom((value) => Math.max(0.5, value - .5))} disabled={zoom === 0.5} aria-label={t("mapZoomOut")}>−</button>
+          <button type="button" onClick={() => setZoom((value) => adjacentZoom(value, -1))} disabled={zoom <= ZOOMS[0]} aria-label={t("mapZoomOut")}>−</button>
           <button type="button" onClick={() => setZoom(1)} aria-label={t("mapFit")}>{Math.round(zoom * 100)}%</button>
-          <button type="button" onClick={() => setZoom((value) => Math.min(3, value + .5))} disabled={zoom === 3} aria-label={t("mapZoomIn")}>+</button>
+          <button type="button" onClick={() => setZoom((value) => adjacentZoom(value, 1))} disabled={zoom >= ZOOMS[ZOOMS.length - 1]} aria-label={t("mapZoomIn")}>+</button>
           {mapTools ? (
             <button type="button" onClick={() => setGrid((value) => !value)} aria-pressed={grid}>{t("mapGrid")}</button>
           ) : null}
@@ -262,17 +338,40 @@ export function HexBoard({
       <svg
         ref={svgRef}
         className="hex-board"
-        style={{ width: `${zoom * 100}%`, touchAction: onPaint || dragging ? "none" : undefined }}
-        onPointerMove={onOrderToken ? (event) => {
+        style={{
+          width: `${zoom * 100}%`,
+          touchAction: onPaint || dragging ? "none" : undefined,
+          ["--mark" as string]: markColor,
+          ["--mark-fill" as string]: markColor ? markTint(markColor, 0.3) : undefined,
+        }}
+        onPointerMove={(event) => {
+          const start = tokenPress.current
+          if (start && !start.armed && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) {
+            if (movableIds?.has(start.id) && (onOrderToken || onTokenDrop)) {
+              start.armed = true
+              dragToken.current = start.id
+              setDragging(true)
+              svgRef.current?.setPointerCapture(event.pointerId)
+              if (onOrderToken) {
+                const at = hexFromEvent(event)
+                if (at) onOrderToken(start.id, at, "down")
+              }
+            }
+          }
           const id = dragToken.current
-          if (!id) return
+          if (!id || !onOrderToken) return
           const spot = hexFromEvent(event)
           if (spot) onOrderToken(id, spot, "move")
-        } : undefined}
-        onPointerUp={onOrderToken ? () => {
+        }}
+        onPointerUp={(event) => {
+          const id = dragToken.current
+          const spot = id && onTokenDrop ? hexFromEvent(event) : null
+          const moved = tokenPress.current?.armed === true
           dragToken.current = null
+          tokenPress.current = null
           setDragging(false)
-        } : undefined}
+          if (id && spot && onTokenDrop && moved) onTokenDrop(id, spot)
+        }}
         viewBox={`${minX} ${minY} ${width} ${height}`}
         role="img"
         aria-label={t("mapsTitle")}
@@ -395,10 +494,14 @@ export function HexBoard({
               data-hex={`${cell.q},${cell.r}`}
               points={points}
               transform={`translate(${cell.x} ${cell.y})`}
-              className={`hex-edge${forts.has(`${cell.q},${cell.r}`) ? " is-fort" : ""}${onCellClick || onPaint ? " is-pick" : ""}`}
+              className={`hex-edge${marked.has(`${cell.q},${cell.r}`) ? " is-placeable" : ""}${forts.has(`${cell.q},${cell.r}`) ? " is-fort" : ""}${onCellClick || onPaint ? " is-pick" : ""}`}
               style={{ strokeWidth: size / SIZE * (forts.has(`${cell.q},${cell.r}`) ? 1.6 : .45) }}
               onMouseEnter={() => onHover(cell)}
-              onMouseLeave={() => onHover(null)}
+              onMouseLeave={(event) => {
+                const next = event.relatedTarget
+                if (next instanceof Element && next.closest(".hex-token-hit")) return
+                onHover(null)
+              }}
               onClick={onCellClick && !onPaint ? () => onCellClick(cell) : undefined}
               onPointerDown={onPaint ? (event) => {
                 event.preventDefault()
@@ -408,6 +511,17 @@ export function HexBoard({
               <title>{`${terrainName(cell)}. ${terrainEffect(cell)}`}</title>
             </polygon>
           ))}
+        </g>
+        <g className="hex-marks" pointerEvents="none">
+          {placed.filter((cell) => marked.has(`${cell.q},${cell.r}`)).map((cell) => {
+            const arm = size * 0.18
+            return (
+              <g key={`mark-${cell.q},${cell.r}`} transform={`translate(${cell.x} ${cell.y})`}>
+                <path className="hex-mark-cross is-shadow" d={`M ${-arm} 0 H ${arm} M 0 ${-arm} V ${arm}`} />
+                <path className="hex-mark-cross" d={`M ${-arm} 0 H ${arm} M 0 ${-arm} V ${arm}`} />
+              </g>
+            )
+          })}
         </g>
         {traces.map((trace, index) => trace.spots.length > 0 ? (
           <g key={`trace-${index}`} className="hex-trace" style={{ color: trace.color }}>
@@ -442,11 +556,11 @@ export function HexBoard({
           />
         ) : null)}
         {tokens.length > 0 ? (
-          <g className="hex-tokens" pointerEvents="none">
+          <g className={tokensQuiet ? "hex-tokens is-quiet" : "hex-tokens"} pointerEvents="none">
             {tokens.map((token) => {
               const placed = tokenSpots?.[token.id] ?? token
               const spot = hexCenter(placed.q, placed.r, size)
-              const stack = tokenStacks.get(`${token.q},${token.r}`) ?? [token]
+              const stack = tokenStacks.get(`${placed.q},${placed.r}`) ?? [token]
               const slot = stack.findIndex(item => item.id === token.id)
               const spread = stack.length > 1 ? (slot - (stack.length - 1) / 2) * size * 0.42 : 0
               const movable = movableIds?.has(token.id) ?? false
@@ -465,23 +579,41 @@ export function HexBoard({
                     y={0}
                     size={size}
                     label={token.label}
+                    mark={token.mark}
+                    attention={token.attention}
                   />
-                  {movable ? (
-                    <circle
-                      className={selectedTokenId === token.id ? "hex-token-hit is-selected" : "hex-token-hit"}
-                      r={size * 0.72}
-                      onPointerDown={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        dragToken.current = token.id
-                        setDragging(true)
-                        svgRef.current?.setPointerCapture(event.pointerId)
-                        const at = hexFromEvent(event)
-                        if (at) onOrderToken?.(token.id, at, "down")
-                      }}
-                      onClick={(event) => event.stopPropagation()}
-                    />
-                  ) : null}
+                  <circle
+                    className={selectedTokenId === token.id ? "hex-token-hit is-selected" : "hex-token-hit"}
+                    r={size * 0.72}
+                    onPointerEnter={() => showTokenNote.current(token)}
+                    onPointerLeave={() => showTokenNote.current(null)}
+                    onPointerDown={(event) => {
+                      event.stopPropagation()
+                      tokenPress.current = { id: token.id, x: event.clientX, y: event.clientY, armed: false }
+                    }}
+                    onPointerUp={(event) => {
+                      const start = tokenPress.current
+                      if (!start || start.id !== token.id || start.armed) return
+                      event.stopPropagation()
+                      const now = performance.now()
+                      if (tokenTap.current?.id === token.id && now - tokenTap.current.at < 450) {
+                        tokenTap.current = null
+                        onTokenInspect?.(token.id)
+                        return
+                      }
+                      tokenTap.current = { id: token.id, at: now }
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      if (!movable) onTokenOpen?.(token.id)
+                    }}
+                    onDoubleClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      tokenTap.current = null
+                      onTokenInspect?.(token.id)
+                    }}
+                  />
                 </g>
               )
             })}

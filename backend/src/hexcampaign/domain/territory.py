@@ -33,6 +33,22 @@ def require_home(
     return disk_at(game, fort, board=board), fort
 
 
+def assigned_homes(game: Game, *, board: set[Hex] | None = None) -> dict[str, set[Hex]]:
+    """The disk each seat was given before anyone moved a fortress."""
+    cells = set(game.hexes) if board is None else board
+    players = [member.player_id for member in game.members if member.status != "expelled"]
+    if len(game.anchors) == len(players) and players:
+        radius = home_radius(game.rules.map_size)
+        return {
+            player_id: owned(game.anchors[index], radius, cells, count=game.home_size)
+            for index, player_id in enumerate(players)
+        }
+    return {
+        player_id: {cell for cell in zone if cell in cells}
+        for player_id, zone in game.discovered.items()
+    }
+
+
 def homes_by_player(game: Game, *, board: set[Hex] | None = None) -> dict[str, set[Hex]]:
     cells = set(game.hexes) if board is None else board
     return {

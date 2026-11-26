@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 import type { CampaignDetail } from "../../api"
 import type { Spot } from "./orders"
 
-const STEP_MS = 520
+export const STEP_MS = 680
 
 const filmHolds = new Set<string>()
 const filmListeners = new Set<() => void>()
@@ -34,21 +34,24 @@ export function useMarchFilm(campaign: CampaignDetail | null): {
   spots: Record<string, Spot> | null
 } {
   const moves = campaign?.playback.moves ?? []
+  const max = moves.reduce((longest, move) => Math.max(longest, move.steps.length), 0)
   const signature = campaign
-    ? `${campaign.id}:${campaign.playback.turn}:${moves.length}`
+    ? `${campaign.id}:${campaign.playback.turn}:${moves.length}:${max}`
     : ""
   const storageKey = campaign && campaign.playback.turn > 0
     ? `hex-march:${campaign.id}:${campaign.playback.turn}`
     : ""
   const seen = storageKey !== "" && sessionStorage.getItem(storageKey) === "1"
-  const wanted = Boolean(campaign && campaign.playback.turn > 0 && moves.length > 0 && !seen)
+  // Abonos sin cambio de hex no deben bloquear la mesa con una película vacía.
+  const wanted = Boolean(
+    campaign && campaign.playback.turn > 0 && moves.length > 0 && max > 0 && !seen,
+  )
   const [play, setPlay] = useState({ key: "", frame: 0, done: "" })
   if (wanted && play.key !== signature) {
     setPlay({ key: signature, frame: 0, done: "" })
   }
   const playing = wanted && play.done !== signature
   const frame = play.key === signature ? play.frame : 0
-  const max = moves.reduce((longest, move) => Math.max(longest, move.steps.length), 0)
 
   useEffect(() => {
     if (!playing || max === 0 || frame >= max) return

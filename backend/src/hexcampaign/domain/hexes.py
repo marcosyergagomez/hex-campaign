@@ -20,6 +20,16 @@ TABLE_RADII = (9, 11, 13)
 DISK_RADIUS = {1 + 3 * radius * (radius + 1): radius for radius in range(2, 65)}
 
 
+def deploy_reach(map_size: int) -> int:
+    """How many hexes from the keep a piece may stand: one, two, or three by table size."""
+    radius = DISK_RADIUS.get(map_size)
+    if radius is None or radius <= TABLE_RADII[0]:
+        return 1
+    if radius <= TABLE_RADII[1]:
+        return 2
+    return 3
+
+
 def neighbors(cell: Hex) -> tuple[Hex, ...]:
     return tuple(Hex(cell.q + step_q, cell.r + step_r) for step_q, step_r in _STEPS)
 

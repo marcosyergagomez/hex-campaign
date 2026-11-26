@@ -28,7 +28,7 @@ export function PlayerIdentity({
   options: IdentityOptions
   onSave: (faction: string, color: string) => Promise<void>
   onClaim: (color: string) => Promise<void>
-  onReady?: () => Promise<void>
+  onReady?: (faction: string, color: string, ready: boolean) => Promise<void>
   busy?: boolean
 }) {
   const { t } = useI18n()
@@ -60,18 +60,6 @@ export function PlayerIdentity({
   const recruiting = campaign.phase === "recruiting"
   const editable = campaign.you?.status === "active" && campaign.phase !== "finished" &&
     (recruiting || (!campaign.you.faction && !campaign.you.color))
-  const canReady = Boolean(
-    onReady &&
-      recruiting &&
-      campaign.you?.status === "active" &&
-      !campaign.you.ready &&
-      faction &&
-      color &&
-      campaign.you.faction === faction &&
-      campaign.you.color === color &&
-      !takenBy(color),
-  )
-
   async function submit(event: FormEvent) {
     event.preventDefault()
     const invalid: Record<string, string[]> = {}
@@ -120,17 +108,18 @@ export function PlayerIdentity({
     }
   }
 
-  async function markReady() {
-    if (!onReady || !canReady || pending || busy) return
+  async function toggleReady(ready: boolean) {
+    if (!onReady || pending || busy) return
+    const invalid: Record<string, string[]> = {}
+    if (ready && !faction) invalid.faction = [clientNotice("factionInvalid")]
+    if (ready && !color) invalid.color = [clientNotice("colorInvalid")]
+    else if (ready && takenBy(color)) invalid.color = [clientNotice("colorTaken")]
+    setErrors(invalid)
+    if (Object.keys(invalid).length > 0) return
     setPending(true)
-    setErrors({})
     try {
-      await onReady()
+      await onReady(faction, color, ready)
       if (mounted.current) setSaved(false)
-    } catch (error: unknown) {
-      if (mounted.current && !(error instanceof ApiError && error.status === 409)) {
-        setErrors(presentError(error, "lobbyReadyFailed"))
-      }
     } finally {
       if (mounted.current) setPending(false)
     }
@@ -177,7 +166,11 @@ export function PlayerIdentity({
                 label: `${t(item.label)}${item.legacy ? ` · ${t("identityLegacy")}` : ""}`,
               })),
             ]}
-            onChange={value => { setFaction(value); setSaved(false) }}
+            onChange={value => {
+              setFaction(value)
+              setSaved(false)
+              if (campaign.you?.ready) void toggleReady(false)
+            }}
           />
           <fieldset className="identity-palette" disabled={pending || busy || !editable}>
             <legend className="label-text">{t("identityColor")}</legend>
@@ -201,16 +194,22 @@ export function PlayerIdentity({
             </div>
           </fieldset>
           <Banner errors={errors} fields={Object.keys(errors).filter(key => key !== "faction")} />
-          {editable ? (
+          {editable && !recruiting ? (
             <button type="submit" disabled={pending || busy || !faction || !color || Boolean(takenBy(color))}>
-              {t(pending && !canReady ? "identitySaving" : "identitySave")}
+              {pending ? t("identitySaving") : t("identitySave")}
             </button>
           ) : null}
           {saved ? <p className="quiet" role="status">{t("identitySaved")}</p> : null}
-          {canReady ? (
-            <button type="button" disabled={pending || busy} onClick={() => { void markReady() }}>
-              {pending ? t("lobbyReadySaving") : t("lobbyReady")}
-            </button>
+          {recruiting && onReady ? (
+            <label className="check-row identity-ready">
+              <input
+                type="checkbox"
+                checked={Boolean(campaign.you?.ready)}
+                disabled={pending || busy || !faction || !color || Boolean(takenBy(color))}
+                onChange={(event) => { void toggleReady(event.target.checked) }}
+              />
+              <span>{pending ? t("lobbyReadySaving") : t("lobbyReady")}</span>
+            </label>
           ) : null}
           {campaign.you?.ready && recruiting ? (
             <p className="quiet" role="status">{t("lobbyReadyDone")}</p>

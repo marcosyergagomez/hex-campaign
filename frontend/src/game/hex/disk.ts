@@ -42,6 +42,14 @@ export function brushCells(cell: Axial, area: boolean): Axial[] {
   return [cell, ...neighbors(cell)]
 }
 
+/** Pieces deploy this many hexes from the keep: small 1, medium 2, large 3. */
+export function deployReach(mapSize: number): number {
+  const radius = diskRadius(mapSize)
+  if (radius === null || radius <= 9) return 1
+  if (radius <= 11) return 2
+  return 3
+}
+
 export function hexDistance(a: Axial, b: Axial): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2
 }

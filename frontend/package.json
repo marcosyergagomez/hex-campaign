@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit --pretty false && vite build",
-    "test:maps": "node --test tests/courses.test.mjs",
+    "test:maps": "node --test tests/courses.test.mjs tests/orders.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

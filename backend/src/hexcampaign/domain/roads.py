@@ -5,9 +5,8 @@ from datetime import datetime
 
 from hexcampaign.domain.chronicle import remember
 from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.game import Game, bump, require_phase, require_player, seated
+from hexcampaign.domain.game import Game, bump, require_phase, require_player
 from hexcampaign.domain.hexes import Hex, distance, neighbors
-from hexcampaign.domain.phases import open_first_turn
 from hexcampaign.domain.terrain import Plot, passable
 from hexcampaign.domain.territory import require_home
 
@@ -60,27 +59,36 @@ def clear_road(game: Game, actor: str, cell: Hex) -> Game:
 
 
 def finish_roads(game: Game, actor: str, now: datetime) -> Game:
-    """Mark the player done. When every seat is ready, the first turn opens."""
+    """This seat leaves the roads and goes on to its armies. The others are not waited on."""
+    del now
     require_phase(game, "preparing")
     member = require_player(game, actor)
     if member.status != "active":
         raise DomainError("forbidden")
+    if not _fort_locked(game, actor) or game.naming or actor in game.prep_done:
+        raise DomainError("phase_invalid")
     if actor in game.road_ready:
         return game
     game.road_ready.add(actor)
     remember(game, "roads_ready", player_id=actor)
-    waiting = {item.player_id for item in seated(game) if item.status == "active"}
-    if waiting <= game.road_ready:
-        game.road_ready = set()
-        open_first_turn(game, now)
-        remember(game, "preparation_closed")
+    for army in game.armies:
+        if army.player_id == actor and not army.destroyed:
+            army.q = None
+            army.r = None
     return bump(game)
+
+
+def _fort_locked(game: Game, actor: str) -> bool:
+    """A seat may lay roads once its own fortress is fixed, even if others are still placing."""
+    if game.plots is None or not game.fort_open:
+        return True
+    return actor in game.lobby_ready
 
 
 def _editing(game: Game, actor: str) -> tuple[set[Hex], Hex, dict[Hex, Plot]]:
     require_phase(game, "preparing")
     require_player(game, actor)
-    if actor in game.road_ready:
+    if not _fort_locked(game, actor) or game.naming or actor in game.road_ready or actor in game.prep_done:
         raise DomainError("phase_invalid")
     if game.plots is None:
         raise DomainError("order_illegal")

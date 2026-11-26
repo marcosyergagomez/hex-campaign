@@ -3,7 +3,29 @@ import { clearRoad, finishRoads, placeRoad } from "../api"
 import { useI18n } from "../i18n/language"
 
 type KnownHex = Extract<CampaignHex, { known: true }>
-type RoadSpot = Pick<MapCell, "q" | "r" | "road"> & { owner_id?: string | null }
+type RoadSpot = Pick<MapCell, "q" | "r" | "road"> & {
+  owner_id?: string | null
+  ground?: string
+}
+
+const IMPASSABLE = new Set(["montana_rocosa", "lago", "acantilado"])
+const STEPS = [
+  [1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1],
+] as const
+
+function touchesOwnNetwork(campaign: CampaignDetail, cell: RoadSpot): boolean {
+  const you = campaign.you?.player_id
+  if (!you) return false
+  return STEPS.some(([dq, dr]) => {
+    const q = cell.q + dq
+    const r = cell.r + dr
+    if (campaign.fortresses.some((fort) => fort.player_id === you && fort.q === q && fort.r === r)) {
+      return true
+    }
+    const neighbor = campaign.hexes.find((hex) => hex.q === q && hex.r === r)
+    return Boolean(neighbor && neighbor.known && neighbor.road && neighbor.owner_id === you)
+  })
+}
 
 export function RoadPreparation({
   campaign,
@@ -56,12 +78,13 @@ export function toggleOwnRoad(
   if (!campaign.roads || campaign.roads.ready || !campaign.you) return
   if (cell.owner_id !== campaign.you.player_id) return
   if (campaign.fortresses.some(fort => fort.q === cell.q && fort.r === cell.r)) return
+  if (cell.ground && IMPASSABLE.has(cell.ground)) return
   const { id, revision } = campaign
   if (cell.road) {
     onChange(() => clearRoad(id, revision, cell.q, cell.r, campaign))
     return
   }
-  if (campaign.roads.left <= 0) return
+  if (campaign.roads.left <= 0 || !touchesOwnNetwork(campaign, cell)) return
   onChange(() => placeRoad(id, revision, cell.q, cell.r, campaign))
 }
 
