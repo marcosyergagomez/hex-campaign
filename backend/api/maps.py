@@ -6,8 +6,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from api.django_db import django_sync
 from api.player_gate import reader, writer
-from api.player_session import SESSION_MESSAGE, django_sync
+from api.player_session import SESSION_MESSAGE
 from apps.campaigns.atlases import (
     copy_for_edit,
     drop_map,

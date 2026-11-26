@@ -7,9 +7,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from api.django_db import django_sync
 from api.player_gate import reader as _reader
 from api.player_gate import writer as _writer
-from api.player_session import SESSION_MESSAGE, django_sync
+from api.player_session import SESSION_MESSAGE
 from apps.campaigns.records import (
     CampaignError,
     RevisionConflict,

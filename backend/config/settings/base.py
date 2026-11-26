@@ -34,11 +34,33 @@ def database_from_url(url: str) -> dict[str, str]:
     }
 
 
+def cache_from_url(url: str) -> dict[str, object]:
+    """Redis URL for a cache shared by every worker. LocMem stays process-local."""
+    parsed = urlparse(url)
+    if parsed.scheme not in {"redis", "rediss"}:
+        raise RuntimeError("CACHE_URL must be a redis:// or rediss:// URL.")
+    return {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": url,
+        "KEY_PREFIX": "hexcampaign",
+    }
+
+
 load_env_file(REPO_ROOT / ".env")
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 DATABASES = {"default": database_from_url(DATABASE_URL)} if DATABASE_URL else {}
+CACHE_URL = os.environ.get("CACHE_URL", "").strip()
+if CACHE_URL:
+    CACHES = {"default": cache_from_url(CACHE_URL)}
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "hexcampaign-throttle",
+        }
+    }
 
 DEBUG = False
 ALLOWED_HOSTS: list[str] = []
@@ -132,6 +154,9 @@ LOGIN_EMAIL_LIMIT = int(os.environ.get("LOGIN_EMAIL_LIMIT", "10"))
 LOGIN_EMAIL_WINDOW_SECONDS = int(os.environ.get("LOGIN_EMAIL_WINDOW_SECONDS", "900"))
 ACCOUNT_POST_LIMIT = int(os.environ.get("ACCOUNT_POST_LIMIT", "30"))
 ACCOUNT_POST_WINDOW_SECONDS = int(os.environ.get("ACCOUNT_POST_WINDOW_SECONDS", "60"))
+# Road painting and order locks need more headroom than account signup.
+PLAY_POST_LIMIT = int(os.environ.get("PLAY_POST_LIMIT", "180"))
+PLAY_POST_WINDOW_SECONDS = int(os.environ.get("PLAY_POST_WINDOW_SECONDS", "60"))
 ADMIN_LOGIN_LIMIT = int(os.environ.get("ADMIN_LOGIN_LIMIT", "20"))
 ADMIN_LOGIN_WINDOW_SECONDS = int(os.environ.get("ADMIN_LOGIN_WINDOW_SECONDS", "900"))
 

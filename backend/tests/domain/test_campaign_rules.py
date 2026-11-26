@@ -16,6 +16,7 @@ from hexcampaign.domain.lobby import (
     choose_identity,
     close_placement,
     create_game,
+    invite_player,
     place_armies,
 )
 from hexcampaign.domain.march import march
@@ -531,3 +532,10 @@ def test_orders_are_due_a_full_day_count_after_they_open(now=NOW) -> None:
 
     assert quiet["orders_due"] is False
     assert due["orders_due"] is True
+
+
+def test_invite_is_refused_when_every_seat_is_taken() -> None:
+    game = create_game("Llena", rules_from(_rules(seats=2)), "1", "ana")
+    accept_seat(game, "2", "boa")
+    with pytest.raises(DomainError, match="seat_full"):
+        invite_player(game, "1", "3", "cio")

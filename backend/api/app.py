@@ -2,7 +2,6 @@
 
 import json
 from datetime import date
-from functools import wraps
 from typing import Literal
 from urllib.parse import parse_qs
 
@@ -15,9 +14,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from api.campaigns import router as campaign_router
+from api.django_db import django_sync
 from api.guard import AccountGuard
 from api.maps import router as map_router
 from api.pages import confirm_page, result_page
+from api.player_session import ORIGIN_MESSAGE, same_origin
 from api.player_session import router as player_session_router
 from apps.accounts.languages import normalize
 from apps.accounts.registration import (
@@ -63,18 +64,6 @@ class RegisterPayload(BaseModel):
     sex: Literal["woman", "man", "other", "undisclosed"]
 
 
-def django_sync(view):
-    @wraps(view)
-    def wrapper(*args, **kwargs):
-        close_old_connections()
-        try:
-            return view(*args, **kwargs)
-        finally:
-            close_old_connections()
-
-    return wrapper
-
-
 def _field_name(location: tuple[object, ...]) -> str:
     parts = [part for part in location if part not in {"body", "query", "path"}]
     return str(parts[0]) if parts else "body"
@@ -114,6 +103,8 @@ async def reject_invalid_body(request: Request, exc: RequestValidationError) -> 
 )
 @django_sync
 def register_user(payload: RegisterPayload, request: Request) -> JSONResponse | Accepted:
+    if not same_origin(request):
+        return JSONResponse(status_code=403, content={"errors": {"origin": [ORIGIN_MESSAGE]}})
     try:
         register_account(
             email=payload.email,

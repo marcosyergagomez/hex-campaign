@@ -993,6 +993,9 @@ export async function getMap(id: string): Promise<SavedMapDetail> {
     if (q === null || r === null || typeof cell.ground !== "string") {
       throw new ApiError(200, {})
     }
+    if (!Object.hasOwn(GROUND_LABEL, cell.ground)) {
+      throw new ApiError(200, {})
+    }
     cells.push({
       q,
       r,

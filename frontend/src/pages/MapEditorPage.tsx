@@ -104,26 +104,26 @@ export function MapEditorPage() {
           const detail = await getMap(editId)
           if (!current) return
           if (detail.generated) {
-            const copy = await copyMapForEdit(detail.id)
-            if (!current) return
-            const drawn = await getMap(copy.id)
-            if (!current) return
-            setMapId(drawn.id)
-            setName(drawn.name)
-            setSize(drawn.size)
-            setCells(drawn.cells)
-            setAnchors(drawn.anchors)
-            navigate(`/mapas/editor?id=${encodeURIComponent(drawn.id)}`, { replace: true })
-          } else {
-            setMapId(detail.id)
-            setName(detail.name)
-            setSize(detail.size)
-            setCells(detail.cells)
-            setAnchors(detail.anchors)
+            // Never copy on GET of a generated id: refresh would spawn duplicates.
+            navigate(`/mapas/editor?copy=${encodeURIComponent(detail.id)}`, { replace: true })
+            return
           }
+          setMapId(detail.id)
+          setName(detail.name)
+          setSize(detail.size)
+          setCells(detail.cells)
+          setAnchors(detail.anchors)
         } else if (copyId) {
+          const cacheKey = `hex-map-copy:${copyId}`
+          const cached = sessionStorage.getItem(cacheKey)
+          if (cached) {
+            navigate(`/mapas/editor?id=${encodeURIComponent(cached)}`, { replace: true })
+            return
+          }
           const copy = await copyMapForEdit(copyId)
           if (!current) return
+          // Persist as soon as the server copy exists so a refresh cannot mint another.
+          sessionStorage.setItem(cacheKey, copy.id)
           const drawn = await getMap(copy.id)
           if (!current) return
           setMapId(drawn.id)
@@ -291,7 +291,12 @@ export function MapEditorPage() {
     setPast(history => {
       if (history.length === 0) return history
       const previous = history[history.length - 1]
-      setFuture(stack => [cloneShot(cells, anchors), ...stack].slice(0, 41))
+      setFuture(stack => [
+        cloneShot(cellsRef.current, anchorsRef.current),
+        ...stack,
+      ].slice(0, 41))
+      cellsRef.current = previous.cells
+      anchorsRef.current = previous.anchors
       setCells(previous.cells)
       setAnchors(previous.anchors)
       setSavedNote(false)
@@ -303,7 +308,12 @@ export function MapEditorPage() {
     setFuture(stack => {
       if (stack.length === 0) return stack
       const [next, ...rest] = stack
-      setPast(history => [...history, cloneShot(cells, anchors)].slice(-41))
+      setPast(history => [
+        ...history,
+        cloneShot(cellsRef.current, anchorsRef.current),
+      ].slice(-41))
+      cellsRef.current = next.cells
+      anchorsRef.current = next.anchors
       setCells(next.cells)
       setAnchors(next.anchors)
       setSavedNote(false)
