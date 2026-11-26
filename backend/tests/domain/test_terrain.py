@@ -16,7 +16,7 @@ from hexcampaign.domain.hexes import Hex, angle, disk, distance, neighbors
 from hexcampaign.domain.land import home_radius, owned, rotate
 from hexcampaign.domain.landscape import _problems, _spread
 from hexcampaign.domain.game import seated
-from hexcampaign.domain.lobby import accept_seat, begin, change_rules, create_game
+from hexcampaign.domain.lobby import accept_seat, begin, change_rules, create_game, mark_ready
 from hexcampaign.domain.map_document import dump_template, load_template
 from hexcampaign.domain.maps import Template, generate, lay
 from hexcampaign.domain.roads import finish_roads, road_budget
@@ -46,6 +46,13 @@ def _finish_prep(game, now=NOW):
     return game
 
 
+def _ready_table(game):
+    for member in seated(game):
+        if member.status == "active":
+            mark_ready(game, member.player_id)
+    return game
+
+
 def test_territory_owners_are_only_sent_for_known_cells_and_respect_the_saved_area() -> None:
     rules = rules_from({
         "seats": 2, "armies": 1, "movement": 3, "map_size": 61, "visibility": "full",
@@ -55,7 +62,7 @@ def test_territory_owners_are_only_sent_for_known_cells_and_respect_the_saved_ar
     game = create_game("Colores", rules, "1", "ana")
     accept_seat(game, "2", "boa")
     now = datetime(2026, 1, 1, tzinfo=UTC)
-    begin(game, "1", [], now)
+    begin(_ready_table(game), "1", [], now)
     game.plots = {cell: Plot("llanura") for cell in game.hexes}
     game.home_size = 7
     game.rules = replace(game.rules, visibility="home")
@@ -409,6 +416,47 @@ def test_the_old_disk_is_not_a_generated_terrain_map() -> None:
         generate(400, 4, random.Random(1))
 
 
+def test_a_drawn_map_may_keep_only_a_subset_of_the_disk() -> None:
+    from hexcampaign.domain.map_document import drawn
+
+    board = list(disk(271))[:40]
+    cells = [
+        {"q": cell.q, "r": cell.r, "ground": "llanura", "road": False, "bridge": False}
+        for cell in board
+    ]
+    fort = board[0]
+    other = board[10]
+    template = drawn(
+        271,
+        cells,
+        [{"q": fort.q, "r": fort.r}, {"q": other.q, "r": other.r}],
+    )
+    assert len(template.cells) == 40
+    assert template.seats == 2
+    assert not template.generated
+    game = create_game("Isla", _table(map_size=271, seats=2), "ana", "Ana")
+    lay(game, template, surveyor=None)
+    assert set(game.hexes) == set(board)
+    assert len(game.plots) == 40
+
+
+def test_a_drawn_map_rejects_a_lone_fortress_or_cells_outside_the_disk() -> None:
+    from hexcampaign.domain.map_document import drawn
+
+    cells = [
+        {"q": cell.q, "r": cell.r, "ground": "llanura", "road": False, "bridge": False}
+        for cell in list(disk(271))[:12]
+    ]
+    with pytest.raises(DomainError):
+        drawn(271, cells, [{"q": cells[0]["q"], "r": cells[0]["r"]}])
+    with pytest.raises(DomainError):
+        drawn(
+            271,
+            cells + [{"q": 60, "r": 0, "ground": "llanura", "road": False, "bridge": False}],
+            [],
+        )
+
+
 @pytest.mark.parametrize(("size", "count"), [(271, 19), (397, 28), (547, 38)])
 def test_the_copy_starts_each_player_on_their_own_disk(size: int, count: int) -> None:
     game = create_game("Norte", _table(map_size=size), "ana", "Ana")
@@ -417,7 +465,7 @@ def test_the_copy_starts_each_player_on_their_own_disk(size: int, count: int) ->
     lay(game, template, surveyor=None)
     game = from_dict(to_dict(game))
     accept_seat(game, "boa", "Boa")
-    begin(game, "ana", [], NOW)
+    begin(_ready_table(game), "ana", [], NOW)
     board = set(game.hexes)
     forts = {fort.player_id: fort.at() for fort in game.fortresses}
     assert game.discovered["ana"] == owned(forts["ana"], HOME_RADIUS[size], board, count=count)
@@ -443,7 +491,7 @@ def test_old_map_and_campaign_documents_keep_their_original_territory() -> None:
     stored.pop("home_size")
     game = from_dict(stored)
     accept_seat(game, "boa", "Boa")
-    begin(game, "ana", [], NOW)
+    begin(_ready_table(game), "ana", [], NOW)
     assert game.home_size is None
     assert len(game.discovered["ana"]) == 19
 
@@ -454,7 +502,7 @@ def test_preparation_lets_each_player_lay_roads_from_their_fortress() -> None:
     game = create_game("Norte", _table(map_size=271, visibility="total"), "ana", "Ana")
     lay(game, generate(271, 2, random.Random(2)), surveyor="ana")
     accept_seat(game, "boa", "Boa")
-    begin(game, "ana", [], NOW)
+    begin(_ready_table(game), "ana", [], NOW)
     assert game.phase == "preparing"
     fort = next(item.at() for item in game.fortresses if item.player_id == "ana")
     home = owned(fort, home_radius(271), set(game.hexes), count=game.home_size)
@@ -483,7 +531,7 @@ def test_roads_delta_ships_only_the_changed_hex_and_road_counters() -> None:
     game = create_game("Norte", _table(map_size=271, visibility="total"), "ana", "Ana")
     lay(game, generate(271, 2, random.Random(2)), surveyor="ana")
     accept_seat(game, "boa", "Boa")
-    begin(game, "ana", [], NOW)
+    begin(_ready_table(game), "ana", [], NOW)
     fort = next(item.at() for item in game.fortresses if item.player_id == "ana")
     first = next(cell for cell in neighbors(fort) if cell in game.plots and passable(game.plots[cell]))
     place_road(game, "ana", first)
@@ -514,7 +562,7 @@ def test_a_player_who_looked_at_the_generated_map_knows_every_hex() -> None:
     game = create_game("Norte", _table(map_size=271), "ana", "Ana")
     lay(game, generate(271, 2, random.Random(2)), surveyor="ana")
     accept_seat(game, "boa", "Boa")
-    begin(game, "ana", [], NOW)
+    begin(_ready_table(game), "ana", [], NOW)
     assert game.phase == "preparing"
     assert game.discovered["ana"] == set(game.hexes)
     assert len(game.discovered["boa"]) < len(game.hexes)
@@ -545,7 +593,7 @@ def test_two_armies_of_one_player_cannot_lock_the_same_hex() -> None:
     game = create_game("Norte", _table(armies=2, map_size=271), "ana", "Ana")
     lay(game, generate(271, 2, random.Random(1)), surveyor=None)
     accept_seat(game, "boa", "Boa")
-    begin(game, "ana", [], NOW)
+    begin(_ready_table(game), "ana", [], NOW)
     _finish_prep(game)
     own = [army for army in game.armies if army.player_id == "ana"]
     fort = next(item for item in game.fortresses if item.player_id == "ana").at()
@@ -566,7 +614,7 @@ def test_a_seen_fortress_stays_until_the_player_looks_again() -> None:
     game = create_game("Norte", _table(map_size=271), "ana", "Ana")
     lay(game, generate(271, 2, random.Random(1)), surveyor=None)
     accept_seat(game, "boa", "Boa")
-    begin(game, "ana", [], NOW)
+    begin(_ready_table(game), "ana", [], NOW)
     fort = next(item for item in game.fortresses if item.player_id == "boa")
     game.discovered["ana"].add(fort.at())
     remember_fort(game, "ana", fort.at())
@@ -630,3 +678,4 @@ def _turns(plots: dict[Hex, Plot], start: Hex, goal: Hex) -> int:
                 seen.add(state)
                 heapq.heappush(queue, (turn, nxt, remain, 0))
     return 5
+

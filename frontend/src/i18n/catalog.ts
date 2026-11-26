@@ -35,6 +35,10 @@ const fromSpanish = [
   "signInFailed",
   "logOutFailed",
   "registerFailed",
+  "profileSaveFailed",
+  "profileLoadFailed",
+  "wrongCurrentPassword",
+  "passwordNeedsCurrent",
   "emailTaken",
   "aliasTaken",
   "aliasShape",
@@ -57,12 +61,17 @@ const fromSpanish = [
   "campaignNotFound",
   "campaignRevisionConflict",
   "campaignOpenLimit",
+  "campaignDeleteLocked",
+  "confirmNameMismatch",
+  "deleteCampaignFailed",
   "mapUnknown",
   "mapLimit",
+  "mapReadonly",
   "factionInvalid",
   "colorInvalid",
   "colorTaken",
   "identityRequired",
+  "lobbyNotReady",
 ] as const satisfies readonly MessageKey[]
 
 const knownMessages: Record<string, MessageKey> = indexSpanish(fromSpanish)

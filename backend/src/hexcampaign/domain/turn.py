@@ -115,6 +115,7 @@ def expel_player(game: Game, actor: str, target_id: str, rng: random.Random, now
     if target.role == "owner" and target.status == "active":
         raise DomainError("cannot_expel_owner")
     remember(game, "expelled", player_id=actor, target_id=target.player_id)
+    game.lobby_ready.discard(target.player_id)
     _remove(game, target)
     if not _active_staff(game):
         _hand_over(game, rng)
@@ -127,6 +128,7 @@ def leave_campaign(game: Game, actor: str, rng: random.Random, now: datetime) ->
         raise DomainError("forbidden")
     was_owner = target.role == "owner"
     remember(game, "left", player_id=actor)
+    game.lobby_ready.discard(actor)
     _remove(game, target)
     if was_owner or not _active_staff(game):
         _hand_over(game, rng)
@@ -168,6 +170,34 @@ def deactivate_player(game: Game, player_id: str, rng: random.Random) -> Game:
     remember(game, "inactive", player_id=player_id, cause="account")
     if was_owner or not _active_staff(game):
         _hand_over(game, rng)
+    return bump(game)
+
+
+def withdraw_player(game: Game, actor: str, rng: random.Random, now: datetime) -> Game:
+    """A non-staff player steps away: inactive seat, still restorable by staff."""
+    member = find_member(game, actor)
+    if member is None or member.status != "active":
+        raise DomainError("forbidden")
+    if member.role in {"owner", "admin"}:
+        raise DomainError("forbidden")
+    member.status = "inactive"
+    member.cause = "withdrawn"
+    game.lobby_ready.discard(actor)
+    notice(game, "player_inactive", actor, cause="withdrawn")
+    remember(game, "withdrawn", player_id=actor)
+    return _after_exit(game, actor, now, rng)
+
+
+def restore_player(game: Game, actor: str, target_id: str) -> Game:
+    """Staff bring an inactive seat back into the match."""
+    require_staff(game, actor)
+    require_phase(game, "recruiting", "placing", "preparing", "orders", "battles")
+    target = find_member(game, target_id)
+    if target is None or target.status != "inactive":
+        raise DomainError("forbidden")
+    target.status = "active"
+    target.cause = ""
+    remember(game, "restored", player_id=actor, target_id=target.player_id)
     return bump(game)
 
 

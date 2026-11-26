@@ -8,9 +8,9 @@ Las reglas puras viven en `hexcampaign.domain` y no importan Django ni FastAPI. 
 
 El reglamento y la partida van en el JSON de la campaña. Una tabla de plazas permite buscar las campañas de una cuenta sin recorrer todos los documentos. La plaza guarda la cuenta, el papel, el estado y el alias con el que entró.
 
-El buscador acepta el id exacto. El nombre puede repetirse y no busca.
+El buscador acepta el id exacto. El nombre puede repetirse y no busca. La descripción es opcional, hasta 15 000 caracteres Unicode normalizados, admite saltos de línea y se guarda en el documento de la campaña.
 
-Crear cuenta las campañas abiertas de esa cuenta: reclutamiento, colocación, preparación, órdenes o batallas. A la cuarta la API responde 422 con «Ya tienes tres campañas abiertas.» y no crea nada. Una fase terminada no cuenta. El creador queda en la fila, así que ceder el puesto no abre otra plaza.
+El límite de tres aplica a campañas en curso del creador (fases órdenes o batallas). Crear o dejar una campaña en preparación no cuenta. Al pasar a órdenes, si ya hay tres en curso, la API responde 422 con «Ya tienes tres campañas en curso.» y no guarda el cambio. Una finalizada libera plaza. El creador queda en la fila, así que ceder el puesto no abre otra plaza.
 
 Invitar es otra cosa. El propietario busca por alias y envía un aviso dentro de la aplicación, o genera un enlace. El enlace lleva un token distinto del id. En la base solo se guarda su resumen, igual que el enlace de confirmación del correo. Quien tiene el enlace ocupa una plaza libre antes de empezar.
 
@@ -20,7 +20,7 @@ Las fases son reclutamiento, colocación si colocan los jugadores, preparación 
 
 Hasta que el propietario pulsa empezar puede cambiar las reglas y bajar el número de plazas, sin bajar de 2 ni de las plazas ya ocupadas. Al empezar quedan fijas. En ese momento se nombran el resto de administradores. Antes solo administra quien creó la campaña.
 
-Sin mapa de terrenos, el tablero sigue midiendo 19, 37 o 61 hexágonos axiales y no hay casillas infranqueables. Con un mapa guardado o generado, el tamaño es el del mapa (hoy 271, 397 o 547 en los preajustes) y el dominio aplica el catálogo de terrenos. `/api/map-scales` publica esos preajustes. El propietario borra un atlas suyo con `DELETE /api/maps/{id}`.
+Sin mapa de terrenos, el tablero sigue midiendo 19, 37 o 61 hexágonos axiales y no hay casillas infranqueables. Con un mapa guardado o generado, el tamaño es el del mapa (hoy 271, 397 o 547 en los preajustes) y el dominio aplica el catálogo de terrenos. El documento dibujado puede ser un subconjunto del disco: `game.hexes` copia esas casillas. `/api/map-scales` publica los preajustes. `POST /api/maps` con `cells` guarda un dibujo; `PUT /api/maps/{id}` actualiza solo dibujos; `POST /api/maps/{id}/copy` clona uno (también generado) a dibujo editable; `DELETE /api/maps/{id}` borra el atlas.
 
 Tras empezar o cerrar la colocación, si la campaña tiene terrenos, la fase pasa a preparación. Ahí viven `POST .../roads`, `POST .../roads/clear` y `POST .../roads/ready`. Mientras la partida sigue en preparación, esas escrituras responden un delta (`kind: roads_delta`): revisión, fase, contadores de camino, `road_ready` y solo las casillas tocadas. Al abrirse el primer turno, `roads/ready` del último asiento devuelve la vista completa.
 

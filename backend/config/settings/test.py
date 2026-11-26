@@ -16,9 +16,17 @@ DATABASES = {
         )
     )
 }
+# Process-local cache keeps pytest free of Redis while still exercising the API.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "hexcampaign-test-throttle",
+    }
+}
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 API_ORIGIN = "http://testserver"
 SESSION_PEPPER = "test-only-session-pepper-not-used-outside-pytest-0123456789"
 ACCOUNT_POST_LIMIT = 10_000
+PLAY_POST_LIMIT = 10_000
 LOGIN_IP_LIMIT = 10_000
 LOGIN_EMAIL_LIMIT = 10_000

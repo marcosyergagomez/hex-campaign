@@ -104,6 +104,57 @@ test("river mouths on the map boundary continue past the last cell instead of en
   assert.ok(Math.max(...xs) > cells[2].x + 28)
 })
 
+test("river branches share the junction instead of leaving a gap", () => {
+  // Arms on non-adjacent bearings so the junction is a true Y, not a triangle.
+  const cells = [
+    mark(0, 0, "rio"),
+    mark(1, 0, "rio"),
+    mark(-1, 1, "rio"),
+    mark(0, -1, "rio"),
+  ]
+  const shapes = riverShapes(cells, 28)
+  assert.equal(shapes.length, 3)
+  const junction = cells[0]
+  for (const shape of shapes) {
+    const points = [...shape.channel.matchAll(/(?:M|L)([-\d.e+]+),([-\d.e+]+)/g)].map(
+      match => [Number(match[1]), Number(match[2])],
+    )
+    // Ribbon outline is offset from the centreline by the channel width.
+    assert.ok(points.some(([x, y]) => Math.hypot(x - junction.x, y - junction.y) < 28 * 0.45))
+  }
+})
+
+test("a sharp hex bend stays near the corridor instead of looping wide", () => {
+  const size = 28
+  const riverAt = new Set(["0,0", "1,0", "1,1"])
+  const cells = []
+  for (let q = -1; q <= 2; q += 1) {
+    for (let r = -1; r <= 2; r += 1) {
+      cells.push(mark(q, r, riverAt.has(`${q},${r}`) ? "rio" : "llanura", size))
+    }
+  }
+  const river = cells.filter(cell => cell.ground === "rio")
+  const channel = riverShapes(cells, size)[0].channel
+  const points = [...channel.matchAll(/(?:M|L)([-\d.e+]+),([-\d.e+]+)/g)].map(
+    match => [Number(match[1]), Number(match[2])],
+  )
+  const segments = [[river[0], river[1]], [river[1], river[2]]]
+  for (const [x, y] of points) {
+    let lateral = Infinity
+    for (const [a, b] of segments) {
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const len2 = dx * dx + dy * dy || 1
+      const t = ((x - a.x) * dx + (y - a.y) * dy) / len2
+      if (t < 0 || t > 1) continue
+      lateral = Math.min(lateral, Math.hypot(x - (a.x + dx * t), y - (a.y + dy * t)))
+    }
+    if (lateral === Infinity) continue
+    // Ignore the ribbon half-width; fail only on true spline overshoot.
+    assert.ok(lateral < size * 0.55, `sample drifted ${lateral} from the river corridor`)
+  }
+})
+
 test("roads draw every arm of a junction, but never connect through ordinary ground", () => {
   const cells = [[0, 0], [1, 0], [-1, 1], [0, -1]]
     .map(([q, r]) => ({ ...mark(q, r, "bosque"), road: true }))

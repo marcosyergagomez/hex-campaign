@@ -9,7 +9,6 @@ export const GROUND_LABEL: Record<string, MessageKey> = {
   montana_rocosa: "groundRocky",
   desierto: "groundDesert",
   tundra: "groundTundra",
-  orilla: "groundBank",
   rio: "groundRiver",
   pantano: "groundSwamp",
   lago: "groundLake",
@@ -17,6 +16,24 @@ export const GROUND_LABEL: Record<string, MessageKey> = {
   acantilado: "groundCliff",
   mina: "groundMine",
   campo: "groundField",
+}
+
+export const GROUND_TIP: Record<string, MessageKey> = {
+  llanura: "groundTipPlain",
+  colina: "groundTipHill",
+  bosque: "groundTipForest",
+  bosque_profundo: "groundTipDeepForest",
+  montana: "groundTipMountain",
+  montana_rocosa: "groundTipRocky",
+  desierto: "groundTipDesert",
+  tundra: "groundTipTundra",
+  rio: "groundTipRiver",
+  pantano: "groundTipSwamp",
+  lago: "groundTipLake",
+  playa: "groundTipBeach",
+  acantilado: "groundTipCliff",
+  mina: "groundTipMine",
+  campo: "groundTipField",
 }
 
 export const GROUND_ART: Record<string, string> = {
@@ -28,7 +45,6 @@ export const GROUND_ART: Record<string, string> = {
   montana_rocosa: "/terrain/montana-rocosa.jpg",
   desierto: "/terrain/desierto.jpg",
   tundra: "/terrain/tundra.jpg",
-  orilla: "/terrain/orilla.jpg",
   rio: "/terrain/rio.jpg",
   pantano: "/terrain/pantano.jpg",
   lago: "/terrain/lago.jpg",
@@ -38,7 +54,7 @@ export const GROUND_ART: Record<string, string> = {
   campo: "/terrain/campo.jpg",
 }
 
-const WATER = new Set(["rio", "lago", "playa", "orilla", "pantano"])
+const WATER = new Set(["rio", "lago", "playa", "pantano"])
 
 export function isWater(ground: string): boolean {
   return WATER.has(ground)

@@ -11,6 +11,18 @@ export type Player = {
   alias: string
 }
 
+export type Profile = Player & {
+  sex: Sex
+  birth_date: string
+}
+
+export type ProfileUpdate = {
+  alias: string
+  sex: Sex
+  password?: string
+  current_password?: string
+}
+
 export class ApiError extends Error {
   readonly status: number
   readonly errors: FieldErrors
@@ -47,6 +59,12 @@ function isErrorBody(value: unknown): value is { errors: FieldErrors } {
   })
 }
 
+const SEXES: readonly Sex[] = ["woman", "man", "other", "undisclosed"]
+
+function isSex(value: unknown): value is Sex {
+  return typeof value === "string" && (SEXES as readonly string[]).includes(value)
+}
+
 function readPlayer(value: unknown): Player | null {
   if (!value || typeof value !== "object") {
     return null
@@ -63,6 +81,22 @@ function readPlayer(value: unknown): Player | null {
     return null
   }
   return { email, alias }
+}
+
+function readProfile(value: unknown): Profile | null {
+  const player = readPlayer(value)
+  if (!player || !value || typeof value !== "object") {
+    return null
+  }
+  const record = value as Record<string, unknown>
+  const { sex, birth_date: birthDate } = record
+  if (!isSex(sex)) {
+    return null
+  }
+  if (typeof birthDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
+    return null
+  }
+  return { ...player, sex, birth_date: birthDate }
 }
 
 function readDetail(value: unknown): string | null {
@@ -147,6 +181,40 @@ export async function logout(): Promise<void> {
   })
 }
 
+export async function loadProfile(): Promise<Profile> {
+  const profile = readProfile(await request("/api/profile", { method: "GET" }))
+  if (!profile) {
+    throw new ApiError(200, {})
+  }
+  return profile
+}
+
+export async function saveProfile(payload: ProfileUpdate): Promise<Profile> {
+  const token = readCookie("__Host-csrf")
+  const body: Record<string, string> = {
+    alias: payload.alias,
+    sex: payload.sex,
+  }
+  if (payload.password) {
+    body.password = payload.password
+    body.current_password = payload.current_password ?? ""
+  }
+  const profile = readProfile(
+    await request("/api/profile", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { "X-CSRF-Token": token } : {}),
+      },
+      body: JSON.stringify(body),
+    }),
+  )
+  if (!profile) {
+    throw new ApiError(200, {})
+  }
+  return profile
+}
+
 export type Registration = {
   email: string
   password: string
@@ -229,6 +297,7 @@ export type CampaignMember = {
   status: string
   faction: string
   color: string
+  ready: boolean
 }
 
 export type CampaignHex = ({ known: true; owner_id: string | null } & MapCell)
@@ -266,6 +335,7 @@ export type ChronicleEntry = {
 export type CampaignDetail = {
   id: string
   name: string
+  description: string
   phase: CampaignPhase
   revision: number
   turn: number
@@ -277,15 +347,17 @@ export type CampaignDetail = {
   fortresses: { q: number; r: number; player_id: string }[]
   chronicle: ChronicleEntry[]
   road_ready: string[]
+  lobby_ready: string[]
   roads: RoadPrep | null
 }
 
 export const DEFAULT_CAMPAIGN_RULES: CampaignRules = {
   seats: 2,
   armies: 1,
-  movement: 1,
-  map_size: 19,
-  visibility: "full",
+  movement: 3,
+  // Small table disk (radius 9). Tiny disks like 19 cannot host fortresses.
+  map_size: 271,
+  visibility: "home",
   victory: "armies",
   hold_turns: 3,
   placement: "app",
@@ -349,7 +421,7 @@ function readRules(value: unknown): CampaignRules | null {
   const record = value as Record<string, unknown>
   const seats = readInt(record.seats, 2, 4)
   const armies = readInt(record.armies, 1, 2)
-  const movement = readInt(record.movement, 1, 3)
+  const movement = readInt(record.movement, 1, 5)
   const hold_turns = readInt(record.hold_turns, 1, 999)
   const order_days = readInt(record.order_days, 1, 30)
   const battle_days = readInt(record.battle_days, 1, 30)
@@ -417,6 +489,7 @@ function readMember(value: unknown): CampaignMember | null {
   }
   const record = value as Record<string, unknown>
   const { player_id, alias, role, status, faction, color } = record
+  const ready = record.ready === true
   if (
     typeof player_id !== "string" ||
     player_id.length === 0 ||
@@ -436,7 +509,7 @@ function readMember(value: unknown): CampaignMember | null {
   ) {
     return null
   }
-  return { player_id, alias, role, status, faction, color }
+  return { player_id, alias, role, status, faction, color, ready }
 }
 
 function readCampaignHex(value: unknown): CampaignHex | null {
@@ -472,6 +545,9 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
     record.name.length === 0 ||
     record.name.length > 120 ||
     CONTROL.test(record.name) ||
+    typeof record.description !== "string" ||
+    record.description.length > 15000 ||
+    CONTROL.test(record.description.replaceAll("\n", "").replaceAll("\t", "")) ||
     !isPhase(record.phase) ||
     revision === null ||
     turn === null ||
@@ -496,7 +572,10 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
   const hexes: CampaignHex[] = []
   const fortresses: CampaignDetail["fortresses"] = []
   if (record.joined) {
-    if (!you || !Array.isArray(record.hexes) || record.hexes.length !== rules.map_size ||
+    // Recruiting seals the atlas (empty hexes). Drawn atlases may keep a subset later.
+    if (!you || !Array.isArray(record.hexes) ||
+      (record.hexes.length < 1 && record.phase !== "recruiting") ||
+      record.hexes.length > rules.map_size ||
       !Array.isArray(record.fortresses) || record.fortresses.length > 8) return null
     for (const value of record.hexes) {
       const cell = readCampaignHex(value)
@@ -510,18 +589,21 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
       if (!spot || !value || typeof value !== "object" || !("player_id" in value) ||
         typeof value.player_id !== "string" ||
         !members.some(member => member.player_id === value.player_id) ||
-        !hexes.some(cell => cell.q === spot.q && cell.r === spot.r && cell.known)) return null
+        !hexes.some(cell => cell.q === spot.q && cell.r === spot.r)) return null
       fortresses.push({ ...spot, player_id: value.player_id })
     }
   }
   const road_ready = readIdList(record.road_ready)
+  const lobby_ready = readIdList(record.lobby_ready)
   const roads = readRoadPrep(record.roads)
-  if (road_ready === null || (record.phase === "preparing" && record.joined && roads === null)) {
+  if (road_ready === null || lobby_ready === null ||
+    (record.phase === "preparing" && record.joined && roads === null)) {
     return null
   }
   return {
     id: record.id,
     name: record.name,
+    description: record.description,
     phase: record.phase,
     revision,
     turn,
@@ -533,6 +615,7 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
     fortresses,
     chronicle: record.phase === "finished" ? readChronicle(record.chronicle) : [],
     road_ready: road_ready ?? [],
+    lobby_ready: lobby_ready ?? [],
     roads: record.phase === "preparing" ? roads : null,
   }
 }
@@ -688,6 +771,7 @@ export async function createCampaign(
   name: string,
   rules: CampaignRules,
   map?: { id: string; blind: boolean },
+  description = "",
 ): Promise<CampaignDetail> {
   const campaign = readDetailCampaign(
     await request("/api/campaigns", {
@@ -698,6 +782,7 @@ export async function createCampaign(
       },
       body: JSON.stringify({
         name,
+        description,
         rules,
         map_id: map?.id ?? null,
         blind: map?.blind ?? false,
@@ -713,6 +798,59 @@ export async function createCampaign(
 export async function getCampaign(id: string): Promise<CampaignDetail> {
   const campaign = readDetailCampaign(
     await request(`/api/campaigns/${encodeURIComponent(id)}`, { method: "GET" }),
+  )
+  if (!campaign) {
+    throw new ApiError(200, {})
+  }
+  return campaign
+}
+
+export async function deleteCampaign(id: string, confirmName: string): Promise<void> {
+  await request(`/api/campaigns/${encodeURIComponent(id)}/scrap`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...csrfHeaders(),
+    },
+    body: JSON.stringify({ confirm_name: confirmName }),
+  })
+}
+
+export async function restoreCampaignMember(
+  id: string,
+  revision: number,
+  playerId: string,
+): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(
+    await request(`/api/campaigns/${encodeURIComponent(id)}/restore`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...csrfHeaders(),
+      },
+      body: JSON.stringify({ revision, player_id: playerId }),
+    }),
+  )
+  if (!campaign) {
+    throw new ApiError(200, {})
+  }
+  return campaign
+}
+
+export async function expelCampaignMember(
+  id: string,
+  revision: number,
+  playerId: string,
+): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(
+    await request(`/api/campaigns/${encodeURIComponent(id)}/expel`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...csrfHeaders(),
+      },
+      body: JSON.stringify({ revision, player_id: playerId }),
+    }),
   )
   if (!campaign) {
     throw new ApiError(200, {})
@@ -754,6 +892,37 @@ export async function saveIdentity(
     headers: { "Content-Type": "application/json", ...csrfHeaders() },
     body: JSON.stringify({ revision, faction, color }),
   }))
+  if (!campaign) throw new ApiError(200, {})
+  return campaign
+}
+
+export async function markCampaignReady(
+  id: string,
+  revision: number,
+): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(
+    await request(`/api/campaigns/${encodeURIComponent(id)}/ready`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ revision }),
+    }),
+  )
+  if (!campaign) throw new ApiError(200, {})
+  return campaign
+}
+
+export async function startCampaign(
+  id: string,
+  revision: number,
+  admins: string[] = [],
+): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(
+    await request(`/api/campaigns/${encodeURIComponent(id)}/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ revision, admins }),
+    }),
+  )
   if (!campaign) throw new ApiError(200, {})
   return campaign
 }
@@ -931,6 +1100,47 @@ export async function deleteMap(id: string): Promise<void> {
   })
 }
 
+export async function saveDrawnMap(
+  name: string,
+  size: MapSize,
+  cells: MapCell[],
+  anchors: { q: number; r: number }[],
+): Promise<SavedMap> {
+  return readSavedMap(
+    await request("/api/maps", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ name, size, cells, anchors }),
+    }),
+  )
+}
+
+export async function updateDrawnMap(
+  id: string,
+  name: string,
+  size: MapSize,
+  cells: MapCell[],
+  anchors: { q: number; r: number }[],
+): Promise<SavedMap> {
+  return readSavedMap(
+    await request(`/api/maps/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ name, size, cells, anchors }),
+    }),
+  )
+}
+
+export async function copyMapForEdit(id: string, name?: string): Promise<SavedMap> {
+  return readSavedMap(
+    await request(`/api/maps/${encodeURIComponent(id)}/copy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ name: name ?? null }),
+    }),
+  )
+}
+
 export async function getMap(id: string): Promise<SavedMapDetail> {
   const data = await request(`/api/maps/${encodeURIComponent(id)}`, { method: "GET" })
   const summary = readSavedMap(data)
@@ -950,6 +1160,9 @@ export async function getMap(id: string): Promise<SavedMapDetail> {
     const q = readInt(cell.q, -64, 64)
     const r = readInt(cell.r, -64, 64)
     if (q === null || r === null || typeof cell.ground !== "string") {
+      throw new ApiError(200, {})
+    }
+    if (!Object.hasOwn(GROUND_LABEL, cell.ground)) {
       throw new ApiError(200, {})
     }
     cells.push({

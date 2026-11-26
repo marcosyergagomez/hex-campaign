@@ -16,11 +16,14 @@ from hexcampaign.domain.lobby import (
     choose_identity,
     close_placement,
     create_game,
+    invite_player,
+    mark_ready,
     place_armies,
 )
 from hexcampaign.domain.march import march
-from hexcampaign.domain.rules import campaign_name, roster_text, rules_from
+from hexcampaign.domain.rules import campaign_description, campaign_name, roster_text, rules_from
 from hexcampaign.domain.sight import known_hex
+from hexcampaign.domain.terrain import Plot
 from hexcampaign.domain.turn import (
     close_orders,
     deactivate_player,
@@ -47,6 +50,10 @@ def test_player_identity_is_persisted_and_required_before_a_new_campaign_starts(
     assert [(member.faction, member.color) for member in restored.members] == [
         ("cathay", COLORS["garnet"]), ("cathay", COLORS["azure"]),
     ]
+    with pytest.raises(DomainError, match="lobby_not_ready"):
+        begin(restored, "1", [], NOW)
+    mark_ready(restored, "1")
+    mark_ready(restored, "2")
     begin(restored, "1", [], NOW)
     assert restored.rules == game.rules
     assert restored.phase == "orders"
@@ -104,10 +111,17 @@ def _rules(**overrides: object) -> dict[str, object]:
     return data
 
 
+def _ready_table(game):
+    for member in game.members:
+        if member.status == "active":
+            mark_ready(game, member.player_id)
+    return game
+
+
 def _opened(**overrides: object):
     game = create_game("Norte", rules_from(_rules(**overrides)), "1", "ana")
     game = accept_seat(game, "2", "boa")
-    return begin(game, "1", [], NOW)
+    return begin(_ready_table(game), "1", [], NOW)
 
 
 def _army(game, player_id: str):
@@ -410,7 +424,7 @@ def test_an_eliminated_owner_passes_the_table_when_the_war_continues() -> None:
     game = create_game("Norte", rules_from(_rules(seats=3, victory="fortress")), "1", "ana")
     game = accept_seat(game, "2", "boa")
     game = accept_seat(game, "3", "cio")
-    game = begin(game, "1", [], NOW)
+    game = begin(_ready_table(game), "1", [], NOW)
     owner = _army(game, "1")
     rival = _army(game, "2")
     third = _army(game, "3")
@@ -434,7 +448,7 @@ def test_a_hidden_battle_and_its_occupier_stay_out_of_the_other_view() -> None:
     game = create_game("Norte", rules_from(_rules(seats=3, visibility="anonymous")), "1", "ana")
     game = accept_seat(game, "2", "boa")
     game = accept_seat(game, "3", "cio")
-    game = begin(game, "1", [], NOW)
+    game = begin(_ready_table(game), "1", [], NOW)
     left = _army(game, "1")
     right = _army(game, "2")
     bystander = _army(game, "3")
@@ -463,7 +477,7 @@ def test_an_adjacent_holder_is_hidden_until_that_army_is_visible() -> None:
     game = create_game("Norte", rules_from(_rules(seats=3, visibility="adjacent")), "1", "ana")
     game = accept_seat(game, "2", "boa")
     game = accept_seat(game, "3", "cio")
-    game = begin(game, "1", [], NOW)
+    game = begin(_ready_table(game), "1", [], NOW)
     watcher = _army(game, "3")
     rival = _army(game, "2")
     far = next(
@@ -493,7 +507,7 @@ def test_a_placed_army_discovers_the_hex_it_stands_on() -> None:
         "ana",
     )
     game = accept_seat(game, "2", "boa")
-    game = begin(game, "1", [], NOW)
+    game = begin(_ready_table(game), "1", [], NOW)
     border = [
         cell
         for cell in game.hexes
@@ -510,6 +524,32 @@ def test_a_placed_army_discovers_the_hex_it_stands_on() -> None:
     assert known_hex(game, "2", Hex(1, 0))
 
 
+def test_players_place_forts_inside_pre_marked_home_land() -> None:
+    game = create_game(
+        "Hogares",
+        rules_from(_rules(placement="players", visibility="home", map_size=37)),
+        "1",
+        "ana",
+    )
+    game = accept_seat(game, "2", "boa")
+    game.plots = {cell: Plot("llanura") for cell in game.hexes}
+    game.home_size = 7
+    game = begin(_ready_table(game), "1", [], NOW)
+    assert game.phase == "placing"
+    assert len(game.anchors) == 2
+    home_one = set(game.discovered["1"])
+    home_two = set(game.discovered["2"])
+    assert home_one and home_two and home_one.isdisjoint(home_two)
+    outsider = next(cell for cell in game.hexes if cell not in home_one)
+    own = next(army for army in game.armies if army.player_id == "1")
+    with pytest.raises(DomainError, match="order_illegal"):
+        place_armies(game, "1", outsider, {own.id: next(iter(home_one))})
+    fort = next(iter(home_one))
+    army_spot = next(cell for cell in home_one if cell != fort)
+    game = place_armies(game, "1", fort, {own.id: army_spot})
+    assert next(item for item in game.fortresses if item.player_id == "1").at() == fort
+
+
 def test_a_name_rejects_a_null_and_a_hidden_direction_mark() -> None:
     with pytest.raises(DomainError) as nul:
         campaign_name("Norte\x00")
@@ -524,6 +564,19 @@ def test_a_name_rejects_a_null_and_a_hidden_direction_mark() -> None:
     assert hidden.value.code == "text_invalid"
 
 
+def test_campaign_description_keeps_paragraphs_and_caps_length() -> None:
+    lore = "En el Imperio\n\nhubo una guerra."
+    assert campaign_description(lore) == lore
+    assert campaign_description(None) == ""
+    assert campaign_description("  ") == ""
+    with pytest.raises(DomainError) as long:
+        campaign_description("x" * 15001)
+    assert long.value.code == "rules_invalid"
+    game = create_game("Cronica", rules_from(_rules()), "1", "ana", lore)
+    assert game.description == lore
+    assert from_dict(to_dict(game)).description == lore
+
+
 def test_orders_are_due_a_full_day_count_after_they_open(now=NOW) -> None:
     game = _opened(order_days=2)
     quiet = project(game, "1", now + timedelta(days=1))
@@ -531,3 +584,10 @@ def test_orders_are_due_a_full_day_count_after_they_open(now=NOW) -> None:
 
     assert quiet["orders_due"] is False
     assert due["orders_due"] is True
+
+
+def test_invite_is_refused_when_every_seat_is_taken() -> None:
+    game = create_game("Llena", rules_from(_rules(seats=2)), "1", "ana")
+    accept_seat(game, "2", "boa")
+    with pytest.raises(DomainError, match="seat_full"):
+        invite_player(game, "1", "3", "cio")

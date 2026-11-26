@@ -35,7 +35,7 @@ def rules_from(data: object, *, floor: int = 2) -> Rules:
         return Rules(
             seats=_span(data["seats"], floor, 4),
             armies=_span(data["armies"], 1, 2),
-            movement=_span(data["movement"], 1, 3),
+            movement=_span(data["movement"], 1, 5),
             map_size=_number(data["map_size"], MAP_SIZES),
             visibility=_word(data["visibility"], VISIBILITY),
             victory=_word(data["victory"], VICTORY),
@@ -49,8 +49,23 @@ def rules_from(data: object, *, floor: int = 2) -> Rules:
         raise DomainError("rules_invalid") from None
 
 
+DESCRIPTION_LIMIT = 15000
+
+
 def campaign_name(value: object) -> str:
     return _line(value, limit=120, required=True, code="rules_invalid")
+
+
+def campaign_description(value: object) -> str:
+    """Optional lore blurb; keeps paragraphs, caps length for Warhammer write-ups."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise DomainError("rules_invalid")
+    text = unicodedata.normalize("NFKC", value).replace("\r\n", "\n").replace("\r", "\n").strip()
+    if len(text) > DESCRIPTION_LIMIT or _hidden(text, allow_breaks=True):
+        raise DomainError("rules_invalid")
+    return text
 
 
 def label(value: object, *, required: bool) -> str:

@@ -7,15 +7,14 @@ Both are Secure, SameSite=Lax, Path=/, and have no Domain, which is what the
 origin does not receive this cookie.
 """
 
-from functools import wraps
 from urllib.parse import SplitResult, urlsplit
 
 from django.conf import settings
-from django.db import close_old_connections
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
+from api.django_db import django_sync
 from apps.accounts.sessions import (
     LoginRejected,
     LoginThrottled,
@@ -41,18 +40,6 @@ TOO_MANY_MESSAGE = "Demasiados intentos. Prueba de nuevo en unos minutos."
 class LoginPayload(BaseModel):
     email: str
     password: str
-
-
-def django_sync(view):
-    @wraps(view)
-    def wrapper(*args, **kwargs):
-        close_old_connections()
-        try:
-            return view(*args, **kwargs)
-        finally:
-            close_old_connections()
-
-    return wrapper
 
 
 def same_origin(request: Request) -> bool:
@@ -97,7 +84,7 @@ def _errors(status: int, field: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"errors": {field: [message]}})
 
 
-def _set_session_cookies(response: Response, opened: OpenedSession) -> None:
+def set_session_cookies(response: Response, opened: OpenedSession) -> None:
     response.set_cookie(
         SESSION_COOKIE,
         opened.token,
@@ -146,7 +133,7 @@ def open_player_session(payload: LoginPayload, request: Request) -> JSONResponse
     except LoginRejected:
         return _errors(401, "credentials", CREDENTIALS_MESSAGE)
     response = JSONResponse({"email": opened.user.email, "alias": opened.user.alias})
-    _set_session_cookies(response, opened)
+    set_session_cookies(response, opened)
     return response
 
 

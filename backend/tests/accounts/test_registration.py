@@ -54,7 +54,20 @@ def _years_ago(day: date, years: int) -> date:
 @pytest.fixture
 def client():
     with TestClient(application) as http:
+        http.headers.update({"origin": "http://testserver"})
         yield http
+
+
+@pytest.mark.django_db(transaction=True)
+def test_register_rejects_a_cross_site_origin(client) -> None:
+    blocked = client.post(
+        "/api/users",
+        json=_payload(email="cruz@example.com", alias="cruz_site"),
+        headers={"origin": "https://evil.example"},
+    )
+    assert blocked.status_code == 403
+    assert blocked.json()["errors"]["origin"] == ["La solicitud no viene de este sitio."]
+    assert User.objects.filter(email="cruz@example.com").count() == 0
 
 
 @pytest.mark.django_db(transaction=True)

@@ -18,7 +18,7 @@ Las reglas se pueden cambiar mientras el propietario no ha pulsado empezar. Desd
 
 Una campaña tiene de 2 a 4 jugadores. El número se elige al crearla. Hasta pulsar empezar, el propietario puede bajarlo para cuadrar con quien ya se ha unido, sin bajar de 2 ni de las plazas ocupadas. Nadie entra después de empezar. El mapa, que se definirá aparte, se genera a partir de ese número y del tamaño elegido.
 
-El nombre puede repetirse. Cada campaña tiene un id propio. El buscador encuentra solo ese id. El propietario también puede invitar por alias: a quien invita le aparece un aviso en la aplicación. O genera un enlace de invitación. Una cuenta puede crear como máximo tres campañas que sigan abiertas. Una campaña terminada deja libre esa plaza.
+El nombre puede repetirse. Cada campaña tiene un id propio. El buscador encuentra solo ese id. Puede llevar una descripción libre de hasta 15 000 caracteres (trasfondo, acuerdos de mesa, tono de la guerra); es opcional y se ve en la ficha de la campaña. El propietario también puede invitar por alias: a quien invita le aparece un aviso en la aplicación. O genera un enlace de invitación. Una campaña está preparada (reclutamiento, colocación o preparación de caminos), en curso (órdenes o batallas) o finalizada. Una cuenta puede tener como máximo tres campañas en curso a la vez; las preparadas y las finalizadas no ocupan esa plaza.
 
 El creador es el único administrador hasta empezar, y el propietario mientras siga activo. Al empezar puede nombrar más administradores, hasta cubrir a todos los jugadores. Un administrador que no es el propietario tiene los mismos poderes que los demás administradores, y ninguno de ellos puede expulsar ni degradar al propietario activo.
 
@@ -28,8 +28,8 @@ Queda fijo en ese momento:
 
 - Jugadores: 2, 3 o 4.
 - Ejércitos iniciales de cada jugador: 1 o 2.
-- Movimiento de cada ejército: 1, 2 o 3 hexágonos. En esta versión es el mismo para todos.
-- Tamaño del mapa: 19, 37 o 61 hexágonos. Con terrenos, el tamaño lo define el mapa elegido. Los tres tamaños ofrecidos actualmente son 271, 397 y 547; los mapas guardados de otros tamaños siguen siendo compatibles.
+- Movimiento de cada ejército: de 1 a 5 puntos. En esta versión es el mismo para todos. Al crear, se recomienda 3 en mapa pequeño, 4 en mediano y 5 en grande; el creador puede cambiarlo.
+- Tamaño del mapa: pequeño, mediano o grande. En la creación de campaña se autogenera un paisaje o se elige uno generado; el tamaño lo fija ese mapa (hoy 271, 397 o 547 casillas). Los mapas guardados de otros tamaños siguen siendo compatibles.
 - Visibilidad de los ejércitos enemigos: todo el mapa, solo los adyacentes, o una ficha sin nombre ni composición. Con un mapa de terrenos, esta elección pasa a ser la de «Mapa y terrenos»: total, mapa conocido con niebla, o solo el territorio propio.
 - Victoria: destruir todos los ejércitos rivales, retener una fortaleza enemiga un número de turnos seguidos, o cualquiera de las dos.
 - Turnos seguidos de retención: un entero de al menos 1.
@@ -123,7 +123,7 @@ Con un mapa de terrenos, estas reglas rigen la partida. Sin él, la mesa antigua
 
 Cada casilla tiene un terreno. El territorio de un jugador es una zona compacta alrededor de su fortaleza, definida más abajo. Lo demás es neutral. De quién es una casilla no cambia lo que cuesta salir de ella. El territorio propio se ve entero, siempre, con terreno y ejércitos.
 
-El movimiento elegido al crear, 1, 2 o 3, pasa a ser puntos. Los puntos se gastan al salir de una casilla, no al entrar. Salir cuesta lo que dice el terreno que se pisa. Entrar en la siguiente no añade otro coste. Quedarse quieto gasta cero y no borra lo ya abonado. La casilla que se pisa no se paga otra vez por estar en ella: desde una montaña se sale pagando el coste de la montaña, y la llanura de destino no cobra.
+El movimiento elegido al crear, de 1 a 5, pasa a ser puntos. Los puntos se gastan al salir de una casilla, no al entrar. Salir cuesta lo que dice el terreno que se pisa. Entrar en la siguiente no añade otro coste. Quedarse quieto gasta cero y no borra lo ya abonado. La casilla que se pisa no se paga otra vez por estar en ella: desde una montaña se sale pagando el coste de la montaña, y la llanura de destino no cobra.
 
 Una orden puede pedir una salida que este turno no alcanza a pagar. Los puntos que sí tiene se abonan a esa salida y el ejército se queda. El abono queda en el ejército hasta que sale de esa casilla. Al turno siguiente sigue faltando la diferencia. Si la orden es quedarse, el abono no crece y no se pierde. Cada ejército lleva el suyo. No se pasa a otro.
 
@@ -133,7 +133,7 @@ Quien ya conoce una casilla infranqueable no puede cerrar una orden que entre en
 
 Mientras le faltan puntos para salir, el ejército sigue ocupando su casilla. Quien termina antes de pagar sale antes. Llegar a una casilla compara los puntos gastados en esa salida, no los hexágonos cruzados. Si dos enemigos completan la salida hacia la misma casilla con el mismo coste, hay batalla ahí. Un ejército que todavía está pagando no ha entrado.
 
-El camino y el puente no sustituyen al suelo. Van encima. Salir de una casilla con camino cuesta 1, aunque el suelo cueste más, y la mirada sigue siendo la del suelo. Al completar esa salida, el ejército suma 1 punto, que puede gastar en salidas posteriores de ese turno. El camino no abre una montaña rocosa, un acantilado ni un lago. El puente o el vado solo puede ir sobre una orilla o un río completo, y salir de ahí cuesta 1. Camino y puente pueden compartir casilla: salir cuesta 1 y, por el camino, suma el punto.
+El camino y el puente no sustituyen al suelo. Van encima. Salir de una casilla con camino cuesta 1, aunque el suelo cueste más, y la visión sigue siendo la del suelo. Completar un movimiento por camino da +1 movimiento ese turno. El camino no abre una montaña rocosa, un acantilado ni un lago. El puente o el vado solo puede ir sobre un río completo, y salir de ahí cuesta 1. Camino y puente pueden compartir casilla: salir cuesta 1 y, por el camino, se obtiene el +1 de movimiento.
 
 Hay dos velos, y no hacen lo mismo.
 
@@ -155,31 +155,32 @@ El conocimiento de cada jugador, y el abono de salida de cada ejército, forman 
 
 Cualquier ejército paga el mismo coste. En este catálogo no hay combate, cobertura de disparo, emboscadas, desgaste, producción, barcos ni vuelo. Un terreno puede compartir efectos con otro y seguir siendo otro terreno, para poder separarlos más adelante sin rehacer el mapa.
 
-Al crear la campaña sin un mapa de terrenos, el tamaño sigue siendo 19, 37 o 61. Con un mapa de terrenos el tamaño es el de ese mapa. Los tamaños actuales son 271, 397 y 547 casillas. La pequeña admite 2 y 3 jugadores; las otras admiten 2, 3 y 4. Estos tamaños son una configuración, no tres algoritmos: `TABLE_RADII` en [hexes.py](../backend/src/hexcampaign/domain/hexes.py) define los radios ofrecidos. El tamaño se calcula como `1 + 3*r*(r+1)`. `/api/map-scales` publica tamaños, plazas viables, recomendación y superficie territorial; la interfaz no mantiene otra lista. Al cambiar esos radios, el mismo motor calcula las nuevas geometrías y composiciones. Los radios válidos son enteros de 2 a 64, dentro del límite de coordenadas guardadas, aunque los más pequeños no admiten campañas generadas con la separación exigida. Al empezar, la campaña se queda una copia del mapa.
+Al crear la campaña, el asistente ofrece pequeño, mediano o grande y autogenera un paisaje o elige uno generado; no hay vista previa en esa pantalla. El tamaño es el del mapa (hoy 271, 397 y 547 casillas). La pequeña admite 2 y 3 jugadores; las otras admiten 2, 3 y 4. Estos tamaños son una configuración, no tres algoritmos: `TABLE_RADII` en [hexes.py](../backend/src/hexcampaign/domain/hexes.py) define los radios ofrecidos. El tamaño se calcula como `1 + 3*r*(r+1)`. `/api/map-scales` publica tamaños, plazas viables, recomendación y superficie territorial; la interfaz no mantiene otra lista. Al cambiar esos radios, el mismo motor calcula las nuevas geometrías y composiciones. Los radios válidos son enteros de 2 a 64, dentro del límite de coordenadas guardadas, aunque los más pequeños no admiten campañas generadas con la separación exigida. Al empezar, la campaña se queda una copia del mapa. Los tableros antiguos sin terrenos (19, 37, 61) siguen siendo compatibles si ya existen.
 
 En un mapa nuevo generado, cada territorio ocupa aproximadamente el 7 % del tablero, redondeado a una casilla, con un mínimo de siete. Los tamaños actuales producen 19, 28 y 38 casillas por jugador. Se toman las casillas más próximas a la fortaleza y, en el anillo incompleto, se priorizan las que miran al interior del tablero. Así crecen de forma gradual, sin tener que añadir un anillo entero ni agrandar artificialmente el mapa. Todos reciben la misma superficie, sus territorios no se solapan y el centro queda neutral. El mapa guarda `home_size` y la campaña copia ese valor. Los documentos anteriores sin ese campo conservan sus discos originales: por ejemplo, 19 casillas en mapas de 397, 37 en los de 547 y 61 en los de 817.
 
 La fortaleza, y cualquier ejército, solo se colocan donde se puede entrar. El territorio de una fortaleza no puede compartir casilla con el de otra. Tiene que quedar terreno neutral. Si con esas plazas no cabe, esas fortalezas no valen y hay que moverlas o bajar plazas.
 
-Si colocan los jugadores, la fortaleza y los ejércitos van en casillas distintas, todas transitables, y la fortaleza tiene que cumplir los límites territoriales. Un ejército inicial puede quedar en la fortaleza. El segundo, si lo hay, en una vecina libre en la que se pueda entrar y, si cabe, dentro del propio territorio.
+Si colocan los jugadores, al empezar cada asiento recibe un territorio de casa ya marcado (el mismo disco que usaría una fortaleza sembrada). Solo puede poner la fortaleza y los ejércitos iniciales en casillas transitables de ese territorio; la fortaleza tiene que seguir cumpliendo los límites territoriales entre vecinos. Un ejército inicial puede quedar en la fortaleza. El segundo, si lo hay, en otra casilla libre de ese mismo territorio.
 
 En un mapa hecho a mano, si coloca la aplicación, reparte las fortalezas junto al borde, lo más lejos posible unas de otras, cumpliendo lo de arriba. El mapa en sí es libre: puede tener un río suelto, una cordillera partida o el transitable cortado en dos.
 
-En un mapa generado, las fortalezas salen solas, lejos unas de otras, y cada semilla dibuja un país distinto. No es una copia girada del mismo reino: es un solo paisaje. El lago, el río y la sierra caen donde caigan, y el otro jugador no nace con el mismo dibujo, pero sí con una fortaleza transitable, un territorio que no pisa el del vecino y un viaje de al menos cinco turnos hasta cualquier fortaleza rival. No basta con contar trece casillas: el generador calcula el viaje más rápido con 3 puntos por turno, el coste al salir y los puntos que devuelven los caminos. El viaje puede rodear el lago: esa es la frontera, no una recta de llanura vacía. El centro del tablero queda fuera de los territorios. Nadie nace sobre el agua ni encerrado por una barrera que no se pueda rodear.
+En un mapa generado, las fortalezas salen solas, lejos unas de otras, y cada semilla dibuja un país distinto. No es una copia girada del mismo reino: es un solo paisaje. El lago, el río y la sierra caen donde caigan, y el otro jugador no nace con el mismo dibujo, pero sí con una fortaleza transitable, un territorio que no pisa el del vecino y un viaje de al menos cinco turnos hasta cualquier fortaleza rival. No basta con contar trece casillas: el generador calcula el viaje más rápido con 3 puntos por turno, el coste al salir y el +1 de movimiento de los caminos. El viaje puede rodear el lago: esa es la frontera, no una recta de llanura vacía. El centro del tablero queda fuera de los territorios. Nadie nace sobre el agua ni encerrado por una barrera que no se pueda rodear.
 
 El generado conecta las fortalezas por terreno transitable. Cada masa de terreno es contigua, pero puede haber muchas separadas por claros y valles; no tiene por qué usar todos los terrenos:
 
 - El río completo forma un curso. Cada casilla, salvo los extremos, tiene dos vecinas de río completo. Un extremo toca un lago o el borde del mapa. No hay un río de una sola casilla, ni una mancha, ni un cruce.
-- La orilla toca al menos un río completo.
 - El acantilado, si sale, forma una cadena de al menos dos casillas, y cada una toca un lago o el borde del mapa.
 - La playa toca un lago o el borde del mapa.
 - Un lago de varias casillas es contiguo.
 - La montaña y la montaña rocosa forman sierras cortas, separadas por pasos transitables.
 - Hay varias masas de bosque. El bosque profundo, si sale, toca al menos un bosque.
-- El pantano, si sale, toca un río completo, una orilla o un lago.
-- El puente o el vado está sobre una orilla o un río completo y une dos casillas en las que se puede entrar.
+- El pantano, si sale, toca un río completo o un lago.
+- El puente o el vado está sobre un río completo y une dos casillas en las que se puede entrar.
 
-Los mapas generados no pintan caminos ni puentes: salen limpios para la preparación. Conservan terreno transitable, frontera y miradores. La fortaleza conserva su salida normal. El puente, cuando lo pone un jugador o un mapa a mano, iguala el río a la llanura y, sin camino encima, no devuelve puntos. Un camino sobre río lleva puente. Salir por camino cuesta 1 y, al completar esa salida, suma 1 punto para salidas posteriores del mismo turno. No cambian la mirada del terreno ni abren casillas infranqueables.
+Los mapas generados no pintan caminos ni puentes: salen limpios para la preparación. Conservan terreno transitable, frontera y miradores. La fortaleza conserva su salida normal. El puente, cuando lo pone un jugador o un mapa a mano, iguala el río a la llanura y, sin camino encima, no da el +1 de movimiento. Un camino sobre río lleva puente. Salir por camino cuesta 1 y completar ese movimiento da +1 movimiento ese turno. No cambian la visión del terreno ni abren casillas infranqueables.
+
+En el editor de mapas el jugador parte de un disco de llanura del tamaño elegido, puede quitar o recuperar hexágonos dentro de ese disco, pintar terreno, caminos y puentes a pincel, y colocar de 0 o de 2 a 4 fortalezas. Un mapa generado se abre como copia editable; el original no se sobrescribe. Al guardar solo se exige que haya casillas y que las fortalezas, si las hay, sean transitables.
 
 Cada jugador dispone de al menos tres casillas de acceso a su frontera y una posición elevada de observación accesible allí. Con movimiento 3 se exige llegar como máximo en dos turnos para los tamaños actuales; el límite crece con el alcance territorial si se configuran mesas mayores. Se aprovecha una colina o montaña existente cuando es posible; no se convierte toda la frontera en colinas. El bosque no oculta por sí mismo a un ejército ni corta la visión; la mirada depende del terreno del observador.
 
@@ -209,7 +210,6 @@ En el visor se puede ampliar hasta el 300 %, desplazarse por el mapa y volver al
 | Montaña rocosa | No se entra | No se ocupa |
 | Desierto | 1 | 2, la de partida |
 | Tundra | 2 | 2, la de partida |
-| Orilla | 2, o 1 con puente o vado | 2, la de partida |
 | Río completo | 3, o 1 con puente o vado | 2, la de partida |
 | Pantano | 3 | 2, la de partida |
 | Lago | No se entra | No se ocupa |
@@ -220,10 +220,10 @@ En el visor se puede ampliar hasta el 300 %, desplazarse por el mapa y volver al
 
 | Vía | Dónde puede ir | Qué cambia |
 | --- | --- | --- |
-| Camino | Encima de un terreno en el que se puede salir | Salir cuesta 1. Al completar esa salida, suma 1 punto para las salidas de después. |
-| Puente o vado | Encima de una orilla o de un río completo | Salir cuesta 1. |
+| Camino | Encima de un terreno en el que se puede salir | Salir cuesta 1. Completar un movimiento por camino: +1 movimiento. |
+| Puente o vado | Encima de un río completo | Salir cuesta 1. |
 
-Desierto, mina y campo se salen y se ven como una llanura. Están en el catálogo porque el desgaste y la producción vendrán después, y el mapa no tendrá que cambiar de terreno. La playa es la costa por la que se puede entrar. El acantilado no se escala. No hay desembarco. Salir de la montaña cuesta 3 y, mientras se está encima, la mirada llega a 4. La montaña rocosa es la barrera.
+Desierto, mina y campo se salen y se ven como una llanura. Están en el catálogo porque el desgaste y la producción vendrán después, y el mapa no tendrá que cambiar de terreno. La playa es la costa por la que se puede entrar. El acantilado no se escala. No hay desembarco. Salir de la montaña cuesta 3 y, mientras se está encima, la visión llega a 4. La montaña rocosa es la barrera.
 
 ## Fuera de esta versión
 

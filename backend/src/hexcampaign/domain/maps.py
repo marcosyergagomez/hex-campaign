@@ -84,12 +84,20 @@ def fortress_sites(size: int, seats: int) -> tuple[Hex, ...]:
 
 
 def lay(game: Game, template: Template, surveyor: str | None) -> None:
-    if template.size != game.rules.map_size or set(template.cells) != set(game.hexes):
+    if template.size != game.rules.map_size:
+        raise DomainError("rules_invalid")
+    board = set(template.cells)
+    if not board or not board <= set(disk(template.size)):
+        raise DomainError("rules_invalid")
+    if template.generated and board != set(disk(template.size)):
         raise DomainError("rules_invalid")
     if game.rules.visibility not in {"total", "charted", "home"}:
         raise DomainError("rules_invalid")
     if template.generated and template.seats != game.rules.seats:
         raise DomainError("rules_invalid")
+    if template.seats is not None and template.seats != game.rules.seats:
+        raise DomainError("rules_invalid")
+    game.hexes = sorted(board)
     game.plots = dict(template.cells)
     game.anchors = list(template.anchors)
     game.surveyor = surveyor

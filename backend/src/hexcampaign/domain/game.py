@@ -6,7 +6,7 @@ from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.identity import checked_identity
 from hexcampaign.domain.land import checked_home_size
-from hexcampaign.domain.rules import Rules, rules_from
+from hexcampaign.domain.rules import Rules, campaign_description, rules_from
 from hexcampaign.domain.terrain import Plot, checked_plot
 
 VERSION = 2
@@ -78,6 +78,7 @@ class Game:
     turn: int
     rules: Rules
     hexes: list[Hex]
+    description: str = ""
     members: list[Member] = field(default_factory=list)
     armies: list[Army] = field(default_factory=list)
     fortresses: list[Fortress] = field(default_factory=list)
@@ -98,6 +99,7 @@ class Game:
     home_size: int | None = None
     identity_required: bool = False
     road_ready: set[str] = field(default_factory=set)
+    lobby_ready: set[str] = field(default_factory=set)
 
 
 def find_member(game: Game, player_id: str) -> Member | None:
@@ -177,6 +179,7 @@ def to_dict(game: Game) -> dict[str, object]:
         "version": VERSION,
         "revision": game.revision,
         "name": game.name,
+        "description": game.description,
         "phase": game.phase,
         "turn": game.turn,
         "rules": _rules_dict(game.rules),
@@ -206,6 +209,7 @@ def to_dict(game: Game) -> dict[str, object]:
         "home_size": game.home_size,
         "identity_required": game.identity_required,
         "road_ready": sorted(game.road_ready),
+        "lobby_ready": sorted(game.lobby_ready),
         "fort_memory": {
             player_id: [
                 {"q": int(key.split(",")[0]), "r": int(key.split(",")[1]), "owner": owner}
@@ -235,6 +239,7 @@ def from_dict(data: object) -> Game:
         turn=_whole(data["turn"]),
         rules=rules_from(data["rules"], floor=0),
         hexes=[_cell(item) for item in _list(data["hexes"])],
+        description=campaign_description(data["description"] if "description" in data else ""),
         orders_opened_at=opened,
         previous=previous,
         winners=[str(item) for item in _list(data["winners"])],
@@ -275,6 +280,10 @@ def from_dict(data: object) -> Game:
     if not isinstance(ready, list) or any(not isinstance(item, str) for item in ready):
         raise DomainError("rules_invalid")
     game.road_ready = set(ready)
+    lobby = data.get("lobby_ready", [])
+    if not isinstance(lobby, list) or any(not isinstance(item, str) for item in lobby):
+        raise DomainError("rules_invalid")
+    game.lobby_ready = set(lobby)
     return game
 
 

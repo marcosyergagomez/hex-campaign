@@ -16,12 +16,18 @@ from hexcampaign.domain.game import (
     from_dict,
     require_owner,
     require_phase,
+    seated,
     to_dict,
 )
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.lobby import accept_seat, create_game, invite_player
-from hexcampaign.domain.rules import rules_from
-from hexcampaign.domain.turn import deactivate_player
+from hexcampaign.domain.rules import campaign_name, rules_from
+from hexcampaign.domain.turn import (
+    deactivate_player,
+    leave_campaign,
+    restore_player,
+    withdraw_player,
+)
 from hexcampaign.domain.view import project, project_roads_delta
 
 from .models import Campaign, Invitation, Seat
@@ -38,8 +44,10 @@ class RevisionConflict(CampaignError):
         super().__init__("revision_conflict")
 
 
-OPEN_PHASES = ("recruiting", "placing", "preparing", "orders", "battles")
-OPEN_CAMPAIGN_LIMIT = 3
+# Visible lifecycle: prepared (recruiting/placing/preparing), running, finished.
+PREPARED_PHASES = ("recruiting", "placing", "preparing")
+RUNNING_PHASES = ("orders", "battles")
+RUNNING_CAMPAIGN_LIMIT = 3
 
 
 def create_campaign(
@@ -48,6 +56,7 @@ def create_campaign(
     rules: dict,
     template=None,
     blind: bool = False,
+    description: str = "",
 ) -> tuple[Campaign, Game]:
     try:
         parsed = rules_from(rules)
@@ -55,17 +64,17 @@ def create_campaign(
         raise CampaignError(exc.code) from exc
     with transaction.atomic():
         account = _actor(user)
-        open_campaigns = Campaign.objects.filter(created_by=account, phase__in=OPEN_PHASES).count()
-        if open_campaigns >= OPEN_CAMPAIGN_LIMIT:
-            raise CampaignError("campaign_limit")
         try:
-            game = create_game(name, parsed, str(account.pk), account.alias)
+            game = create_game(name, parsed, str(account.pk), account.alias, description)
             game.identity_required = True
             if template is not None:
                 from hexcampaign.domain.maps import lay
 
-                surveyor = None if template.generated and blind else str(account.pk)
-                lay(game, template, surveyor)
+                # Atlas stays sealed in recruiting. After kickoff, a non-blind
+                # surveyor gets the full chart; blind owners only learn home land.
+                lay(game, template, None)
+                if not blind:
+                    game.surveyor = str(account.pk)
         except DomainError as exc:
             raise CampaignError(exc.code) from exc
         campaign = Campaign.objects.create(
@@ -75,6 +84,59 @@ def create_campaign(
         )
         _sync(campaign, game)
     return campaign, game
+
+
+def delete_campaign(user, campaign_id) -> None:
+    """Owner may scrap a campaign that has not entered the marching clock yet."""
+    with transaction.atomic():
+        account = _actor(user)
+        campaign = _locked(campaign_id)
+        game = _document(campaign)
+        try:
+            require_owner(game, str(account.pk))
+        except DomainError as exc:
+            raise CampaignError(exc.code) from exc
+        if game.phase not in PREPARED_PHASES:
+            raise CampaignError("campaign_delete_locked")
+        campaign.delete()
+
+
+def scrap_campaign(user, campaign_id, confirm_name: object) -> None:
+    """Leave or destroy a campaign after typing its name.
+
+    - Owner + prepared: the document is deleted.
+    - Owner/admin + running: ownership moves on, the seat leaves the table.
+    - Player: the seat becomes inactive (staff may restore or expel).
+    """
+    try:
+        typed = campaign_name(confirm_name)
+    except DomainError as exc:
+        raise CampaignError("confirm_name_mismatch") from exc
+    with transaction.atomic():
+        account = _actor(user)
+        campaign = _locked(campaign_id)
+        game = _document(campaign)
+        if typed != game.name:
+            raise CampaignError("confirm_name_mismatch")
+        actor = str(account.pk)
+        member = find_member(game, actor)
+        if member is None or member.status != "active":
+            raise CampaignError("forbidden")
+        if game.phase == "finished":
+            raise CampaignError("campaign_delete_locked")
+        if game.phase in PREPARED_PHASES and member.role == "owner":
+            campaign.delete()
+            return
+        rng = random.Random()
+        now = timezone.now()
+        try:
+            if member.role in {"owner", "admin"}:
+                updated = leave_campaign(game, actor, rng, now)
+            else:
+                updated = withdraw_player(game, actor, rng, now)
+        except DomainError as exc:
+            raise CampaignError(exc.code) from exc
+        _save(campaign, updated)
 
 
 def play(
@@ -91,13 +153,59 @@ def play(
         if game.revision != revision:
             raise RevisionConflict()
         before = game.revision
+        was_running = campaign.phase in RUNNING_PHASES
+        active_before = {member.player_id for member in game.members if member.status == "active"}
         try:
             updated = command(game)
         except DomainError as exc:
             raise CampaignError(exc.code) from exc
         if updated.revision != before:
+            if updated.phase in RUNNING_PHASES and not was_running:
+                _assert_members_running_capacity(updated, campaign.pk)
+            elif updated.phase in RUNNING_PHASES:
+                _assert_reactivated_capacity(updated, campaign.pk, active_before)
             _save(campaign, updated)
         return campaign, updated
+
+
+def _assert_running_capacity(user, campaign_id) -> None:
+    """Any active seat may keep at most three campaigns in orders or battles."""
+    if user is None:
+        return
+    running = (
+        Seat.objects.filter(user=user, status="active", campaign__phase__in=RUNNING_PHASES)
+        .exclude(campaign_id=campaign_id)
+        .count()
+    )
+    if running >= RUNNING_CAMPAIGN_LIMIT:
+        raise CampaignError("campaign_limit")
+
+
+def _assert_members_running_capacity(game: Game, campaign_id) -> None:
+    from apps.accounts.models import User
+
+    for member in game.members:
+        if member.status != "active":
+            continue
+        try:
+            account = User.objects.get(pk=int(member.player_id))
+        except (TypeError, ValueError, User.DoesNotExist):
+            continue
+        _assert_running_capacity(account, campaign_id)
+
+
+def _assert_reactivated_capacity(game: Game, campaign_id, active_before: set[str]) -> None:
+    """When staff restores a seat into a running match, count that player's other seats."""
+    from apps.accounts.models import User
+
+    for member in game.members:
+        if member.status != "active" or member.player_id in active_before:
+            continue
+        try:
+            account = User.objects.get(pk=int(member.player_id))
+        except (TypeError, ValueError, User.DoesNotExist):
+            continue
+        _assert_running_capacity(account, campaign_id)
 
 
 def invite_alias(user, campaign_id, revision: int, alias: str) -> tuple[Campaign, Game]:
@@ -127,6 +235,8 @@ def invite_link(user, campaign_id) -> str:
         try:
             require_owner(game, str(user.pk))
             require_phase(game, "recruiting")
+            if len(seated(game)) >= game.rules.seats:
+                raise DomainError("seat_full")
         except DomainError as exc:
             raise CampaignError(exc.code) from exc
         Invitation.objects.create(campaign=campaign, token_hash=_digest(raw))
@@ -160,12 +270,19 @@ def read_campaign(user, campaign_id, now) -> dict[str, object]:
     campaign = _campaign(campaign_id)
     game = _document(campaign)
     if find_member(game, str(user.pk)) is None:
-        return _card(campaign, game)
+        # Do not leak name, phase or seat counts to anyone who is not seated.
+        # Invitation previews go through preview_link with a secret token.
+        raise CampaignError("not_found")
     return present(campaign, game, user, now)
 
 
 def list_campaigns(user) -> list[dict[str, object]]:
-    seats = Seat.objects.filter(user=user).select_related("campaign").defer("campaign__state")
+    # Inactive / expelled seats stay off the player's board until staff restores them.
+    seats = (
+        Seat.objects.filter(user=user, status__in=["active", "eliminated"])
+        .select_related("campaign")
+        .defer("campaign__state")
+    )
     return [
         {
             "id": str(seat.campaign_id),
@@ -274,8 +391,6 @@ def _accept_locked(
 
 
 def _card(campaign: Campaign, game: Game) -> dict[str, object]:
-    from hexcampaign.domain.game import seated
-
     return {
         "id": str(campaign.id),
         "name": game.name,

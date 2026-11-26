@@ -4,12 +4,13 @@ import random
 
 from django.utils import timezone
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from api.django_db import django_sync
 from api.player_gate import reader as _reader
 from api.player_gate import writer as _writer
-from api.player_session import SESSION_MESSAGE, django_sync
+from api.player_session import SESSION_MESSAGE
 from apps.campaigns.records import (
     CampaignError,
     RevisionConflict,
@@ -25,6 +26,7 @@ from apps.campaigns.records import (
     present_roads_delta,
     preview_link,
     read_campaign,
+    scrap_campaign,
 )
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex
@@ -35,6 +37,7 @@ from hexcampaign.domain.lobby import (
     choose_identity,
     close_placement,
     describe_army,
+    mark_ready,
     place_armies,
 )
 from hexcampaign.domain.roads import clear_road, finish_roads, place_road
@@ -47,6 +50,7 @@ from hexcampaign.domain.turn import (
     lock_orders,
     promote_player,
     report_battle,
+    restore_player,
     revert_turn,
 )
 
@@ -68,12 +72,15 @@ _MESSAGES = {
     "unknown_player": "No hay ningún jugador con ese alias.",
     "invitation_invalid": "La invitación no es válida.",
     "revision_conflict": "La campaña ha cambiado. Vuelve a leerla.",
-    "campaign_limit": "Ya tienes tres campañas abiertas.",
+    "campaign_limit": "Ya tienes tres campañas en curso.",
+    "campaign_delete_locked": "Esa campaña no se puede eliminar así.",
+    "confirm_name_mismatch": "Escribe el nombre exacto de la campaña para confirmar.",
     "map_unknown": "No hay ningún mapa con ese identificador.",
     "faction_invalid": "Elige una raza de The Old World.",
     "color_invalid": "Elige un color de la paleta.",
     "color_taken": "Ese color ya pertenece a otro jugador.",
     "identity_required": "Todos los jugadores deben elegir raza y color antes de empezar.",
+    "lobby_not_ready": "Todos los jugadores deben estar listos antes de iniciar.",
 }
 _STATUS = {
     "not_found": 404,
@@ -100,6 +107,7 @@ class RulesBody(BaseModel):
 class CreateBody(BaseModel):
     name: str
     rules: RulesBody
+    description: str = ""
     map_id: str | None = None
     blind: bool = False
 
@@ -117,6 +125,7 @@ class RulesChange(BaseModel):
     revision: int
     name: str
     rules: RulesBody
+    description: str | None = None
 
 
 class AliasBody(BaseModel):
@@ -167,6 +176,10 @@ class BattleBody(BaseModel):
 class PlayerBody(BaseModel):
     revision: int
     player_id: str
+
+
+class ScrapBody(BaseModel):
+    confirm_name: str
 
 
 def _errors(status: int, field: str, message: str) -> JSONResponse:
@@ -255,6 +268,18 @@ def post_identity(campaign_id: str, payload: IdentityBody, request: Request) -> 
     return _run(request, action)
 
 
+@router.post("/api/campaigns/{campaign_id}/ready")
+@django_sync
+def post_ready(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return mark_ready(game, str(user.pk))
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
 @router.post("/api/campaigns", status_code=201)
 @django_sync
 def post_campaign(payload: CreateBody, request: Request) -> JSONResponse:
@@ -270,8 +295,21 @@ def post_campaign(payload: CreateBody, request: Request) -> JSONResponse:
             payload.rules.model_dump(),
             template,
             payload.blind,
+            payload.description,
         )
         return _view(user, campaign, game, 201)
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/scrap", response_model=None)
+@django_sync
+def post_scrap_campaign(campaign_id: str, payload: ScrapBody, request: Request):
+    """Leave or destroy a campaign after the player types its name."""
+
+    def action(user):
+        scrap_campaign(user, campaign_id, payload.confirm_name)
+        return Response(status_code=204)
 
     return _run(request, action)
 
@@ -316,7 +354,7 @@ def post_rules(campaign_id: str, payload: RulesChange, request: Request) -> JSON
         rules = _rules(payload.rules)
 
         def command(game):
-            return change_rules(game, str(user.pk), payload.name, rules)
+            return change_rules(game, str(user.pk), payload.name, rules, payload.description)
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
 
@@ -564,6 +602,18 @@ def post_admin(campaign_id: str, payload: PlayerBody, request: Request) -> JSONR
     def action(user):
         def command(game):
             return promote_player(game, str(user.pk), payload.player_id)
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/restore")
+@django_sync
+def post_restore(campaign_id: str, payload: PlayerBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return restore_player(game, str(user.pk), payload.player_id)
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
 

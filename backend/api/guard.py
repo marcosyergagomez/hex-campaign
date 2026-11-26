@@ -16,7 +16,8 @@ from api.pages import result_page
 from apps.accounts.throttle import account_posts
 
 _ACCOUNT_BODY = 4096
-_CAMPAIGN_BODY = 8192
+# Campaign create may carry a 15000-char lore blurb plus rules JSON.
+_CAMPAIGN_BODY = 65536
 # Drawn maps send every hex, including previously saved 817-cell boards.
 _MAP_BODY = 98304
 _BODY_LIMITED = {
@@ -24,9 +25,12 @@ _BODY_LIMITED = {
     "/api/users/verify-email",
     "/api/session",
     "/api/session/logout",
+    "/api/profile",
 }
-_ACCOUNT_LIMITED = {"/api/users", "/api/users/verify-email"}
-_WRITE_PREFIXES = ("/api/campaigns", "/api/maps", "/api/invitations")
+# Auth signup/confirm stay tightly capped. Gameplay posts (roads, orders) are
+# frequent, so they use a separate higher ceiling instead of the account budget.
+_ACCOUNT_LIMITED = {"/api/users", "/api/users/verify-email", "/api/profile"}
+_PLAY_PREFIXES = ("/api/campaigns", "/api/maps", "/api/invitations")
 _MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _TOO_MANY = "Demasiados intentos. Prueba de nuevo en unos minutos."
 _TOO_LARGE = "La solicitud es demasiado grande."
@@ -71,12 +75,16 @@ def _client_key(scope: Scope) -> str:
     return f"{_client_host(scope)} {_normalized_path(scope.get('path', ''))}"
 
 
-def _allow_post(key: str) -> bool:
-    return account_posts.allow(
-        key,
-        settings.ACCOUNT_POST_LIMIT,
-        settings.ACCOUNT_POST_WINDOW_SECONDS,
-    )
+def _allow_post(key: str, *, limit: int, window: int) -> bool:
+    return account_posts.allow(key, limit, window)
+
+
+def _rate_limit(path: str) -> tuple[int, int] | None:
+    if path in _ACCOUNT_LIMITED:
+        return settings.ACCOUNT_POST_LIMIT, settings.ACCOUNT_POST_WINDOW_SECONDS
+    if any(path == prefix or path.startswith(prefix + "/") for prefix in _PLAY_PREFIXES):
+        return settings.PLAY_POST_LIMIT, settings.PLAY_POST_WINDOW_SECONDS
+    return None
 
 
 class _ClientGone(Exception):
@@ -107,6 +115,8 @@ def _error_field(path: str) -> str:
         return "token"
     if normalized.startswith("/api/session"):
         return "credentials"
+    if normalized.startswith("/api/profile"):
+        return "alias"
     if normalized.startswith("/api/campaigns") or normalized.startswith("/api/invitations"):
         return "campaign"
     if normalized.startswith("/api/maps"):
@@ -140,12 +150,6 @@ def _body_limit(path: str) -> int | None:
     return None
 
 
-def _write_limited(path: str) -> bool:
-    if path in _ACCOUNT_LIMITED:
-        return True
-    return any(path == prefix or path.startswith(prefix + "/") for prefix in _WRITE_PREFIXES)
-
-
 class AccountGuard:
     """Limits posts and keeps confirmation pages out of caches and referrers."""
 
@@ -174,8 +178,11 @@ class AccountGuard:
             await send(message)
 
         method = scope.get("method", "")
-        if method in _MUTATING and _write_limited(path):
-            if not _allow_post(_client_key(scope)):
+        if method in _MUTATING:
+            budget = _rate_limit(path)
+            if budget is not None and not _allow_post(
+                _client_key(scope), limit=budget[0], window=budget[1]
+            ):
                 await _reject(send, scope, 429, _TOO_MANY)
                 return
 
