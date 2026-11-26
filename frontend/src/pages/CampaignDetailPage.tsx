@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 
 import {
@@ -6,6 +6,7 @@ import {
   expelCampaignMember,
   getCampaign,
   identityOptions,
+  inviteCampaignPlayer,
   markCampaignReady,
   restoreCampaignMember,
   saveIdentity,
@@ -16,6 +17,7 @@ import {
   type Victory,
 } from "../api"
 import { Chronicle } from "./Chronicle"
+import { InvitePanel } from "./InvitePanel"
 import { PlayerIdentity } from "./PlayerIdentity"
 import { RoadPreparation, isKnownHex, toggleOwnRoad } from "./RoadPreparation"
 import { Banner } from "../form"
@@ -23,6 +25,7 @@ import { HexBoard } from "../game/hex/HexBoard"
 import { clientNotice, type MessageKey } from "../i18n/catalog"
 import { useI18n } from "../i18n/language"
 import { presentError } from "../presentError"
+import { useCampaignLive } from "../useCampaignLive"
 
 const PHASE_KEYS: Record<CampaignDetail["phase"], MessageKey> = {
   recruiting: "phaseRecruiting",
@@ -83,6 +86,17 @@ export function CampaignDetailPage() {
     accept(await getCampaign(campaignId))
   }
 
+  const pullLive = useCallback(async () => {
+    if (!id || busy) return
+    try {
+      accept(await getCampaign(id))
+    } catch {
+      /* keep the last good view; next pulse retries */
+    }
+  }, [busy, id])
+
+  useCampaignLive(campaign?.id ?? null, campaign?.revision ?? null, busy, pullLive)
+
   async function applyCampaign(action: () => Promise<CampaignDetail>) {
     if (!campaign || busy) return
     setBusy(true)
@@ -133,6 +147,12 @@ export function CampaignDetailPage() {
       campaign.you?.role === "owner" &&
       seatsFull &&
       allReady,
+  )
+  const canInvite = Boolean(
+    campaign &&
+      campaign.phase === "recruiting" &&
+      (campaign.you?.role === "owner" || campaign.you?.role === "admin") &&
+      activeMembers.length < campaign.rules.seats,
   )
   const known = useMemo(
     () => (campaign ? campaign.hexes.filter(isKnownHex) : []),
@@ -330,6 +350,31 @@ export function CampaignDetailPage() {
             {campaign.phase === "recruiting" ? (
               <>
                 <p className="quiet">{t("recruitingHint")}</p>
+                {canInvite ? (
+                  <InvitePanel
+                    busy={busy}
+                    onInvite={async (alias) => {
+                      try {
+                        accept(
+                          await inviteCampaignPlayer(
+                            campaign.id,
+                            campaign.revision,
+                            alias,
+                          ),
+                        )
+                      } catch (error: unknown) {
+                        if (error instanceof ApiError && error.status === 409) {
+                          try {
+                            await refresh(campaign.id)
+                          } catch {
+                            /* keep invite error */
+                          }
+                        }
+                        throw error
+                      }
+                    }}
+                  />
+                ) : null}
                 {campaign.you?.role === "owner" ? (
                   <button
                     type="button"

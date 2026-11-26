@@ -5,6 +5,7 @@ import { deleteCampaign, listCampaigns, type CampaignSummary } from "../api"
 import { Banner } from "../form"
 import { clientNotice, type MessageKey } from "../i18n/catalog"
 import { useI18n } from "../i18n/language"
+import { subscribeLive } from "../liveEvents"
 import { presentError } from "../presentError"
 
 const CARD_PHOTOS = ["/campaign-hall.jpg", "/campaign-seal.jpg", "/campaign-fortress.jpg"] as const
@@ -38,20 +39,35 @@ export function CampaignListPage() {
   useEffect(() => {
     mounted.current = true
     let current = true
-    listCampaigns()
-      .then((found) => {
+
+    async function load(quiet: boolean) {
+      try {
+        const found = await listCampaigns()
         if (current) {
           setRows(found)
+          if (!quiet) setErrors({})
         }
-      })
-      .catch((error: unknown) => {
-        if (current) {
+      } catch (error: unknown) {
+        if (current && !quiet) {
           setErrors(presentError(error, "campaignsLoadFailed"))
         }
-      })
+      }
+    }
+
+    void load(false)
+    const stop = subscribeLive((event) => {
+      if (
+        event.type === "campaigns" ||
+        event.type === "campaign" ||
+        event.type === "reconnect"
+      ) {
+        void load(true)
+      }
+    })
     return () => {
       current = false
       mounted.current = false
+      stop()
     }
   }, [])
 

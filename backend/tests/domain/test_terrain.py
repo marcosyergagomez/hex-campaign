@@ -558,13 +558,21 @@ def test_roads_delta_ships_only_the_changed_hex_and_road_counters() -> None:
     assert "ana" in ready["road_ready"]
 
 
-def test_a_player_who_looked_at_the_generated_map_knows_every_hex() -> None:
+def test_fog_binds_owner_and_guest_the_same_way() -> None:
     game = create_game("Norte", _table(map_size=271), "ana", "Ana")
     lay(game, generate(271, 2, random.Random(2)), surveyor="ana")
     accept_seat(game, "boa", "Boa")
     begin(_ready_table(game), "ana", [], NOW)
     assert game.phase == "preparing"
-    assert game.discovered["ana"] == set(game.hexes)
+    board = set(game.hexes)
+    forts = {fort.player_id: fort.at() for fort in game.fortresses}
+    assert game.discovered["ana"] == owned(
+        forts["ana"], home_radius(271), board, count=game.home_size,
+    )
+    assert game.discovered["boa"] == owned(
+        forts["boa"], home_radius(271), board, count=game.home_size,
+    )
+    assert len(game.discovered["ana"]) < len(game.hexes)
     assert len(game.discovered["boa"]) < len(game.hexes)
 
 

@@ -16,6 +16,7 @@ from hexcampaign.domain.game import (
     require_owner,
     require_phase,
     require_player,
+    require_staff,
     seated,
 )
 from hexcampaign.domain.hexes import DISK_RADIUS, Hex, angle, disk, distance, neighbors
@@ -77,7 +78,7 @@ def change_rules(
 
 
 def invite_player(game: Game, actor: str, invitee_id: str, alias: str) -> Game:
-    require_owner(game, actor)
+    require_staff(game, actor)
     require_phase(game, "recruiting")
     if not alias or len(alias) > 24:
         raise DomainError("rules_invalid")
@@ -390,13 +391,11 @@ def _territory(game: Game) -> None:
     if game.plots is not None and game.rules.visibility in {"full", "total", "charted"}:
         for player_id in players:
             game.discovered[player_id] = set(game.hexes)
-        _grant_surveyor(game)
         return
     if game.plots is not None and game.rules.visibility == "home":
         board = set(game.hexes)
         for player_id in players:
             game.discovered[player_id] = home_land(game, player_id, board=board)
-        _grant_surveyor(game)
         return
     forts = [(fort.at(), fort.player_id) for fort in game.fortresses]
     if game.rules.visibility == "full":
@@ -471,7 +470,3 @@ def _home_notice(game: Game) -> None:
     for member in seated(game):
         notice(game, "home_land", member.player_id)
 
-
-def _grant_surveyor(game: Game) -> None:
-    if game.surveyor:
-        game.discovered[game.surveyor] = set(game.hexes)

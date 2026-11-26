@@ -15,40 +15,196 @@ const EDGE_STEPS: readonly (readonly [number, number])[] = [
 const WATER = new Set(["rio", "lago"])
 const RIDGE = new Set(["montana", "montana_rocosa"])
 
+type RoadNode = Mark & { road: boolean; fort: boolean }
+
+/**
+ * Road strokes follow arms from junctions, like rivers.
+ * Triangles become a hub (crossing) instead of a bent corridor.
+ * Every road beside a fortress keeps an entrance into the keep.
+ */
 export function roadPaths(
   cells: (Mark & { road: boolean })[],
   size: number,
   anchors: { q: number; r: number }[] = [],
 ): string[] {
   const forts = new Set(anchors.map(key))
-  const roads = new Map(cells.filter((cell) => cell.road || forts.has(key(cell)))
-    .map((cell) => [key(cell), cell]))
-  const paths: string[] = []
-  const connections = new Map<string, Set<string>>()
-  for (const cell of [...roads.values()].sort((a, b) => a.q - b.q || a.r - b.r)) {
-    if (!cell.road) continue
-    const adjacent = linked(cell, roads)
-    for (const other of adjacent) {
-      if (other.road && key(cell) > key(other)) continue
-      const from = connections.get(key(cell)) ?? new Set<string>()
-      const to = connections.get(key(other)) ?? new Set<string>()
-      // Adjacent road hexes can form a tiny triangle without being three separate routes.
-      if ([...from].some((neighbor) => to.has(neighbor))) continue
-      from.add(key(other))
-      to.add(key(cell))
-      connections.set(key(cell), from)
-      connections.set(key(other), to)
-      const dx = other.x - cell.x
-      const dy = other.y - cell.y
-      // Keep the road out of the fortress courtyard, whose normal exit still costs a point.
-      const reach = other.road ? 1 : .72
-      paths.push(`M${cell.x},${cell.y} Q${cell.x + dx * .5 - dy * .045},${cell.y + dy * .5 + dx * .045} ${cell.x + dx * reach},${cell.y + dy * reach}`)
-    }
-    if (!adjacent.length) {
-      paths.push(`M${cell.x - size * .35},${cell.y} Q${cell.x},${cell.y - size * .1} ${cell.x + size * .35},${cell.y}`)
+  const nodes = new Map<string, RoadNode>()
+  for (const cell of cells) {
+    const fort = forts.has(key(cell))
+    if (cell.road || fort) {
+      nodes.set(key(cell), { ...cell, fort })
     }
   }
+  for (const spot of anchors) {
+    if (nodes.has(key(spot))) continue
+    nodes.set(key(spot), {
+      q: spot.q,
+      r: spot.r,
+      ground: "llanura",
+      x: size * Math.sqrt(3) * (spot.q + spot.r / 2),
+      y: size * 1.5 * spot.r,
+      road: false,
+      fort: true,
+    })
+  }
+
+  const graph = roadGraph(nodes)
+  promoteTriangles(graph, nodes)
+
+  const paths: string[] = []
+  const used = new Set<string>()
+  const ordered = [...nodes.values()].sort((left, right) => left.q - right.q || left.r - right.r)
+
+  function degree(id: string) {
+    return graph.get(id)?.size ?? 0
+  }
+
+  function walkArm(startId: string, firstId: string): string[] {
+    const run = [startId, firstId]
+    used.add(roadEdge(startId, firstId))
+    let previous = startId
+    let current = firstId
+    while (degree(current) === 2 && !nodes.get(current)?.fort) {
+      const next = [...(graph.get(current) ?? [])].find((item) => item !== previous)
+      if (!next || used.has(roadEdge(current, next))) break
+      used.add(roadEdge(current, next))
+      run.push(next)
+      previous = current
+      current = next
+    }
+    return run
+  }
+
+  for (const cell of ordered) {
+    const id = key(cell)
+    if (degree(id) === 0) {
+      if (cell.road) {
+        paths.push(
+          `M${cell.x - size * .35},${cell.y} Q${cell.x},${cell.y - size * .1} ${cell.x + size * .35},${cell.y}`,
+        )
+      }
+      continue
+    }
+    if (degree(id) === 2 && !cell.fort) continue
+    for (const next of [...(graph.get(id) ?? [])].sort()) {
+      if (used.has(roadEdge(id, next))) continue
+      paths.push(strokeRoadRun(walkArm(id, next).map((item) => nodes.get(item)!), size))
+    }
+  }
+
+  for (const cell of ordered) {
+    const id = key(cell)
+    for (const next of [...(graph.get(id) ?? [])].sort()) {
+      if (used.has(roadEdge(id, next))) continue
+      const run = walkArm(id, next)
+      while (true) {
+        const head = run[0]
+        const tail = run[run.length - 1]
+        if (head === tail && run.length > 2) break
+        const prev = run[run.length - 2]
+        const step = [...(graph.get(tail) ?? [])].find(
+          (item) => item !== prev && !used.has(roadEdge(tail, item)),
+        )
+        if (!step) break
+        used.add(roadEdge(tail, step))
+        run.push(step)
+        if (step === head) break
+      }
+      paths.push(strokeRoadRun(run.map((item) => nodes.get(item)!), size))
+    }
+  }
+
   return paths
+}
+
+function roadGraph(nodes: Map<string, RoadNode>): Map<string, Set<string>> {
+  const graph = new Map<string, Set<string>>()
+  for (const cell of nodes.values()) {
+    graph.set(key(cell), new Set())
+  }
+  for (const cell of nodes.values()) {
+    for (const other of linked(cell, nodes)) {
+      if (key(cell) >= key(other)) continue
+      // Keep-to-keep never; every road beside a keep joins it.
+      if (cell.fort && other.fort) continue
+      if (!cell.road && !other.road) continue
+      graph.get(key(cell))!.add(key(other))
+      graph.get(key(other))!.add(key(cell))
+    }
+  }
+  return graph
+}
+
+/** Three mutual road hexes read as a crossing, not a bent corridor. */
+function promoteTriangles(
+  graph: Map<string, Set<string>>,
+  nodes: Map<string, RoadNode>,
+) {
+  const roadIds = [...nodes.values()].filter((cell) => cell.road && !cell.fort).map(key)
+  const seen = new Set<string>()
+  for (const a of roadIds) {
+    const aroundA = [...(graph.get(a) ?? [])].filter((id) => nodes.get(id)?.road)
+    for (let i = 0; i < aroundA.length; i += 1) {
+      for (let j = i + 1; j < aroundA.length; j += 1) {
+        const b = aroundA[i]
+        const c = aroundA[j]
+        if (!graph.get(b)?.has(c)) continue
+        const stamp = [a, b, c].sort().join("|")
+        if (seen.has(stamp)) continue
+        seen.add(stamp)
+        const hubId = `hub:${stamp}`
+        const hubCells = [nodes.get(a)!, nodes.get(b)!, nodes.get(c)!]
+        nodes.set(hubId, {
+          q: hubCells[0].q,
+          r: hubCells[0].r,
+          ground: "llanura",
+          x: (hubCells[0].x + hubCells[1].x + hubCells[2].x) / 3,
+          y: (hubCells[0].y + hubCells[1].y + hubCells[2].y) / 3,
+          road: true,
+          fort: false,
+        })
+        graph.set(hubId, new Set())
+        for (const id of [a, b, c]) {
+          for (const other of [a, b, c]) {
+            if (id === other) continue
+            graph.get(id)?.delete(other)
+          }
+          graph.get(id)!.add(hubId)
+          graph.get(hubId)!.add(id)
+        }
+      }
+    }
+  }
+}
+
+function roadEdge(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`
+}
+
+function strokeRoadRun(run: RoadNode[], size: number): string {
+  if (run.length === 0) return ""
+  if (run.length === 1) {
+    const cell = run[0]
+    return `M${cell.x - size * .35},${cell.y} Q${cell.x},${cell.y - size * .1} ${cell.x + size * .35},${cell.y}`
+  }
+  const points = run.map((cell, index) => {
+    if (!cell.fort) return { x: cell.x, y: cell.y }
+    const inward = run[index === 0 ? 1 : index - 1] ?? cell
+    // Stop short of the courtyard; the keep itself is never a road tile.
+    return {
+      x: cell.x + (inward.x - cell.x) * .28,
+      y: cell.y + (inward.y - cell.y) * .28,
+    }
+  })
+  let path = `M${points[0].x},${points[0].y}`
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = points[i - 1]
+    const here = points[i]
+    const dx = here.x - prev.x
+    const dy = here.y - prev.y
+    path += ` Q${prev.x + dx * .5 - dy * .03},${prev.y + dy * .5 + dx * .03} ${here.x},${here.y}`
+  }
+  return path
 }
 
 export function terrainChains(cells: Mark[], grounds: Set<string>): string[] {

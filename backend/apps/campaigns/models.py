@@ -98,6 +98,34 @@ class Invitation(models.Model):
         return f"{self.campaign_id} {self.created_at:%Y-%m-%d}"
 
 
+class Notification(models.Model):
+    """In-app notice for a player. Starts with campaign invites; more kinds follow."""
+
+    KIND_CAMPAIGN_INVITE = "campaign_invite"
+    KIND_TURN = "turn"
+    KIND_BATTLE = "battle"
+    KINDS = (KIND_CAMPAIGN_INVITE, KIND_TURN, KIND_BATTLE)
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    kind = models.CharField(max_length=32)
+    payload = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["user", "read_at", "-created_at"], name="notif_user_unread"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind} {self.user_id}"
+
+
 class CampaignMap(models.Model):
     """A reusable picture of the ground. A started campaign keeps its own copy."""
 

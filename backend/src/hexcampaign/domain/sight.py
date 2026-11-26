@@ -6,6 +6,22 @@ from hexcampaign.domain.terrain import gaze_from
 from hexcampaign.domain.territory import home_land
 
 
+def equalize_fog(game: Game) -> bool:
+    """Fog binds every seat. Drop the legacy surveyor atlas privilege."""
+    if not game.surveyor:
+        return False
+    surveyor = game.surveyor
+    game.surveyor = None
+    if (
+        game.plots is not None
+        and game.rules.visibility == "home"
+        and game.phase not in {"recruiting", "setup"}
+    ):
+        board = set(game.hexes)
+        game.discovered[surveyor] = home_land(game, surveyor, board=board)
+    return True
+
+
 def sees_army(
     game: Game,
     viewer: str,
