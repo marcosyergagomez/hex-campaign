@@ -931,6 +931,47 @@ export async function deleteMap(id: string): Promise<void> {
   })
 }
 
+export async function saveDrawnMap(
+  name: string,
+  size: MapSize,
+  cells: MapCell[],
+  anchors: { q: number; r: number }[],
+): Promise<SavedMap> {
+  return readSavedMap(
+    await request("/api/maps", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ name, size, cells, anchors }),
+    }),
+  )
+}
+
+export async function updateDrawnMap(
+  id: string,
+  name: string,
+  size: MapSize,
+  cells: MapCell[],
+  anchors: { q: number; r: number }[],
+): Promise<SavedMap> {
+  return readSavedMap(
+    await request(`/api/maps/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ name, size, cells, anchors }),
+    }),
+  )
+}
+
+export async function copyMapForEdit(id: string, name?: string): Promise<SavedMap> {
+  return readSavedMap(
+    await request(`/api/maps/${encodeURIComponent(id)}/copy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ name: name ?? null }),
+    }),
+  )
+}
+
 export async function getMap(id: string): Promise<SavedMapDetail> {
   const data = await request(`/api/maps/${encodeURIComponent(id)}`, { method: "GET" })
   const summary = readSavedMap(data)

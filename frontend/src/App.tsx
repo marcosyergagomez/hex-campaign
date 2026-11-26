@@ -5,6 +5,7 @@ import { Gate } from "./Gate"
 import { CampaignDetailPage } from "./pages/CampaignDetailPage"
 import { CampaignListPage } from "./pages/CampaignListPage"
 import { CreateCampaignPage } from "./pages/CreateCampaignPage"
+import { MapEditorPage } from "./pages/MapEditorPage"
 import { MapsPage } from "./pages/MapsPage"
 import { LoginPage } from "./pages/LoginPage"
 import { RegisterPage } from "./pages/RegisterPage"
@@ -20,6 +21,7 @@ export function App() {
       <Route element={<AppShell />}>
         <Route path="/campanas" element={<CampaignListPage />} />
         <Route path="/mapas" element={<MapsPage />} />
+        <Route path="/mapas/editor" element={<MapEditorPage />} />
         <Route path="/campanas/nueva" element={<CreateCampaignPage />} />
         <Route path="/campanas/:id" element={<CampaignDetailPage />} />
       </Route>
