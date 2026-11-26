@@ -52,6 +52,7 @@ export function CampaignDetailPage() {
   const [options, setOptions] = useState<IdentityOptions | null>(null)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const [busy, setBusy] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   useEffect(() => {
     mounted.current = true
@@ -138,6 +139,7 @@ export function CampaignDetailPage() {
   }
 
   const preparing = campaign?.phase === "preparing" && campaign.roads !== null
+  const playing = Boolean(campaign && campaign.phase !== "recruiting")
   const activeMembers = campaign?.members.filter((member) => member.status === "active") ?? []
   const seatsFull = Boolean(campaign && activeMembers.length === campaign.rules.seats)
   const allReady = activeMembers.length > 0 && activeMembers.every((member) => member.ready)
@@ -174,33 +176,86 @@ export function CampaignDetailPage() {
   }
 
   return (
-    <section className="campaign-detail">
-      <header className="stage">
-        <img className="stage-photo" src="/campaign-fortress.jpg" alt="" />
-        <div className="stage-copy">
-          <div>
-            <p className="mark">{t("campaignDetail")}</p>
-            <h1>{campaign?.name ?? t("campaignDetail")}</h1>
-            {campaign ? (
-              <p>
-                {t(statusKey(campaign.phase))}
-                {campaign.phase !== "finished" ? ` · ${t(PHASE_KEYS[campaign.phase])}` : ""}
-              </p>
-            ) : null}
+    <section className={playing ? "campaign-detail is-playing" : "campaign-detail"}>
+      {playing ? (
+        <header className="play-bar">
+          <div className="play-bar-copy">
+            <Link className="text-link play-bar-back" to="/campanas">
+              {t("backToCampaigns")}
+            </Link>
+            <div>
+              <h1>{campaign?.name ?? t("campaignDetail")}</h1>
+              {campaign ? (
+                <p className="play-bar-phase">
+                  {t(statusKey(campaign.phase))}
+                  {campaign.phase !== "finished" ? ` · ${t(PHASE_KEYS[campaign.phase])}` : ""}
+                </p>
+              ) : null}
+            </div>
           </div>
-          <Link className="text-link" to="/campanas">
-            {t("backToCampaigns")}
-          </Link>
-        </div>
-      </header>
+          <button
+            type="button"
+            className="button-quiet"
+            aria-expanded={detailsOpen}
+            onClick={() => setDetailsOpen((value) => !value)}
+          >
+            {t("campaignDetailsButton")}
+          </button>
+        </header>
+      ) : (
+        <header className="stage">
+          <img className="stage-photo" src="/campaign-fortress.jpg" alt="" />
+          <div className="stage-copy">
+            <div>
+              <p className="mark">{t("campaignDetail")}</p>
+              <h1>{campaign?.name ?? t("campaignDetail")}</h1>
+              {campaign ? (
+                <p>
+                  {t(statusKey(campaign.phase))}
+                  {campaign.phase !== "finished" ? ` · ${t(PHASE_KEYS[campaign.phase])}` : ""}
+                </p>
+              ) : null}
+            </div>
+            <Link className="text-link" to="/campanas">
+              {t("backToCampaigns")}
+            </Link>
+          </div>
+        </header>
+      )}
 
       <Banner errors={errors} fields={["form", "session", "campaign", "origin", "csrf", "revision"]} />
 
-      {campaign?.description ? (
+      {!playing && campaign?.description ? (
         <p className="campaign-blurb">{campaign.description}</p>
       ) : null}
 
-      {campaign?.you && options ? (
+      {playing && detailsOpen && campaign ? (
+        <div className="campaign-details-toggle">
+          <div className="detail-grid">
+            <RulesPanel campaign={campaign} />
+            <MembersPanel
+              campaign={campaign}
+              busy={busy}
+              canInvite={false}
+              canStart={false}
+              seatsFull={seatsFull}
+              onInvite={undefined}
+              onRestore={(playerId) => {
+                void applyCampaign(() =>
+                  restoreCampaignMember(campaign.id, campaign.revision, playerId),
+                )
+              }}
+              onExpel={(playerId) => {
+                void applyCampaign(() =>
+                  expelCampaignMember(campaign.id, campaign.revision, playerId),
+                )
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {campaign?.phase === "recruiting" && campaign.you && options ? (
         <PlayerIdentity
           key={campaign.id}
           campaign={campaign}
@@ -210,28 +265,31 @@ export function CampaignDetailPage() {
           busy={busy}
         />
       ) : null}
-      {campaign && campaign.phase !== "recruiting" && campaign.hexes.length > 0 ? (
-        <section className="campaign-map" aria-labelledby="territory-title">
-          <h2 id="territory-title">{t("territoryTitle")}</h2>
-          <p className="hint">{t(preparing ? "roadsHint" : "territoryHint")}</p>
-          {preparing ? (
-            <RoadPreparation
-              campaign={campaign}
-              busy={busy}
-              onChange={action => { void applyCampaign(action) }}
-            />
-          ) : null}
-          <ul className="territory-legend">
-            {campaign.members.filter(member => member.color).map(member => {
-              const faction = options?.factions.find(item => item.id === member.faction)
-              return (
-                <li key={member.player_id}>
-                  <span className="territory-dot" style={{ backgroundColor: member.color }} aria-hidden="true" />
-                  <span><strong>{member.alias}</strong>{faction ? <> · {t(faction.label)}</> : null}</span>
-                </li>
-              )
-            })}
-          </ul>
+      {playing && campaign && campaign.hexes.length > 0 ? (
+        <section className="campaign-map is-play" aria-label={t("territoryTitle")}>
+          <div className="play-map-meta">
+            {preparing ? (
+              <p className="hint">{t("roadsHint")}</p>
+            ) : null}
+            {preparing ? (
+              <RoadPreparation
+                campaign={campaign}
+                busy={busy}
+                onChange={action => { void applyCampaign(action) }}
+              />
+            ) : null}
+            <ul className="territory-legend">
+              {campaign.members.filter(member => member.color).map(member => {
+                const faction = options?.factions.find(item => item.id === member.faction)
+                return (
+                  <li key={member.player_id}>
+                    <span className="territory-dot" style={{ backgroundColor: member.color }} aria-hidden="true" />
+                    <span><strong>{member.alias}</strong>{faction ? <> · {t(faction.label)}</> : null}</span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
           <HexBoard
             cells={known}
             unknown={unknown}
@@ -248,158 +306,187 @@ export function CampaignDetailPage() {
       {campaign?.phase === "recruiting" ? (
         <p className="quiet">{t("mapSealedHint")}</p>
       ) : null}
-      {campaign ? (
+      {campaign?.phase === "recruiting" ? (
         <div className="detail-grid">
-          <article className="detail-panel">
-            <h2>{t("rulesSummary")}</h2>
-            <ul className="detail-list">
-              <li>
-                {t("ruleSeats")}: {campaign.rules.seats}
-              </li>
-              <li>
-                {t("ruleArmies")}: {campaign.rules.armies}
-              </li>
-              <li>
-                {t("ruleMovement")}: {campaign.rules.movement}
-              </li>
-              <li>
-                {t("ruleMapSize")}: {campaign.rules.map_size}
-              </li>
-              <li>
-                {t("ruleVisibility")}: {t(visibilityKey(campaign.rules.visibility))}
-              </li>
-              <li>
-                {t("ruleVictory")}: {t(victoryKey(campaign.rules.victory))}
-              </li>
-              <li>
-                {t("ruleHoldTurns")}: {campaign.rules.hold_turns}
-              </li>
-              <li>
-                {t("rulePlacement")}:{" "}
-                {campaign.rules.placement === "app" ? t("placementApp") : t("placementPlayers")}
-              </li>
-              <li>
-                {t("ruleOrderDays")}: {campaign.rules.order_days}
-              </li>
-              <li>
-                {t("ruleBattleDays")}: {campaign.rules.battle_days}
-              </li>
-              <li>
-                {t("ruleMissedTurns")}: {campaign.rules.missed_turns}
-              </li>
-            </ul>
-          </article>
-          <article className="detail-panel">
-            <h2>{t("membersTitle")}</h2>
-            <ul className="detail-list">
-              {campaign.members.map((member) => {
-                const staff =
-                  campaign.you?.role === "owner" || campaign.you?.role === "admin"
-                const canManage =
-                  staff &&
-                  member.status === "inactive" &&
-                  member.player_id !== campaign.you?.player_id &&
-                  campaign.phase !== "finished"
-                return (
-                  <li key={member.player_id}>
-                    <strong>{member.alias}</strong> · {member.role} · {member.status}
-                    {!member.faction ? <> · {t("identityPending")}</> : null}
-                    {campaign.phase === "recruiting" && member.status === "active" ? (
-                      <> · {member.ready ? t("memberReady") : t("memberNotReady")}</>
-                    ) : null}
-                    {canManage ? (
-                      <span className="member-actions">
-                        <button
-                          type="button"
-                          className="button-quiet"
-                          disabled={busy}
-                          onClick={() => {
-                            void applyCampaign(() =>
-                              restoreCampaignMember(
-                                campaign.id,
-                                campaign.revision,
-                                member.player_id,
-                              ),
-                            )
-                          }}
-                        >
-                          {t("restoreMember")}
-                        </button>
-                        <button
-                          type="button"
-                          className="button-quiet"
-                          disabled={busy}
-                          onClick={() => {
-                            void applyCampaign(() =>
-                              expelCampaignMember(
-                                campaign.id,
-                                campaign.revision,
-                                member.player_id,
-                              ),
-                            )
-                          }}
-                        >
-                          {t("expelMember")}
-                        </button>
-                      </span>
-                    ) : null}
-                  </li>
-                )
-              })}
-            </ul>
-            {campaign.phase === "recruiting" ? (
-              <>
-                <p className="quiet">{t("recruitingHint")}</p>
-                {canInvite ? (
-                  <InvitePanel
-                    busy={busy}
-                    onInvite={async (alias) => {
-                      try {
-                        accept(
-                          await inviteCampaignPlayer(
-                            campaign.id,
-                            campaign.revision,
-                            alias,
-                          ),
-                        )
-                      } catch (error: unknown) {
-                        if (error instanceof ApiError && error.status === 409) {
-                          try {
-                            await refresh(campaign.id)
-                          } catch {
-                            /* keep invite error */
-                          }
+          <RulesPanel campaign={campaign} />
+          <MembersPanel
+            campaign={campaign}
+            busy={busy}
+            canInvite={canInvite}
+            canStart={canStart}
+            seatsFull={seatsFull}
+            onInvite={
+              canInvite
+                ? async (alias) => {
+                    try {
+                      accept(
+                        await inviteCampaignPlayer(
+                          campaign.id,
+                          campaign.revision,
+                          alias,
+                        ),
+                      )
+                    } catch (error: unknown) {
+                      if (error instanceof ApiError && error.status === 409) {
+                        try {
+                          await refresh(campaign.id)
+                        } catch {
+                          /* keep invite error */
                         }
-                        throw error
                       }
-                    }}
-                  />
-                ) : null}
-                {campaign.you?.role === "owner" ? (
-                  <button
-                    type="button"
-                    disabled={busy || !canStart}
-                    onClick={() => {
-                      void applyCampaign(() => startCampaign(campaign.id, campaign.revision))
-                    }}
-                  >
-                    {busy ? t("startingCampaign") : t("startCampaign")}
-                  </button>
-                ) : null}
-                {campaign.you?.role === "owner" && !canStart ? (
-                  <p className="quiet">
-                    {!seatsFull ? t("startNeedSeats") : t("startNeedReady")}
-                  </p>
-                ) : null}
-              </>
-            ) : null}
-          </article>
+                      throw error
+                    }
+                  }
+                : undefined
+            }
+            onStart={() => {
+              void applyCampaign(() => startCampaign(campaign.id, campaign.revision))
+            }}
+            onRestore={(playerId) => {
+              void applyCampaign(() =>
+                restoreCampaignMember(campaign.id, campaign.revision, playerId),
+              )
+            }}
+            onExpel={(playerId) => {
+              void applyCampaign(() =>
+                expelCampaignMember(campaign.id, campaign.revision, playerId),
+              )
+            }}
+          />
         </div>
       ) : null}
       {campaign?.phase === "finished" ? (
         <Chronicle entries={campaign.chronicle} members={campaign.members} />
       ) : null}
     </section>
+  )
+}
+
+function RulesPanel({ campaign }: { campaign: CampaignDetail }) {
+  const { t } = useI18n()
+  return (
+    <article className="detail-panel">
+      <h2>{t("rulesSummary")}</h2>
+      <ul className="detail-list">
+        <li>
+          {t("ruleSeats")}: {campaign.rules.seats}
+        </li>
+        <li>
+          {t("ruleArmies")}: {campaign.rules.armies}
+        </li>
+        <li>
+          {t("ruleMovement")}: {campaign.rules.movement}
+        </li>
+        <li>
+          {t("ruleMapSize")}: {campaign.rules.map_size}
+        </li>
+        <li>
+          {t("ruleVisibility")}: {t(visibilityKey(campaign.rules.visibility))}
+        </li>
+        <li>
+          {t("ruleVictory")}: {t(victoryKey(campaign.rules.victory))}
+        </li>
+        <li>
+          {t("ruleHoldTurns")}: {campaign.rules.hold_turns}
+        </li>
+        <li>
+          {t("rulePlacement")}:{" "}
+          {campaign.rules.placement === "app" ? t("placementApp") : t("placementPlayers")}
+        </li>
+        <li>
+          {t("ruleOrderDays")}: {campaign.rules.order_days}
+        </li>
+        <li>
+          {t("ruleBattleDays")}: {campaign.rules.battle_days}
+        </li>
+        <li>
+          {t("ruleMissedTurns")}: {campaign.rules.missed_turns}
+        </li>
+      </ul>
+    </article>
+  )
+}
+
+function MembersPanel({
+  campaign,
+  busy,
+  canInvite,
+  canStart,
+  seatsFull,
+  onInvite,
+  onStart,
+  onRestore,
+  onExpel,
+}: {
+  campaign: CampaignDetail
+  busy: boolean
+  canInvite: boolean
+  canStart: boolean
+  seatsFull: boolean
+  onInvite?: (alias: string) => Promise<void>
+  onStart?: () => void
+  onRestore: (playerId: string) => void
+  onExpel: (playerId: string) => void
+}) {
+  const { t } = useI18n()
+  return (
+    <article className="detail-panel">
+      <h2>{t("membersTitle")}</h2>
+      <ul className="detail-list">
+        {campaign.members.map((member) => {
+          const staff =
+            campaign.you?.role === "owner" || campaign.you?.role === "admin"
+          const canManage =
+            staff &&
+            member.status === "inactive" &&
+            member.player_id !== campaign.you?.player_id &&
+            campaign.phase !== "finished"
+          return (
+            <li key={member.player_id}>
+              <strong>{member.alias}</strong> · {member.role} · {member.status}
+              {!member.faction ? <> · {t("identityPending")}</> : null}
+              {campaign.phase === "recruiting" && member.status === "active" ? (
+                <> · {member.ready ? t("memberReady") : t("memberNotReady")}</>
+              ) : null}
+              {canManage ? (
+                <span className="member-actions">
+                  <button
+                    type="button"
+                    className="button-quiet"
+                    disabled={busy}
+                    onClick={() => onRestore(member.player_id)}
+                  >
+                    {t("restoreMember")}
+                  </button>
+                  <button
+                    type="button"
+                    className="button-quiet"
+                    disabled={busy}
+                    onClick={() => onExpel(member.player_id)}
+                  >
+                    {t("expelMember")}
+                  </button>
+                </span>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+      {campaign.phase === "recruiting" ? (
+        <>
+          <p className="quiet">{t("recruitingHint")}</p>
+          {canInvite && onInvite ? <InvitePanel busy={busy} onInvite={onInvite} /> : null}
+          {campaign.you?.role === "owner" && onStart ? (
+            <button type="button" disabled={busy || !canStart} onClick={onStart}>
+              {busy ? t("startingCampaign") : t("startCampaign")}
+            </button>
+          ) : null}
+          {campaign.you?.role === "owner" && !canStart ? (
+            <p className="quiet">{!seatsFull ? t("startNeedSeats") : t("startNeedReady")}</p>
+          ) : null}
+        </>
+      ) : null}
+    </article>
   )
 }
 
