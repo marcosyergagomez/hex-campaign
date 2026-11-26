@@ -29,7 +29,7 @@ _BODY_LIMITED = {
 }
 # Auth signup/confirm stay tightly capped. Gameplay posts (roads, orders) are
 # frequent, so they use a separate higher ceiling instead of the account budget.
-_ACCOUNT_LIMITED = {"/api/users", "/api/users/verify-email"}
+_ACCOUNT_LIMITED = {"/api/users", "/api/users/verify-email", "/api/profile"}
 _PLAY_PREFIXES = ("/api/campaigns", "/api/maps", "/api/invitations")
 _MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _TOO_MANY = "Demasiados intentos. Prueba de nuevo en unos minutos."
@@ -115,6 +115,8 @@ def _error_field(path: str) -> str:
         return "token"
     if normalized.startswith("/api/session"):
         return "credentials"
+    if normalized.startswith("/api/profile"):
+        return "alias"
     if normalized.startswith("/api/campaigns") or normalized.startswith("/api/invitations"):
         return "campaign"
     if normalized.startswith("/api/maps"):

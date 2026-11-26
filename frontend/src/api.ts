@@ -297,6 +297,7 @@ export type CampaignMember = {
   status: string
   faction: string
   color: string
+  ready: boolean
 }
 
 export type CampaignHex = ({ known: true; owner_id: string | null } & MapCell)
@@ -346,6 +347,7 @@ export type CampaignDetail = {
   fortresses: { q: number; r: number; player_id: string }[]
   chronicle: ChronicleEntry[]
   road_ready: string[]
+  lobby_ready: string[]
   roads: RoadPrep | null
 }
 
@@ -353,8 +355,9 @@ export const DEFAULT_CAMPAIGN_RULES: CampaignRules = {
   seats: 2,
   armies: 1,
   movement: 3,
-  map_size: 19,
-  visibility: "full",
+  // Small table disk (radius 9). Tiny disks like 19 cannot host fortresses.
+  map_size: 271,
+  visibility: "home",
   victory: "armies",
   hold_turns: 3,
   placement: "app",
@@ -486,6 +489,7 @@ function readMember(value: unknown): CampaignMember | null {
   }
   const record = value as Record<string, unknown>
   const { player_id, alias, role, status, faction, color } = record
+  const ready = record.ready === true
   if (
     typeof player_id !== "string" ||
     player_id.length === 0 ||
@@ -505,7 +509,7 @@ function readMember(value: unknown): CampaignMember | null {
   ) {
     return null
   }
-  return { player_id, alias, role, status, faction, color }
+  return { player_id, alias, role, status, faction, color, ready }
 }
 
 function readCampaignHex(value: unknown): CampaignHex | null {
@@ -568,7 +572,10 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
   const hexes: CampaignHex[] = []
   const fortresses: CampaignDetail["fortresses"] = []
   if (record.joined) {
-    if (!you || !Array.isArray(record.hexes) || record.hexes.length !== rules.map_size ||
+    // Recruiting seals the atlas (empty hexes). Drawn atlases may keep a subset later.
+    if (!you || !Array.isArray(record.hexes) ||
+      (record.hexes.length < 1 && record.phase !== "recruiting") ||
+      record.hexes.length > rules.map_size ||
       !Array.isArray(record.fortresses) || record.fortresses.length > 8) return null
     for (const value of record.hexes) {
       const cell = readCampaignHex(value)
@@ -582,13 +589,15 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
       if (!spot || !value || typeof value !== "object" || !("player_id" in value) ||
         typeof value.player_id !== "string" ||
         !members.some(member => member.player_id === value.player_id) ||
-        !hexes.some(cell => cell.q === spot.q && cell.r === spot.r && cell.known)) return null
+        !hexes.some(cell => cell.q === spot.q && cell.r === spot.r)) return null
       fortresses.push({ ...spot, player_id: value.player_id })
     }
   }
   const road_ready = readIdList(record.road_ready)
+  const lobby_ready = readIdList(record.lobby_ready)
   const roads = readRoadPrep(record.roads)
-  if (road_ready === null || (record.phase === "preparing" && record.joined && roads === null)) {
+  if (road_ready === null || lobby_ready === null ||
+    (record.phase === "preparing" && record.joined && roads === null)) {
     return null
   }
   return {
@@ -606,6 +615,7 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
     fortresses,
     chronicle: record.phase === "finished" ? readChronicle(record.chronicle) : [],
     road_ready: road_ready ?? [],
+    lobby_ready: lobby_ready ?? [],
     roads: record.phase === "preparing" ? roads : null,
   }
 }
@@ -795,6 +805,59 @@ export async function getCampaign(id: string): Promise<CampaignDetail> {
   return campaign
 }
 
+export async function deleteCampaign(id: string, confirmName: string): Promise<void> {
+  await request(`/api/campaigns/${encodeURIComponent(id)}/scrap`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...csrfHeaders(),
+    },
+    body: JSON.stringify({ confirm_name: confirmName }),
+  })
+}
+
+export async function restoreCampaignMember(
+  id: string,
+  revision: number,
+  playerId: string,
+): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(
+    await request(`/api/campaigns/${encodeURIComponent(id)}/restore`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...csrfHeaders(),
+      },
+      body: JSON.stringify({ revision, player_id: playerId }),
+    }),
+  )
+  if (!campaign) {
+    throw new ApiError(200, {})
+  }
+  return campaign
+}
+
+export async function expelCampaignMember(
+  id: string,
+  revision: number,
+  playerId: string,
+): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(
+    await request(`/api/campaigns/${encodeURIComponent(id)}/expel`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...csrfHeaders(),
+      },
+      body: JSON.stringify({ revision, player_id: playerId }),
+    }),
+  )
+  if (!campaign) {
+    throw new ApiError(200, {})
+  }
+  return campaign
+}
+
 export async function identityOptions(): Promise<IdentityOptions> {
   const data = await request("/api/campaign-identity", { method: "GET" })
   if (!data || typeof data !== "object" || !("factions" in data) || !Array.isArray(data.factions) ||
@@ -829,6 +892,37 @@ export async function saveIdentity(
     headers: { "Content-Type": "application/json", ...csrfHeaders() },
     body: JSON.stringify({ revision, faction, color }),
   }))
+  if (!campaign) throw new ApiError(200, {})
+  return campaign
+}
+
+export async function markCampaignReady(
+  id: string,
+  revision: number,
+): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(
+    await request(`/api/campaigns/${encodeURIComponent(id)}/ready`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ revision }),
+    }),
+  )
+  if (!campaign) throw new ApiError(200, {})
+  return campaign
+}
+
+export async function startCampaign(
+  id: string,
+  revision: number,
+  admins: string[] = [],
+): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(
+    await request(`/api/campaigns/${encodeURIComponent(id)}/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ revision, admins }),
+    }),
+  )
   if (!campaign) throw new ApiError(200, {})
   return campaign
 }

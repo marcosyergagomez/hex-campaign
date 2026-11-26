@@ -3,7 +3,14 @@ import { useI18n } from "./i18n/language"
 
 export function Banner({ errors, fields }: { errors: FieldErrors; fields?: string[] }) {
   const { text } = useI18n()
-  const names = fields ?? Object.keys(errors)
+  // Prefer the caller's order, then any extra server fields so nothing is hidden.
+  const preferred = fields ?? []
+  const names = [
+    ...preferred.filter((name) => (errors[name]?.length ?? 0) > 0),
+    ...Object.keys(errors).filter(
+      (name) => !preferred.includes(name) && (errors[name]?.length ?? 0) > 0,
+    ),
+  ]
   const messages = names.flatMap((name) => errors[name] ?? []).map(text)
   if (messages.length === 0) {
     return null

@@ -84,6 +84,10 @@ def invite_player(game: Game, actor: str, invitee_id: str, alias: str) -> Game:
     existing = find_member(game, invitee_id)
     if existing is not None and existing.status == "expelled":
         raise DomainError("expelled")
+    if existing is not None and existing.status == "inactive":
+        notice(game, "invited", invitee_id, alias=alias)
+        remember(game, "invited", player_id=invitee_id)
+        return bump(game)
     if existing is not None:
         raise DomainError("already_joined")
     if len(seated(game)) >= game.rules.seats:
@@ -100,6 +104,12 @@ def accept_seat(game: Game, player_id: str, alias: str) -> Game:
     existing = find_member(game, player_id)
     if existing is not None and existing.status == "expelled":
         raise DomainError("expelled")
+    if existing is not None and existing.status == "inactive":
+        existing.status = "active"
+        existing.cause = ""
+        existing.alias = alias
+        remember(game, "joined", player_id=player_id)
+        return bump(game)
     if existing is not None:
         raise DomainError("already_joined")
     if len(seated(game)) >= game.rules.seats:
@@ -120,6 +130,23 @@ def choose_identity(game: Game, actor: str, faction: str, color: str) -> Game:
     if any(other.player_id != actor and other.color == color for other in game.members):
         raise DomainError("color_taken")
     member.faction, member.color = faction, color
+    # Changing the banner after marking ready puts the seat back in drafting.
+    game.lobby_ready.discard(actor)
+    return bump(game)
+
+
+def mark_ready(game: Game, actor: str) -> Game:
+    """Player locks their seat for kickoff after choosing race and colour."""
+    require_phase(game, "recruiting")
+    member = require_player(game, actor)
+    if member.status != "active":
+        raise DomainError("forbidden")
+    if game.identity_required and (not member.faction or not member.color):
+        raise DomainError("identity_required")
+    if actor in game.lobby_ready:
+        return game
+    game.lobby_ready.add(actor)
+    remember(game, "lobby_ready", player_id=actor)
     return bump(game)
 
 
@@ -129,14 +156,19 @@ def begin(game: Game, actor: str, admin_ids: list[str], now: datetime) -> Game:
     playing = seated(game)
     if len(playing) < 2 or len(playing) != game.rules.seats:
         raise DomainError("phase_invalid")
-    if game.identity_required and any(not member.faction or not member.color for member in playing):
+    active = [member for member in playing if member.status == "active"]
+    if game.identity_required and any(not member.faction or not member.color for member in active):
         raise DomainError("identity_required")
+    waiting = {member.player_id for member in active}
+    if not waiting or not waiting <= game.lobby_ready:
+        raise DomainError("lobby_not_ready")
     known = {member.player_id for member in playing}
     if any(player_id not in known for player_id in admin_ids):
         raise DomainError("forbidden")
     for member in playing:
         if member.player_id in admin_ids and member.role != "owner":
             member.role = "admin"
+    game.lobby_ready = set()
     remember(game, "started", player_id=actor, placement=game.rules.placement)
     if game.rules.placement == "app":
         _deploy(game)
@@ -241,7 +273,11 @@ def _reject_overlap(game: Game, actor: str, cells: set[Hex]) -> None:
 
 
 def _open_player_homes(game: Game) -> None:
-    """Carve each seat a pre-set home disk; players must place inside it."""
+    """Carve each seat a pre-set home disk; players must place inside it.
+
+    During placing there is no fortress yet, so the home disk is staged in
+    `discovered` until close_placement replaces it with real fog-of-war.
+    """
     players = seated(game)
     centers = _seat_centers(game, players)
     game.anchors = list(centers)

@@ -14,10 +14,18 @@ const PREVIEW = [
   { q: 0, r: 1, ground: "llanura" },
 ].map((cell, index) => ({ ...cell, road: false, bridge: false, owner_id: index < 5 ? "preview" : null }))
 
-export function PlayerIdentity({ campaign, options, onSave }: {
+export function PlayerIdentity({
+  campaign,
+  options,
+  onSave,
+  onReady,
+  busy = false,
+}: {
   campaign: CampaignDetail
   options: IdentityOptions
   onSave: (faction: string, color: string) => Promise<void>
+  onReady?: () => Promise<void>
+  busy?: boolean
 }) {
   const { t } = useI18n()
   const [faction, setFaction] = useState(campaign.you?.faction ?? "")
@@ -34,10 +42,22 @@ export function PlayerIdentity({ campaign, options, onSave }: {
     setFaction(campaign.you?.faction ?? "")
     setColor(campaign.you?.color ?? "")
   }, [campaign.you?.faction, campaign.you?.color])
+  const recruiting = campaign.phase === "recruiting"
   const editable = campaign.you?.status === "active" && campaign.phase !== "finished" &&
-    (campaign.phase === "recruiting" || (!campaign.you.faction && !campaign.you.color))
+    (recruiting || (!campaign.you.faction && !campaign.you.color))
   const takenBy = (value: string) => campaign.members.find(
     member => member.player_id !== campaign.you?.player_id && member.color === value,
+  )
+  const canReady = Boolean(
+    onReady &&
+      recruiting &&
+      campaign.you?.status === "active" &&
+      !campaign.you.ready &&
+      faction &&
+      color &&
+      campaign.you.faction === faction &&
+      campaign.you.color === color &&
+      !takenBy(color),
   )
 
   async function submit(event: FormEvent) {
@@ -60,6 +80,20 @@ export function PlayerIdentity({ campaign, options, onSave }: {
     }
   }
 
+  async function markReady() {
+    if (!onReady || !canReady || pending || busy) return
+    setPending(true)
+    setErrors({})
+    try {
+      await onReady()
+      if (mounted.current) setSaved(false)
+    } catch (error: unknown) {
+      if (mounted.current) setErrors(presentError(error, "lobbyReadyFailed"))
+    } finally {
+      if (mounted.current) setPending(false)
+    }
+  }
+
   return (
     <section className="detail-panel player-identity" aria-labelledby="identity-title">
       <div className="identity-copy">
@@ -68,7 +102,7 @@ export function PlayerIdentity({ campaign, options, onSave }: {
         <form onSubmit={submit} noValidate>
           <SelectField
             label={t("identityRace")} name="faction" value={faction} error={errors.faction}
-            disabled={pending || !editable}
+            disabled={pending || busy || !editable}
             options={[
               { value: "", label: t("choose") },
               ...options.factions.map(item => ({
@@ -78,7 +112,7 @@ export function PlayerIdentity({ campaign, options, onSave }: {
             ]}
             onChange={value => { setFaction(value); setSaved(false) }}
           />
-          <fieldset className="identity-palette" disabled={pending || !editable}>
+          <fieldset className="identity-palette" disabled={pending || busy || !editable}>
             <legend className="label-text">{t("identityColor")}</legend>
             <div className="identity-colors">
               {options.colors.map(item => {
@@ -101,11 +135,19 @@ export function PlayerIdentity({ campaign, options, onSave }: {
           </fieldset>
           <Banner errors={errors} fields={Object.keys(errors).filter(key => key !== "faction")} />
           {editable ? (
-            <button type="submit" disabled={pending || !faction || !color || Boolean(takenBy(color))}>
-              {t(pending ? "identitySaving" : "identitySave")}
+            <button type="submit" disabled={pending || busy || !faction || !color || Boolean(takenBy(color))}>
+              {t(pending && !canReady ? "identitySaving" : "identitySave")}
             </button>
           ) : null}
           {saved ? <p className="quiet" role="status">{t("identitySaved")}</p> : null}
+          {canReady ? (
+            <button type="button" disabled={pending || busy} onClick={() => { void markReady() }}>
+              {pending ? t("lobbyReadySaving") : t("lobbyReady")}
+            </button>
+          ) : null}
+          {campaign.you?.ready && recruiting ? (
+            <p className="quiet" role="status">{t("lobbyReadyDone")}</p>
+          ) : null}
         </form>
       </div>
       <figure className="identity-preview">

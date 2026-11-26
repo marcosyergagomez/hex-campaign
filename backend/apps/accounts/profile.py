@@ -7,6 +7,7 @@ from django.db.models.functions import Lower
 from django.utils import translation
 
 from apps.accounts.models import User
+from apps.accounts.passwords import check_user_password, set_user_password
 from apps.accounts.validation import (
     MAX_PASSWORD_LENGTH,
     PASSWORD_TOO_LONG,
@@ -21,6 +22,14 @@ class ProfileRejected(Exception):
     def __init__(self, errors: dict[str, list[str]]) -> None:
         self.errors = errors
         super().__init__("profile")
+
+
+class ProfileUpdate:
+    """Saved row plus whether the password (and thus every cookie) changed."""
+
+    def __init__(self, user: User, *, password_changed: bool) -> None:
+        self.user = user
+        self.password_changed = password_changed
 
 
 def public_profile(user: User) -> dict[str, str]:
@@ -39,29 +48,20 @@ def update_profile(
     sex: object,
     password: object = None,
     current_password: object = None,
-) -> User:
+) -> ProfileUpdate:
     errors: dict[str, list[str]] = {}
+    next_alias = ""
     if not isinstance(alias, str):
         errors["alias"] = alias_errors("").get("alias", ["El alias no es válido."])
     else:
         next_alias = canonical_alias(alias)
         errors.update(alias_errors(next_alias))
-        taken = (
-            User.objects.annotate(alias_key=Lower("alias"))
-            .filter(alias_key=next_alias.lower())
-            .exclude(pk=user.pk)
-            .exists()
-        )
-        if taken:
-            errors["alias"] = ["Ese alias ya está en uso."]
 
     if not isinstance(sex, str) or sex not in Sex.values:
         errors["sex"] = [SEX_MESSAGE]
 
     changing_password = password not in (None, "")
     if changing_password:
-        if not isinstance(current_password, str) or not user.check_password(current_password):
-            errors["current_password"] = ["La contraseña actual no es correcta."]
         if not isinstance(password, str):
             errors["password"] = [PASSWORD_TOO_LONG]
         elif len(password) > MAX_PASSWORD_LENGTH:
@@ -72,41 +72,73 @@ def update_profile(
                     validate_password(password, user=user)
             except ValidationError as exc:
                 errors["password"] = list(exc.messages)
+        if not isinstance(current_password, str) or not current_password:
+            errors.setdefault("current_password", ["La contraseña actual no es correcta."])
 
-    if errors:
+    if errors and not changing_password:
         raise ProfileRejected(errors)
 
-    assert isinstance(alias, str) and isinstance(sex, str)
-    next_alias = canonical_alias(alias)
     with transaction.atomic():
-        user.alias = next_alias
-        user.sex = sex
+        locked = User.objects.select_for_update().filter(pk=user.pk).first()
+        if locked is None or not locked.is_active or locked.email_verified_at is None:
+            raise ProfileRejected({"session": ["La sesión no es válida."]})
+
+        if next_alias and "alias" not in errors:
+            taken = (
+                User.objects.annotate(alias_key=Lower("alias"))
+                .filter(alias_key=next_alias.lower())
+                .exclude(pk=locked.pk)
+                .exists()
+            )
+            if taken:
+                errors["alias"] = ["Ese alias ya está en uso."]
+
+        if changing_password and "current_password" not in errors:
+            assert isinstance(current_password, str)
+            if not check_user_password(locked, current_password):
+                errors["current_password"] = ["La contraseña actual no es correcta."]
+
+        if errors:
+            raise ProfileRejected(errors)
+
+        assert isinstance(sex, str)
+        locked.alias = next_alias
+        locked.sex = sex
         if changing_password:
             assert isinstance(password, str)
-            user.set_password(password)
-            user.save()
+            set_user_password(locked, password)
+            # Full save so password-change hooks revoke every prior cookie.
+            locked.save()
         else:
-            user.save(update_fields=["alias", "sex"])
-        _mirror_alias(user)
-    return user
+            locked.save(update_fields=["alias", "sex"])
+        _mirror_alias(locked)
+        return ProfileUpdate(locked, password_changed=changing_password)
 
 
 def _mirror_alias(user: User) -> None:
-    """Keep seat rows and living campaign documents in sync with the account alias."""
+    """Keep seat rows and living campaign documents in sync with the account alias.
+
+    Campaigns are locked in id order after the user row, matching deactivate_account.
+    """
     from apps.campaigns.models import Campaign, Seat
     from hexcampaign.domain.errors import DomainError
     from hexcampaign.domain.game import from_dict, to_dict
 
     Seat.objects.filter(user=user).update(alias=user.alias)
-    campaign_ids = Seat.objects.filter(user=user).values_list("campaign_id", flat=True)
-    for campaign in Campaign.objects.filter(pk__in=campaign_ids).iterator():
+    campaign_ids = sorted(
+        Seat.objects.filter(user=user).values_list("campaign_id", flat=True),
+        key=str,
+    )
+    player_id = str(user.pk)
+    for campaign_id in campaign_ids:
+        campaign = Campaign.objects.select_for_update().get(pk=campaign_id)
         try:
             game = from_dict(campaign.state)
         except DomainError:
             continue
         changed = False
         for member in game.members:
-            if member.player_id == str(user.pk) and member.alias != user.alias:
+            if member.player_id == player_id and member.alias != user.alias:
                 member.alias = user.alias
                 changed = True
         if changed:

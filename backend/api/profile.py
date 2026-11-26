@@ -6,7 +6,9 @@ from pydantic import BaseModel
 
 from api.django_db import django_sync
 from api.player_gate import reader, writer
+from api.player_session import set_session_cookies
 from apps.accounts.profile import ProfileRejected, public_profile, update_profile
+from apps.accounts.sessions import open_session
 
 router = APIRouter()
 
@@ -55,4 +57,8 @@ def write_profile(payload: ProfilePayload, request: Request) -> JSONResponse:
         )
     except ProfileRejected as rejected:
         return JSONResponse(status_code=400, content={"errors": rejected.errors})
-    return JSONResponse(public_profile(updated))
+    response = JSONResponse(public_profile(updated.user))
+    if updated.password_changed:
+        # Password save revoked every cookie; mint a fresh one for this browser.
+        set_session_cookies(response, open_session(updated.user))
+    return response

@@ -37,14 +37,23 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
             "battle_days": game.rules.battle_days,
             "missed_turns": game.rules.missed_turns,
         },
-        "you": None if member is None else _you(member),
-        "members": [_member_view(item, staff or item.player_id == viewer) for item in game.members],
-        "hexes": [
+        "you": None if member is None else _you(member, game),
+        "members": [
+            _member_view(item, game, staff or item.player_id == viewer) for item in game.members
+        ],
+        # The atlas stays sealed until kickoff; nobody peeks during recruiting.
+        "hexes": []
+        if game.phase == "recruiting"
+        else [
             _hex_view(game, viewer, cell, owners.get(cell), home=home, board=board)
             for cell in game.hexes
         ],
-        "armies": _armies(game, viewer, home=home, board=board),
-        "fortresses": _fortresses(game, viewer, home=home, board=board),
+        "armies": []
+        if game.phase == "recruiting"
+        else _armies(game, viewer, home=home, board=board),
+        "fortresses": []
+        if game.phase == "recruiting"
+        else _fortresses(game, viewer, home=home, board=board),
         "orders": {
             army_id: [{"q": cell.q, "r": cell.r} for cell in path]
             for army_id, path in game.orders.get(viewer, {}).items()
@@ -61,6 +70,7 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
         "orders_due": game.phase == "orders"
         and overdue(game.orders_opened_at, game.rules.order_days, now),
         "road_ready": sorted(game.road_ready),
+        "lobby_ready": sorted(game.lobby_ready) if game.phase == "recruiting" else [],
         "roads": _roads_view(game, viewer),
     }
     return body
@@ -126,7 +136,7 @@ def _owners_for(
     return owners
 
 
-def _you(member) -> dict[str, object]:
+def _you(member, game: Game) -> dict[str, object]:
     return {
         "player_id": member.player_id,
         "alias": member.alias,
@@ -135,10 +145,11 @@ def _you(member) -> dict[str, object]:
         "missed": member.missed,
         "faction": member.faction,
         "color": member.color,
+        "ready": member.player_id in game.lobby_ready,
     }
 
 
-def _member_view(member, show_missed: bool) -> dict[str, object]:
+def _member_view(member, game: Game, show_missed: bool) -> dict[str, object]:
     shown = {
         "player_id": member.player_id,
         "alias": member.alias,
@@ -146,6 +157,7 @@ def _member_view(member, show_missed: bool) -> dict[str, object]:
         "status": member.status,
         "faction": member.faction,
         "color": member.color,
+        "ready": member.player_id in game.lobby_ready,
     }
     if show_missed:
         shown["missed"] = member.missed

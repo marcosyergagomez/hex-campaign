@@ -1,9 +1,9 @@
 import type { MapCell } from "../../api"
 
 export const EARTH: Record<string, string> = {
-  llanura: "#c6b580", colina: "#b2a477", bosque: "#9b9b68",
+  llanura: "#c6b580", colina: "#a1996c", bosque: "#9b9b68",
   bosque_profundo: "#7e895d", montana: "#a39980", montana_rocosa: "#92928b",
-  desierto: "#d5bd87", tundra: "#c6c9bc", orilla: "#aaa477",
+  desierto: "#dcc484", tundra: "#c6c9bc", orilla: "#aaa477",
   rio: "#b1ac7f", pantano: "#899572", lago: "#386575", playa: "#d3c295",
   acantilado: "#a69a80", mina: "#b4a17b", campo: "#bbaa70",
 }
@@ -29,6 +29,12 @@ export function ArtDefinitions({ id, size }: { id: string; size: number }) {
       </radialGradient>
       <linearGradient id={`${id}-slope`} x1="0" y1="0" x2="1" y2="1">
         <stop stopColor="#ddd4b5" /><stop offset=".45" stopColor="#a69d84" /><stop offset="1" stopColor="#625e50" />
+      </linearGradient>
+      <linearGradient id={`${id}-hill-lit`} x1="0" y1="0" x2=".85" y2="1">
+        <stop stopColor="#efe6c4" /><stop offset=".4" stopColor="#b7ae86" /><stop offset="1" stopColor="#5f5a45" />
+      </linearGradient>
+      <linearGradient id={`${id}-dune-lit`} x1="0" y1="0" x2="1" y2="1">
+        <stop stopColor="#f3e2a8" /><stop offset=".45" stopColor="#d4b05a" /><stop offset="1" stopColor="#9a7535" />
       </linearGradient>
       <pattern id={`${id}-paper`} width={size * 8} height={size * 8} patternUnits="userSpaceOnUse">
         <image href="/terrain/llanura.jpg" width={size * 8} height={size * 8} opacity=".38" />
@@ -62,10 +68,20 @@ export function ArtDefinitions({ id, size }: { id: string; size: number }) {
         <path d="M-20-6-17-10-10-11-6-17 2-15 6-19 11-16 18-13 9-8 0-10-9-6Z" fill="#a8aa83" />
         <path d="M-12-8-13-4-10 3M-3-10-5-3-1 1M6-11 7-6 5-2 8 3M14-11 13-5 15 1" stroke="#c1b69a" strokeWidth=".7" fill="none" />
       </symbol>
-      <symbol id={`${id}-hill`} viewBox="-20 -15 40 20">
-        <ellipse cy="1" rx="19" ry="3" fill="#665f3c" opacity=".16" />
-        <path d="M-20 1C-14-2-9-16-2-12S9-1 20 2Q4-3-3 1" fill={`url(#${id}-slope)`} opacity=".6" />
-        <path d="M-15-2Q-7-15 1-6M-5-4Q2-9 10 0M-12 1Q-7-6-4-5" fill="none" stroke="#8e8966" strokeWidth=".45" opacity=".65" />
+      <symbol id={`${id}-hill`} viewBox="-22 -24 44 32">
+        <ellipse cy="4" rx="19" ry="3.5" fill="#3a372c" opacity=".24" />
+        <path d="M-19 4C-13-1-9-18-1-20S11-4 20 4Z" fill={`url(#${id}-hill-lit)`} stroke="#5a5546" strokeWidth=".45" opacity=".92" />
+        <path d="M-1-20 3-8 11-1 20 4 7 1-1-6Z" fill="#464236" opacity=".42" />
+        <path d="M-9-10Q-1-22 5-9" fill="none" stroke="#efe6c8" strokeWidth="1.1" opacity=".62" />
+        <path d="M-16 4C-11 1-7-9 1-10S12 1 16 4Z" fill={`url(#${id}-hill-lit)`} stroke="#5f5a48" strokeWidth=".4" opacity=".88" />
+        <path d="M1-10 5-3 16 4 4 1Z" fill="#4a4638" opacity=".38" />
+      </symbol>
+      <symbol id={`${id}-dune`} viewBox="-20 -12 40 18">
+        <ellipse cy="3" rx="17" ry="3" fill="#7a5f2e" opacity=".16" />
+        <path d="M-19 3C-11-1-5-9 2-8S13 0 19 3Q2 0-19 3" fill={`url(#${id}-dune-lit)`} stroke="#b08a42" strokeWidth=".45" opacity=".9" />
+        <path d="M2-8 7-1 19 3 5 0Z" fill="#8f6c36" opacity=".4" />
+        <path d="M-7-2Q2-9 9-1" fill="none" stroke="#f4e6b8" strokeWidth="1" opacity=".7" />
+        <path d="M-14 3C-9 1-5-4 1-3S10 2 13 3Z" fill={`url(#${id}-dune-lit)`} opacity=".82" stroke="#b89550" strokeWidth=".35" />
       </symbol>
       <symbol id={`${id}-reeds`} viewBox="-8 -12 16 16">
         <path d="M-8 2Q0 5 8 1M-3 0-5-9M0 1V-12M3 0 6-8" fill="none" stroke="#555e3b" strokeWidth="1" />
@@ -132,23 +148,31 @@ export function noise(q: number, r: number, index: number): number {
 export function ornaments(cell: MapCell): Ornament[] {
   const forest = cell.ground === "bosque" || cell.ground === "bosque_profundo"
   const mountain = cell.ground === "montana" || cell.ground === "montana_rocosa"
-  const count = forest ? 32 : mountain ? 7 : cell.ground === "pantano" ? 14 : cell.ground === "colina" ? 7 : 14
+  const hills = cell.ground === "colina"
+  const desert = cell.ground === "desierto"
+  const count = forest ? 32 : mountain ? 7 : hills ? 5 : desert ? 5 : cell.ground === "pantano" ? 14 : 14
   return Array.from({ length: count }, (_, i) => {
-    const x = (noise(cell.q, cell.r, i * 3) - .5) * 43
-    const y = (noise(cell.q, cell.r, i * 3 + 1) - .5) * 38 + 9
+    const x = (noise(cell.q, cell.r, i * 3) - .5) * (hills || desert ? 38 : 43)
+    const y = (noise(cell.q, cell.r, i * 3 + 1) - .5) * (hills || desert ? 32 : 38) + (hills ? 7 : 9)
     const variant = noise(cell.q, cell.r, i * 3 + 2)
     let kind = "grass"
     if (forest) kind = cell.ground === "bosque_profundo" || variant > .75 ? "pine" : "tree"
     else if (mountain) kind = cell.ground === "montana_rocosa" ? "crag" : "peak"
     else if (cell.ground === "acantilado") kind = "cliff"
-    else if (cell.ground === "colina") kind = "hill"
+    else if (hills) kind = i === count - 1 && variant > .5 ? "rock" : "hill"
     else if (cell.ground === "pantano" || cell.ground === "orilla") kind = "reeds"
-    else if (cell.ground === "desierto" || cell.ground === "playa") kind = "dune"
+    else if (desert) kind = variant > .9 ? "rock" : "dune"
+    else if (cell.ground === "playa") kind = "dune"
     else if (cell.ground === "tundra") kind = "rock"
     else if (cell.ground === "llanura") kind = variant > .9 ? "rock" : variant > .65 ? "scrub" : "grass"
     if (forest && i % 7 === 0) kind = "scrub"
-    if ((mountain || cell.ground === "colina") && i % 3 === 0) kind = variant > .5 ? "rock" : "scrub"
-    return { x, y, kind, scale: mountain ? .4 + variant * .55 : forest ? .32 + variant * .38 : .4 + variant * .35, mirror: variant > .5 ? -1 : 1, variant: Math.floor(variant * 5) }
+    if (mountain && i % 3 === 0) kind = variant > .5 ? "rock" : "scrub"
+    const scale = mountain ? .4 + variant * .55
+      : forest ? .32 + variant * .38
+      : hills ? .55 + variant * .35
+      : desert ? .55 + variant * .32
+      : .4 + variant * .35
+    return { x, y, kind, scale, mirror: variant > .5 ? -1 : 1, variant: Math.floor(variant * 5) }
   })
 }
 
@@ -159,13 +183,11 @@ export function OrnamentArt({ mark, id }: { mark: Ornament; id: string }) {
   if (mark.kind === "grass") {
     return <path d="M-3 0-4-3M0 0 1-4M3 0 5-2" fill="none" stroke="#777d4e" strokeWidth=".8" opacity=".7" />
   }
-  if (mark.kind === "dune") {
-    return <path d="M-10 1Q-2-5 8 0M-6 3Q0 0 12 2" fill="none" stroke="#ad955f" strokeWidth=".8" opacity=".65" />
-  }
   const mountain = mark.kind === "peak" || mark.kind === "crag"
   const box = mountain ? [-22, -36, 44, 42]
     : mark.kind === "cliff" ? [-20, -20, 40, 26]
-    : mark.kind === "hill" ? [-20, -15, 40, 20]
+    : mark.kind === "hill" ? [-22, -24, 44, 32]
+    : mark.kind === "dune" ? [-20, -12, 40, 18]
     : mark.kind === "pine" ? [-9, -24, 18, 28]
     : mark.kind === "tree" ? [-9, -22, 18, 26]
     : mark.kind === "reeds" ? [-8, -12, 16, 16] : [-8, -7, 16, 12]

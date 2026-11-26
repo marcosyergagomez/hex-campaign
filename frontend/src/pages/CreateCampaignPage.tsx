@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom"
 import {
   createCampaign,
   DEFAULT_CAMPAIGN_RULES,
+  deleteMap,
   generateMap,
   listMapScales,
   listMaps,
@@ -124,12 +125,18 @@ export function CreateCampaignPage() {
       goNext()
       return
     }
+    if (mapMode === "auto" && !tables.some((table) => table.size === rules.map_size)) {
+      setErrors({ map: [clientNotice("fieldRequired")] })
+      return
+    }
     setPending(true)
     setErrors({})
+    let generatedId: string | null = null
     try {
       let chosen = maps.find((item) => item.id === mapId)
       if (mapMode === "auto") {
         chosen = await generateMap(name.trim(), rules.map_size, rules.seats)
+        generatedId = chosen.id
       }
       if (!chosen) {
         setErrors({ map: [clientNotice("fieldRequired")] })
@@ -144,14 +151,22 @@ export function CreateCampaignPage() {
       const created = await createCampaign(
         name.trim(),
         next,
-        { id: chosen.id, blind: true },
+        { id: chosen.id, blind: false },
         description,
       )
+      generatedId = null
       if (!mounted.current) {
         return
       }
       navigate(`/campanas/${created.id}`, { replace: true })
     } catch (error) {
+      if (generatedId) {
+        try {
+          await deleteMap(generatedId)
+        } catch {
+          /* keep the create error below */
+        }
+      }
       if (mounted.current) {
         setErrors(presentError(error, "campaignCreateFailed"))
       }
@@ -202,7 +217,7 @@ export function CreateCampaignPage() {
       </ol>
 
       <form className="wizard-panel" onSubmit={onSubmit} noValidate>
-        <Banner errors={errors} fields={["form", "campaign", "map", "rules", "name", "description", "origin", "csrf", "session"]} />
+        <Banner errors={errors} />
 
         {step === 1 ? (
           <div className="wizard-fields">
