@@ -1,5 +1,7 @@
 /** Pointy-top axial disk helpers for the map editor. */
 
+import { hexRound } from "./geometry"
+
 const STEPS: readonly [number, number][] = [
   [1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1],
 ]
@@ -38,4 +40,20 @@ export function neighbors(cell: Axial): Axial[] {
 export function brushCells(cell: Axial, area: boolean): Axial[] {
   if (!area) return [cell]
   return [cell, ...neighbors(cell)]
+}
+
+export function hexDistance(a: Axial, b: Axial): number {
+  return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2
+}
+
+/** Inclusive axial line so fast strokes do not skip hexes between samples. */
+export function hexLine(a: Axial, b: Axial): Axial[] {
+  const n = hexDistance(a, b)
+  if (n === 0) return [{ q: a.q, r: a.r }]
+  const line: Axial[] = []
+  for (let i = 0; i <= n; i += 1) {
+    const t = i / n
+    line.push(hexRound(a.q + (b.q - a.q) * t, a.r + (b.r - a.r) * t))
+  }
+  return line
 }

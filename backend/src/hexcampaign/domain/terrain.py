@@ -16,7 +16,6 @@ GROUNDS = frozenset(
         "montana_rocosa",
         "desierto",
         "tundra",
-        "orilla",
         "rio",
         "pantano",
         "lago",
@@ -35,7 +34,6 @@ _EXIT = {
     "montana": 3,
     "desierto": 1,
     "tundra": 2,
-    "orilla": 2,
     "rio": 3,
     "pantano": 3,
     "playa": 1,
@@ -55,13 +53,16 @@ class Plot:
 
 
 def checked_plot(ground: object, road: object, bridge: object) -> Plot:
+    # Legacy maps may still store "orilla"; keep bridges on river, the rest as plain.
+    if ground == "orilla":
+        ground = "rio" if bridge is True else "llanura"
     if not isinstance(ground, str) or ground not in GROUNDS:
         raise DomainError("rules_invalid")
     if not isinstance(road, bool) or not isinstance(bridge, bool):
         raise DomainError("rules_invalid")
     if ground in IMPASSABLE and (road or bridge):
         raise DomainError("rules_invalid")
-    if bridge and ground not in {"orilla", "rio"}:
+    if bridge and ground != "rio":
         raise DomainError("rules_invalid")
     return Plot(ground, road, bridge)
 

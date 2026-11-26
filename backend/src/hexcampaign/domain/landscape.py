@@ -52,7 +52,6 @@ def _sketch(board: set[Hex], forts: tuple[Hex, ...], rng: random.Random) -> dict
     _beach(plots, rng)
     _cliff(plots, rng)
     _marsh(plots, rng)
-    _banks(plots)
     return plots
 
 
@@ -335,17 +334,11 @@ def _marsh(plots: dict[Hex, Plot], rng: random.Random) -> None:
     wet = [
         cell
         for cell, plot in plots.items()
-        if plot.ground == "llanura" and _touches(plots, cell, "rio", "orilla", "lago")
+        if plot.ground == "llanura" and _touches(plots, cell, "rio", "lago")
     ]
     rng.shuffle(wet)
     for cell in wet[:3]:
         plots[cell] = Plot("pantano")
-
-
-def _banks(plots: dict[Hex, Plot]) -> None:
-    for cell, plot in list(plots.items()):
-        if plot.ground == "llanura" and _touches(plots, cell, "rio"):
-            plots[cell] = Plot("orilla")
 
 
 def _shore(plots: dict[Hex, Plot], grounds: set[str]) -> list[Hex]:
@@ -494,7 +487,9 @@ def _problems(plots: dict[Hex, Plot], board: set[Hex], forts: tuple[Hex, ...]) -
     sectors: list[list[Plot]] = [[] for _ in range(6)]
     for cell, plot in plots.items():
         sectors[int((angle(cell) + math.pi) * 3 / math.pi) % 6].append(plot)
-    if any(sum(plot.ground not in {"llanura", "desierto", "playa", "tundra"}
+    if any(sum(plot.ground not in {
+                   "llanura", "desierto", "playa", "tundra",
+               }
                for plot in sector) * 3 < len(sector) for sector in sectors):
         found.append("empty_sector")
     if sum(plot.ground in _WOODS for plot in plots.values()) < len(board) * .23:
@@ -545,11 +540,9 @@ def _rivers_ok(plots: dict[Hex, Plot], board: set[Hex]) -> bool:
 
 def _shores_ok(plots: dict[Hex, Plot], board: set[Hex]) -> bool:
     for cell, plot in plots.items():
-        if plot.ground == "orilla" and not _touches(plots, cell, "rio"):
-            return False
         if plot.ground == "playa" and not (_touches(plots, cell, "lago") or _rim(cell, board)):
             return False
-        if plot.ground == "pantano" and not _touches(plots, cell, "rio", "orilla", "lago"):
+        if plot.ground == "pantano" and not _touches(plots, cell, "rio", "lago"):
             return False
         if plot.ground == "bosque_profundo" and not _touches(plots, cell, "bosque"):
             return False

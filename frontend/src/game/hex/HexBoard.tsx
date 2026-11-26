@@ -1,8 +1,9 @@
-import { useCallback, useId, useMemo, useRef, useState } from "react"
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import type { MapCell } from "../../api"
 import { useI18n } from "../../i18n/language"
-import { hexCenter, hexPoints } from "./geometry"
+import { hexLine } from "./disk"
+import { axialFromPixel, hexCenter, hexPoints } from "./geometry"
 import { GROUND_LABEL } from "./grounds"
 import { lakeOutlines, riverShapes, roadPaths, terrainOutlines, territoryOutlines } from "./courses"
 import { ArtDefinitions, EARTH, Fields, noise, OrnamentArt, ornaments } from "./TerrainArt"
@@ -18,7 +19,7 @@ export type TerritoryPlayer = { player_id: string; label: string; color: string 
 const NO_PLAYERS: TerritoryPlayer[] = []
 const NO_SPOTS: Spot[] = []
 
-const SAMPLES = ["rio", "lago", "playa", "orilla", "pantano", "bosque", "montana", "desierto"]
+const SAMPLES = ["rio", "lago", "playa", "pantano", "bosque", "montana", "desierto"]
 const STEPS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]
 
 export function HexStrip() {
@@ -49,7 +50,7 @@ export function HexBoard({
   unknown?: Spot[]
   ghosts?: Spot[]
   onCellClick?: (cell: OwnedCell) => void
-  onPaint?: (cell: OwnedCell | Spot) => void
+  onPaint?: (cells: Array<OwnedCell | Spot>) => void
 }) {
   const { t } = useI18n()
   const [zoom, setZoom] = useState(1)
@@ -57,6 +58,13 @@ export function HexBoard({
   const [showTerritories, setShowTerritories] = useState(true)
   const painting = useRef(false)
   const painted = useRef(new Set<string>())
+  const lastHex = useRef<Spot | null>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+  const byKey = useRef(new Map<string, OwnedCell | Spot>())
+  const onPaintRef = useRef(onPaint)
+  const sizeRef = useRef(size)
+  onPaintRef.current = onPaint
+  sizeRef.current = size
   const caption = useRef<HTMLParagraphElement>(null)
   function terrainName(cell: OwnedCell) {
     const owner = players.find(player => player.player_id === cell.owner_id)
@@ -90,33 +98,93 @@ export function HexBoard({
     [ghosts, size],
   )
   const extent = useMemo(() => [...placed, ...hidden, ...ghosted], [placed, hidden, ghosted])
-  const paintCell = useCallback((cell: OwnedCell | Spot) => {
-    if (!onPaint) return
-    const key = `${cell.q},${cell.r}`
-    if (painted.current.has(key)) return
-    painted.current.add(key)
-    onPaint(cell)
-  }, [onPaint])
+  byKey.current = new Map(
+    [...cells, ...ghosts].map(cell => [`${cell.q},${cell.r}`, cell]),
+  )
+  // Art can lag behind the stroke so pointer sampling stays responsive.
+  const artCells = useDeferredValue(cells)
+  const artPlaced = useMemo(
+    () => artCells.map(cell => ({ ...cell, ...hexCenter(cell.q, cell.r, size) })),
+    [artCells, size],
+  )
+  const emitPaint = useCallback((batch: Array<OwnedCell | Spot>) => {
+    if (!batch.length || !onPaintRef.current) return
+    onPaintRef.current(batch)
+  }, [])
+  const paintStroke = useCallback((target: Spot, bridgeFromLast: boolean) => {
+    if (!onPaintRef.current || !painting.current) return
+    const origin = bridgeFromLast ? lastHex.current : null
+    lastHex.current = { q: target.q, r: target.r }
+    const line = origin ? hexLine(origin, target) : [target]
+    const batch: Array<OwnedCell | Spot> = []
+    for (const spot of line) {
+      const key = `${spot.q},${spot.r}`
+      if (painted.current.has(key)) continue
+      const cell = byKey.current.get(key)
+      if (!cell) continue
+      painted.current.add(key)
+      batch.push(cell)
+    }
+    emitPaint(batch)
+  }, [emitPaint])
+  const paintAt = useCallback((clientX: number, clientY: number) => {
+    if (!onPaintRef.current || !painting.current) return
+    const svg = svgRef.current
+    if (!svg) return
+    const matrix = svg.getScreenCTM()
+    if (!matrix) return
+    const point = svg.createSVGPoint()
+    point.x = clientX
+    point.y = clientY
+    const local = point.matrixTransform(matrix.inverse())
+    const axial = axialFromPixel(local.x, local.y, sizeRef.current)
+    if (!byKey.current.has(`${axial.q},${axial.r}`)) return
+    paintStroke(axial, true)
+  }, [paintStroke])
   const endPaint = useCallback(() => {
     painting.current = false
     painted.current.clear()
+    lastHex.current = null
   }, [])
-  const territories = useMemo(() => territoryOutlines(placed, size).flatMap(region => {
+  const beginPaint = useCallback((cell: OwnedCell | Spot) => {
+    painting.current = true
+    painted.current.clear()
+    lastHex.current = null
+    paintStroke(cell, false)
+  }, [paintStroke])
+  useEffect(() => {
+    if (!onPaint) return
+    const move = (event: PointerEvent) => {
+      if (!painting.current) return
+      if (event.buttons !== 0 && (event.buttons & 1) === 0) return
+      paintAt(event.clientX, event.clientY)
+    }
+    const up = () => endPaint()
+    window.addEventListener("pointermove", move)
+    window.addEventListener("pointerup", up)
+    window.addEventListener("pointercancel", up)
+    return () => {
+      window.removeEventListener("pointermove", move)
+      window.removeEventListener("pointerup", up)
+      window.removeEventListener("pointercancel", up)
+    }
+  }, [onPaint, paintAt, endPaint])
+  const territories = useMemo(() => territoryOutlines(artPlaced, size).flatMap(region => {
     const player = players.find(item => item.player_id === region.owner_id)
     return player?.color ? [{ ...region, player }] : []
-  }), [placed, size, players])
+  }), [artPlaced, size, players])
   const forts = useMemo(
     () => new Set(anchors.map((spot) => `${spot.q},${spot.r}`)),
     [anchors],
   )
-  const rivers = useMemo(() => riverShapes(placed, size), [placed, size])
-  const roads = useMemo(() => roadPaths(placed, size, anchors), [placed, size, anchors])
-  const lakes = useMemo(() => lakeOutlines(placed, size), [placed, size])
+  const rivers = useMemo(() => riverShapes(artPlaced, size), [artPlaced, size])
+  const roads = useMemo(() => roadPaths(artPlaced, size, anchors), [artPlaced, size, anchors])
+  const lakes = useMemo(() => lakeOutlines(artPlaced, size), [artPlaced, size])
   const regions = useMemo(() => Object.entries(EARTH)
     .filter(([ground]) => !["llanura", "lago", "rio"].includes(ground))
-    .map(([ground, color]) => ({ ground, color, path: terrainOutlines(placed, size, new Set([ground])).join(" ") })),
-  [placed, size])
-  const scenery = useMemo(() => placed.flatMap((cell) =>
+    .map(([ground, color]) => ({ ground, color, path: terrainOutlines(artPlaced, size, new Set([ground])).join(" ") })),
+  [artPlaced, size])
+  const scenery = useMemo(() => artPlaced.flatMap((cell) =>
     ["lago", "rio", "campo", "mina"].includes(cell.ground) || forts.has(`${cell.q},${cell.r}`)
       ? []
       : ornaments(cell).map((mark, index) => ({
@@ -125,7 +193,7 @@ export function HexBoard({
         x: cell.x + mark.x * size / SIZE,
         y: cell.y + mark.y * size / SIZE,
       })),
-  ).sort((left, right) => left.y - right.y || left.x - right.x), [placed, forts, size])
+  ).sort((left, right) => left.y - right.y || left.x - right.x), [artPlaced, forts, size])
   const sceneryArt = useMemo(() => scenery.map((mark) => (
     <g key={mark.key} transform={`translate(${mark.x} ${mark.y}) scale(${mark.scale * size / SIZE})`}>
       <g transform={`scale(${mark.mirror} 1)`}><OrnamentArt mark={mark} id={boardId} /></g>
@@ -157,8 +225,9 @@ export function HexBoard({
       ) : null}
       <div className={extent.length > 8 ? "hex-viewport" : undefined} tabIndex={extent.length > 8 ? 0 : undefined} role="group" aria-label={t("mapsTitle")}>
       <svg
+        ref={svgRef}
         className="hex-board"
-        style={{ width: `${zoom * 100}%` }}
+        style={{ width: `${zoom * 100}%`, touchAction: onPaint ? "none" : undefined }}
         viewBox={`${minX} ${minY} ${width} ${height}`}
         role="img"
         aria-label={t("mapsTitle")}
@@ -193,7 +262,7 @@ export function HexBoard({
             {regions.map((region) => <path key={region.ground} d={region.path} fill={region.color} fillRule="evenodd" />)}
           </g>
           <g filter={`url(#${boardId}-blend)`}>
-            {placed.map((cell) => (
+            {artPlaced.map((cell) => (
               <g key={`${cell.q},${cell.r}`} transform={`translate(${cell.x} ${cell.y})`}>
                 <ellipse rx={size * 1.3} ry={size * .7} fill={noise(cell.q, cell.r, 17) > .5 ? "#8b8a56" : "#ebd9a8"} opacity=".13"
                   transform={`rotate(${noise(cell.q, cell.r, 18) * 180})`} />
@@ -254,21 +323,15 @@ export function HexBoard({
           {ghosted.map((cell) => (
             <polygon
               key={`ghost-${cell.q},${cell.r}`}
+              data-hex={`${cell.q},${cell.r}`}
               points={points}
               transform={`translate(${cell.x} ${cell.y})`}
               className={`hex-edge hex-ghost${onPaint ? " is-pick" : ""}`}
               style={{ strokeWidth: size / SIZE * .45 }}
               onPointerDown={onPaint ? (event) => {
-                event.currentTarget.setPointerCapture(event.pointerId)
-                painting.current = true
-                painted.current.clear()
-                paintCell(cell)
+                event.preventDefault()
+                beginPaint(cell)
               } : undefined}
-              onPointerEnter={onPaint ? () => {
-                if (painting.current) paintCell(cell)
-              } : undefined}
-              onPointerUp={onPaint ? endPaint : undefined}
-              onPointerCancel={onPaint ? endPaint : undefined}
             >
               <title>{t("editorAddHex")}</title>
             </polygon>
@@ -276,6 +339,7 @@ export function HexBoard({
           {placed.map((cell) => (
             <polygon
               key={`${cell.q},${cell.r}`}
+              data-hex={`${cell.q},${cell.r}`}
               points={points}
               transform={`translate(${cell.x} ${cell.y})`}
               className={`hex-edge${forts.has(`${cell.q},${cell.r}`) ? " is-fort" : ""}${onCellClick || onPaint ? " is-pick" : ""}`}
@@ -284,16 +348,9 @@ export function HexBoard({
               onMouseLeave={() => onHover(null)}
               onClick={onCellClick && !onPaint ? () => onCellClick(cell) : undefined}
               onPointerDown={onPaint ? (event) => {
-                event.currentTarget.setPointerCapture(event.pointerId)
-                painting.current = true
-                painted.current.clear()
-                paintCell(cell)
+                event.preventDefault()
+                beginPaint(cell)
               } : undefined}
-              onPointerEnter={onPaint ? () => {
-                if (painting.current) paintCell(cell)
-              } : undefined}
-              onPointerUp={onPaint ? endPaint : undefined}
-              onPointerCancel={onPaint ? endPaint : undefined}
             >
               <title>{terrainName(cell)}</title>
             </polygon>

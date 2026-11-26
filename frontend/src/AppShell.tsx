@@ -97,7 +97,6 @@ export function AppShell() {
               {t("campaignsNav")}
             </NavLink>
             <NavLink to="/mapas">{t("mapsNav")}</NavLink>
-            <NavLink to="/mapas/editor">{t("mapEditorNav")}</NavLink>
             <NavLink to="/campanas/nueva">{t("newCampaign")}</NavLink>
           </nav>
         </div>

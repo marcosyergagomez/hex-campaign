@@ -85,7 +85,7 @@ def road_masses(plots: dict[Hex, Plot]) -> list[set[Hex]]:
         group
         for grounds in (
             {"bosque", "bosque_profundo"}, {"montana", "colina"},
-            {"pantano", "orilla"}, {"tundra"},
+            {"pantano"}, {"tundra"},
         )
         for group in terrain_groups(plots, grounds)
     ]
