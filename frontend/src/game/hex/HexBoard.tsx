@@ -38,19 +38,25 @@ export function HexBoard({
   size = SIZE,
   players = NO_PLAYERS,
   unknown = NO_SPOTS,
+  ghosts = NO_SPOTS,
   onCellClick,
+  onPaint,
 }: {
   cells: OwnedCell[]
   anchors: Spot[]
   size?: number
   players?: TerritoryPlayer[]
   unknown?: Spot[]
+  ghosts?: Spot[]
   onCellClick?: (cell: OwnedCell) => void
+  onPaint?: (cell: OwnedCell | Spot) => void
 }) {
   const { t } = useI18n()
   const [zoom, setZoom] = useState(1)
   const [grid, setGrid] = useState(true)
   const [showTerritories, setShowTerritories] = useState(true)
+  const painting = useRef(false)
+  const painted = useRef(new Set<string>())
   const caption = useRef<HTMLParagraphElement>(null)
   function terrainName(cell: OwnedCell) {
     const owner = players.find(player => player.player_id === cell.owner_id)
@@ -79,7 +85,22 @@ export function HexBoard({
     [cells, size],
   )
   const hidden = useMemo(() => unknown.map(cell => ({ ...cell, ...hexCenter(cell.q, cell.r, size) })), [unknown, size])
-  const extent = useMemo(() => [...placed, ...hidden], [placed, hidden])
+  const ghosted = useMemo(
+    () => ghosts.map(cell => ({ ...cell, ...hexCenter(cell.q, cell.r, size) })),
+    [ghosts, size],
+  )
+  const extent = useMemo(() => [...placed, ...hidden, ...ghosted], [placed, hidden, ghosted])
+  const paintCell = useCallback((cell: OwnedCell | Spot) => {
+    if (!onPaint) return
+    const key = `${cell.q},${cell.r}`
+    if (painted.current.has(key)) return
+    painted.current.add(key)
+    onPaint(cell)
+  }, [onPaint])
+  const endPaint = useCallback(() => {
+    painting.current = false
+    painted.current.clear()
+  }, [])
   const territories = useMemo(() => territoryOutlines(placed, size).flatMap(region => {
     const player = players.find(item => item.player_id === region.owner_id)
     return player?.color ? [{ ...region, player }] : []
@@ -230,16 +251,49 @@ export function HexBoard({
           ))}
         </g>
         <g className={grid ? undefined : "hex-grid-hidden"}>
+          {ghosted.map((cell) => (
+            <polygon
+              key={`ghost-${cell.q},${cell.r}`}
+              points={points}
+              transform={`translate(${cell.x} ${cell.y})`}
+              className={`hex-edge hex-ghost${onPaint ? " is-pick" : ""}`}
+              style={{ strokeWidth: size / SIZE * .45 }}
+              onPointerDown={onPaint ? (event) => {
+                event.currentTarget.setPointerCapture(event.pointerId)
+                painting.current = true
+                painted.current.clear()
+                paintCell(cell)
+              } : undefined}
+              onPointerEnter={onPaint ? () => {
+                if (painting.current) paintCell(cell)
+              } : undefined}
+              onPointerUp={onPaint ? endPaint : undefined}
+              onPointerCancel={onPaint ? endPaint : undefined}
+            >
+              <title>{t("editorAddHex")}</title>
+            </polygon>
+          ))}
           {placed.map((cell) => (
             <polygon
               key={`${cell.q},${cell.r}`}
               points={points}
               transform={`translate(${cell.x} ${cell.y})`}
-              className={`hex-edge${forts.has(`${cell.q},${cell.r}`) ? " is-fort" : ""}${onCellClick ? " is-pick" : ""}`}
+              className={`hex-edge${forts.has(`${cell.q},${cell.r}`) ? " is-fort" : ""}${onCellClick || onPaint ? " is-pick" : ""}`}
               style={{ strokeWidth: size / SIZE * (forts.has(`${cell.q},${cell.r}`) ? 1.6 : .45) }}
               onMouseEnter={() => onHover(cell)}
               onMouseLeave={() => onHover(null)}
-              onClick={onCellClick ? () => onCellClick(cell) : undefined}
+              onClick={onCellClick && !onPaint ? () => onCellClick(cell) : undefined}
+              onPointerDown={onPaint ? (event) => {
+                event.currentTarget.setPointerCapture(event.pointerId)
+                painting.current = true
+                painted.current.clear()
+                paintCell(cell)
+              } : undefined}
+              onPointerEnter={onPaint ? () => {
+                if (painting.current) paintCell(cell)
+              } : undefined}
+              onPointerUp={onPaint ? endPaint : undefined}
+              onPointerCancel={onPaint ? endPaint : undefined}
             >
               <title>{terrainName(cell)}</title>
             </polygon>
