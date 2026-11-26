@@ -37,9 +37,15 @@ def store_generated(user, name: str, size: int, seats: int, rng: random.Random) 
         )
 
 
-def store_drawn(user, name: str, size: int, cells: list[dict[str, object]]) -> CampaignMap:
+def store_drawn(
+    user,
+    name: str,
+    size: int,
+    cells: list[dict[str, object]],
+    anchors: list[dict[str, object]] | None = None,
+) -> CampaignMap:
     try:
-        template = drawn(size, cells)
+        template = drawn(size, cells, anchors)
         title = campaign_name(name)
     except DomainError as exc:
         raise CampaignError(exc.code) from exc
@@ -50,9 +56,70 @@ def store_drawn(user, name: str, size: int, cells: list[dict[str, object]]) -> C
             owner=account,
             name=title,
             size=template.size,
-            seats=None,
+            seats=template.seats,
             generated=False,
             document=dump_template(template),
+        )
+
+
+def update_drawn(
+    user,
+    map_id: str,
+    name: str,
+    size: int,
+    cells: list[dict[str, object]],
+    anchors: list[dict[str, object]] | None = None,
+) -> CampaignMap:
+    try:
+        template = drawn(size, cells, anchors)
+        title = campaign_name(name)
+    except DomainError as exc:
+        raise CampaignError(exc.code) from exc
+    with transaction.atomic():
+        _actor(user)
+        row = _owned(user, map_id)
+        if row.generated:
+            raise CampaignError("map_readonly")
+        row.name = title
+        row.size = template.size
+        row.seats = template.seats
+        row.document = dump_template(template)
+        row.save(update_fields=["name", "size", "seats", "document"])
+        return row
+
+
+def copy_for_edit(user, map_id: str, name: str | None = None) -> CampaignMap:
+    """Clone any owned map into a new hand-drawn atlas the player can reshape."""
+    with transaction.atomic():
+        account = _actor(user)
+        source = _owned(user, map_id)
+        try:
+            template = load_template(source.document)
+            title = campaign_name(name or f"{source.name} · copia")
+            clone = drawn(
+                template.size,
+                [
+                    {
+                        "q": cell.q,
+                        "r": cell.r,
+                        "ground": plot.ground,
+                        "road": plot.road,
+                        "bridge": plot.bridge,
+                    }
+                    for cell, plot in template.cells.items()
+                ],
+                [{"q": cell.q, "r": cell.r} for cell in template.anchors],
+            )
+        except DomainError as exc:
+            raise CampaignError(exc.code) from exc
+        _ensure_room(account)
+        return CampaignMap.objects.create(
+            owner=account,
+            name=title,
+            size=clone.size,
+            seats=clone.seats,
+            generated=False,
+            document=dump_template(clone),
         )
 
 
