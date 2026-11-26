@@ -3,12 +3,12 @@
 import random
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from api.player_gate import reader, writer
 from api.player_session import SESSION_MESSAGE, django_sync
-from apps.campaigns.atlases import list_maps, read_map, store_drawn, store_generated
+from apps.campaigns.atlases import drop_map, list_maps, read_map, store_drawn, store_generated
 from apps.campaigns.records import CampaignError
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.maps import table_presets
@@ -18,6 +18,7 @@ router = APIRouter()
 _MESSAGES = {
     "rules_invalid": "Las reglas no son válidas.",
     "map_unknown": "No hay ningún mapa con ese identificador.",
+    "map_limit": "Ya tienes el máximo de mapas guardados.",
 }
 
 
@@ -27,13 +28,17 @@ def _failure(exc: CampaignError) -> JSONResponse:
             status_code=401,
             content={"errors": {"session": [SESSION_MESSAGE]}},
         )
-    status = 404 if exc.code == "map_unknown" else 422
-    field = "map" if exc.code == "map_unknown" else "rules"
+    if exc.code == "map_unknown":
+        status, field = 404, "map"
+    elif exc.code == "map_limit":
+        status, field = 422, "map"
+    else:
+        status, field = 422, "rules"
     message = _MESSAGES.get(exc.code, _MESSAGES["rules_invalid"])
     return JSONResponse(status_code=status, content={"errors": {field: [message]}})
 
 
-def _run(request: Request, action):
+def _run(request: Request, action) -> Response:
     user = writer(request)
     if isinstance(user, JSONResponse):
         return user
@@ -89,6 +94,16 @@ def get_map(map_id: str, request: Request) -> JSONResponse:
         return JSONResponse(read_map(user, map_id))
     except CampaignError as exc:
         return _failure(exc)
+
+
+@router.delete("/api/maps/{map_id}", status_code=204)
+@django_sync
+def delete_map(map_id: str, request: Request) -> Response:
+    def action(user):
+        drop_map(user, map_id)
+        return Response(status_code=204)
+
+    return _run(request, action)
 
 
 @router.post("/api/maps", status_code=201)

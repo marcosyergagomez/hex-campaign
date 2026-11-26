@@ -13,6 +13,9 @@ from hexcampaign.domain.terrain import Plot, passable
 
 # Geometric floor; landscape validation also checks five turns with local road refunds.
 _SEPARATION = 15
+# Local wobble around the ideal seat; symmetry is copied by rotation so the
+# landscape engine still sees a fair constellation.
+_JITTER = 2
 
 
 @dataclass(frozen=True)
@@ -52,10 +55,11 @@ def table_presets() -> list[dict[str, object]]:
 def generate(size: int, seats: int, rng: random.Random) -> Template:
     """One landscape. The seed moves the lake, the river and the ridge."""
     board = set(disk(size))
-    turn = rng.randrange(6)
-    sites = tuple(rotate(site, turn) for site in fortress_sites(size, seats))
-    plots = paint(board, sites, rng)
     area = initial_area(size)
+    turn = rng.randrange(6)
+    base = tuple(rotate(site, turn) for site in fortress_sites(size, seats))
+    sites = _scatter(base, seats, board, area, rng)
+    plots = paint(board, sites, rng)
     _check_shape(plots, board, sites, area)
     return Template(size, seats, True, plots, sites, area)
 
@@ -92,6 +96,91 @@ def lay(game: Game, template: Template, surveyor: str | None) -> None:
     game.home_size = template.home_size
     if template.generated:
         game.rules = replace(game.rules, placement="app")
+
+
+def _jitter_offsets() -> list[Hex]:
+    return [
+        Hex(q, r)
+        for q in range(-_JITTER, _JITTER + 1)
+        for r in range(-_JITTER, _JITTER + 1)
+        if distance(Hex(q, r), Hex(0, 0)) <= _JITTER
+    ]
+
+
+def _scatter(
+    base: tuple[Hex, ...],
+    seats: int,
+    board: set[Hex],
+    area: int,
+    rng: random.Random,
+) -> tuple[Hex, ...]:
+    """Nudge forts off the ideal seats; keep rotational symmetry (and ring parity)."""
+    offsets = [cell for cell in _jitter_offsets() if cell != Hex(0, 0)]
+    rng.shuffle(offsets)
+    offsets.append(Hex(0, 0))
+    if seats in {2, 3}:
+        for offset in offsets:
+            sites = _shifted_ring(base[0], seats, offset)
+            if _anchors_fit(sites, board, area):
+                return sites
+        return base
+    first, second = _pair_seeds(base)
+    for left in offsets:
+        seed = Hex(first.q + left.q, first.r + left.r)
+        if seed not in board:
+            continue
+        ring = distance(seed, Hex(0, 0))
+        for right in offsets:
+            other = Hex(second.q + right.q, second.r + right.r)
+            if other not in board or distance(other, Hex(0, 0)) != ring:
+                continue
+            sites = (seed, rotate(seed, 3), other, rotate(other, 3))
+            if len(set(sites)) < 4:
+                continue
+            if _anchors_fit(sites, board, area):
+                return sites
+    return base
+
+
+def _shifted_ring(seed_seat: Hex, seats: int, offset: Hex) -> tuple[Hex, ...]:
+    seed = Hex(seed_seat.q + offset.q, seed_seat.r + offset.r)
+    if seats == 2:
+        return (seed, rotate(seed, 3))
+    return (seed, rotate(seed, 2), rotate(seed, 4))
+
+
+def _pair_seeds(sites: tuple[Hex, ...]) -> tuple[Hex, Hex]:
+    pending = set(sites)
+    seeds: list[Hex] = []
+    while pending:
+        cell = min(pending)
+        other = rotate(cell, 3)
+        if other not in pending:
+            raise DomainError("rules_invalid")
+        pending -= {cell, other}
+        seeds.append(cell)
+    if len(seeds) != 2:
+        raise DomainError("rules_invalid")
+    return seeds[0], seeds[1]
+
+
+def _anchors_fit(sites: tuple[Hex, ...], board: set[Hex], area: int) -> bool:
+    if any(site not in board for site in sites):
+        return False
+    if len({distance(site, Hex(0, 0)) for site in sites}) != 1:
+        return False
+    apart = min(distance(left, right) for left in sites for right in sites if left != right)
+    if apart < _SEPARATION:
+        return False
+    homes = [owned(fort, 0, board, count=area) for fort in sites]
+    if any(len(home) != area for home in homes):
+        return False
+    claimed: set[Hex] = set()
+    for home in homes:
+        if claimed & home:
+            return False
+        claimed.update(home)
+    return Hex(0, 0) not in claimed and len(claimed) < len(board)
 
 
 def _check_shape(

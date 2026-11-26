@@ -26,6 +26,8 @@ _BODY_LIMITED = {
     "/api/session/logout",
 }
 _ACCOUNT_LIMITED = {"/api/users", "/api/users/verify-email"}
+_WRITE_PREFIXES = ("/api/campaigns", "/api/maps", "/api/invitations")
+_MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _TOO_MANY = "Demasiados intentos. Prueba de nuevo en unos minutos."
 _TOO_LARGE = "La solicitud es demasiado grande."
 _SECURITY_HEADERS = {
@@ -138,6 +140,12 @@ def _body_limit(path: str) -> int | None:
     return None
 
 
+def _write_limited(path: str) -> bool:
+    if path in _ACCOUNT_LIMITED:
+        return True
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in _WRITE_PREFIXES)
+
+
 class AccountGuard:
     """Limits posts and keeps confirmation pages out of caches and referrers."""
 
@@ -159,19 +167,26 @@ class AccountGuard:
                 headers = MutableHeaders(scope=message)
                 for key, value in _SECURITY_HEADERS.items():
                     headers[key] = value
+                if not settings.DEBUG:
+                    headers["strict-transport-security"] = (
+                        "max-age=31536000; includeSubDomains"
+                    )
             await send(message)
 
+        method = scope.get("method", "")
+        if method in _MUTATING and _write_limited(path):
+            if not _allow_post(_client_key(scope)):
+                await _reject(send, scope, 429, _TOO_MANY)
+                return
+
         limit = _body_limit(path)
-        if scope.get("method") != "POST" or limit is None:
+        if method != "POST" or limit is None:
             await self.app(scope, receive, send_hardened)
             return
 
         length = _header(scope, b"content-length")
         if len(length) > 8 or (length.isdigit() and int(length) > limit):
             await _reject(send, scope, 413, _TOO_LARGE)
-            return
-        if path in _ACCOUNT_LIMITED and not _allow_post(_client_key(scope)):
-            await _reject(send, scope, 429, _TOO_MANY)
             return
 
         try:

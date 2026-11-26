@@ -4,7 +4,6 @@ from dataclasses import replace
 from datetime import datetime
 
 from hexcampaign.domain.chronicle import remember
-from hexcampaign.domain.clock import stamp
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import (
     Army,
@@ -22,8 +21,10 @@ from hexcampaign.domain.game import (
 from hexcampaign.domain.hexes import DISK_RADIUS, Hex, angle, disk, distance, neighbors
 from hexcampaign.domain.identity import checked_identity
 from hexcampaign.domain.land import home_radius, owned
+from hexcampaign.domain.phases import open_first_turn, open_preparation
 from hexcampaign.domain.rules import Rules, campaign_name, label, roster_text
 from hexcampaign.domain.terrain import passable
+from hexcampaign.domain.territory import home_land
 
 
 def create_game(name: str, rules: Rules, owner_id: str, alias: str) -> Game:
@@ -93,7 +94,7 @@ def accept_seat(game: Game, player_id: str, alias: str) -> Game:
 
 def choose_identity(game: Game, actor: str, faction: str, color: str) -> Game:
     member = require_player(game, actor)
-    require_phase(game, "recruiting", "placing", "orders", "battles")
+    require_phase(game, "recruiting", "placing", "preparing", "orders", "battles")
     if member.status != "active":
         raise DomainError("forbidden")
     if game.phase != "recruiting" and (member.faction or member.color):
@@ -123,9 +124,10 @@ def begin(game: Game, actor: str, admin_ids: list[str], now: datetime) -> Game:
     if game.rules.placement == "app":
         _deploy(game)
         _note_deployment(game)
-        game.phase = "orders"
-        game.turn = 1
-        game.orders_opened_at = stamp(now)
+        if game.plots is not None:
+            open_preparation(game)
+        else:
+            open_first_turn(game, now)
     else:
         _blank_armies(game)
         game.phase = "placing"
@@ -177,9 +179,10 @@ def close_placement(game: Game, actor: str, now: datetime) -> Game:
     _territory(game)
     _home_notice(game)
     remember(game, "placement_closed", player_id=actor)
-    game.phase = "orders"
-    game.turn = 1
-    game.orders_opened_at = stamp(now)
+    if game.plots is not None:
+        open_preparation(game)
+    else:
+        open_first_turn(game, now)
     return bump(game)
 
 
@@ -192,7 +195,7 @@ def describe_army(
     race: str,
     roster: str,
 ) -> Game:
-    require_phase(game, "placing", "orders", "battles")
+    require_phase(game, "placing", "preparing", "orders", "battles")
     found = next((army for army in game.armies if army.id == army_id), None)
     if found is None or found.player_id != actor or found.destroyed:
         raise DomainError("forbidden")
@@ -225,6 +228,8 @@ def _deploy(game: Game) -> None:
         border.sort(key=lambda cell: (angle(cell), cell.q, cell.r))
         if game.plots is not None:
             border = [cell for cell in border if _standable(game, cell)]
+        if not border:
+            raise DomainError("rules_invalid")
         chosen = [border[(index * len(border)) // len(players)] for index in range(len(players))]
     taken = set(chosen)
     for member, fort in zip(players, chosen, strict=True):
@@ -265,6 +270,8 @@ def _army(game: Game, player_id: str, name: str, spot: Hex | None) -> Army:
 def _beside(origin: Hex, taken: set[Hex], board: set[Hex]) -> Hex:
     options = [cell for cell in neighbors(origin) if cell in board and cell not in taken]
     options.sort(key=lambda cell: (distance(cell, Hex(0, 0)), cell.q, cell.r))
+    if not options:
+        raise DomainError("rules_invalid")
     return options[0]
 
 
@@ -295,13 +302,8 @@ def _territory(game: Game) -> None:
         return
     if game.plots is not None and game.rules.visibility == "home":
         board = set(game.hexes)
-        radius = home_radius(game.rules.map_size)
         for player_id in players:
-            cells: set[Hex] = set()
-            for fort in game.fortresses:
-                if fort.player_id == player_id:
-                    cells.update(owned(fort.at(), radius, board, count=game.home_size))
-            game.discovered[player_id] = cells
+            game.discovered[player_id] = home_land(game, player_id, board=board)
         _grant_surveyor(game)
         return
     forts = [(fort.at(), fort.player_id) for fort in game.fortresses]

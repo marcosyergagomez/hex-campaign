@@ -22,6 +22,7 @@ from apps.campaigns.records import (
     list_campaigns,
     play,
     present,
+    present_roads_delta,
     preview_link,
     read_campaign,
 )
@@ -36,6 +37,7 @@ from hexcampaign.domain.lobby import (
     describe_army,
     place_armies,
 )
+from hexcampaign.domain.roads import clear_road, finish_roads, place_road
 from hexcampaign.domain.rules import Rules, rules_from
 from hexcampaign.domain.turn import (
     close_orders,
@@ -138,6 +140,12 @@ class PlaceBody(BaseModel):
     armies: dict[str, HexBody]
 
 
+class RoadBody(BaseModel):
+    revision: int
+    q: int
+    r: int
+
+
 class ArmyBody(BaseModel):
     revision: int
     name: str
@@ -189,6 +197,18 @@ def _run(request: Request, action):
 
 def _view(user, campaign, game, status: int = 200) -> JSONResponse:
     return JSONResponse(present(campaign, game, user, timezone.now()), status_code=status)
+
+
+def _play(user, campaign_id: str, revision: int, command) -> JSONResponse:
+    return _view(user, *play(user, campaign_id, revision, command))
+
+
+def _road_play(user, campaign_id: str, revision: int, command, changed: list[Hex]) -> JSONResponse:
+    """Preparing stays on a delta; leaving preparation returns the full table view."""
+    campaign, game = play(user, campaign_id, revision, command)
+    if game.phase != "preparing":
+        return _view(user, campaign, game)
+    return JSONResponse(present_roads_delta(campaign, game, user, changed))
 
 
 def _hexes(steps: list[HexBody]) -> list[Hex]:
@@ -375,6 +395,55 @@ def post_close_placement(campaign_id: str, payload: RevisionBody, request: Reque
             return close_placement(game, str(user.pk), timezone.now())
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/roads")
+@django_sync
+def post_road(campaign_id: str, payload: RoadBody, request: Request) -> JSONResponse:
+    cell = Hex(payload.q, payload.r)
+
+    def action(user):
+        return _road_play(
+            user,
+            campaign_id,
+            payload.revision,
+            lambda game: place_road(game, str(user.pk), cell),
+            [cell],
+        )
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/roads/clear")
+@django_sync
+def post_clear_road(campaign_id: str, payload: RoadBody, request: Request) -> JSONResponse:
+    cell = Hex(payload.q, payload.r)
+
+    def action(user):
+        return _road_play(
+            user,
+            campaign_id,
+            payload.revision,
+            lambda game: clear_road(game, str(user.pk), cell),
+            [cell],
+        )
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/roads/ready")
+@django_sync
+def post_roads_ready(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
+    def action(user):
+        return _road_play(
+            user,
+            campaign_id,
+            payload.revision,
+            lambda game: finish_roads(game, str(user.pk), timezone.now()),
+            [],
+        )
 
     return _run(request, action)
 

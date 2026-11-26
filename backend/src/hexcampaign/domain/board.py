@@ -51,7 +51,8 @@ def capture(game: Game) -> dict[str, object]:
             for member in game.members
         ],
         "battle_ids": [battle.id for battle in game.battles],
-        "previous": copy.deepcopy(game.previous),
+        # One level only: nesting previous snapshots would grow the document each turn.
+        "previous": None,
         "fort_memory": copy.deepcopy(game.fort_memory),
     }
 

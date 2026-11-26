@@ -18,10 +18,11 @@ from hexcampaign.domain.game import (
     require_phase,
     to_dict,
 )
+from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.lobby import accept_seat, create_game, invite_player
 from hexcampaign.domain.rules import rules_from
 from hexcampaign.domain.turn import deactivate_player
-from hexcampaign.domain.view import project
+from hexcampaign.domain.view import project, project_roads_delta
 
 from .models import Campaign, Invitation, Seat
 
@@ -37,7 +38,7 @@ class RevisionConflict(CampaignError):
         super().__init__("revision_conflict")
 
 
-OPEN_PHASES = ("recruiting", "placing", "orders", "battles")
+OPEN_PHASES = ("recruiting", "placing", "preparing", "orders", "battles")
 OPEN_CAMPAIGN_LIMIT = 3
 
 
@@ -89,11 +90,13 @@ def play(
         game = _document(campaign)
         if game.revision != revision:
             raise RevisionConflict()
+        before = game.revision
         try:
             updated = command(game)
         except DomainError as exc:
             raise CampaignError(exc.code) from exc
-        _save(campaign, updated)
+        if updated.revision != before:
+            _save(campaign, updated)
         return campaign, updated
 
 
@@ -202,6 +205,18 @@ def preview_link(user, token: str) -> dict[str, object]:
 
 def present(campaign: Campaign, game: Game, user, now) -> dict[str, object]:
     body = project(game, str(user.pk), now)
+    body["id"] = str(campaign.id)
+    body["joined"] = True
+    return body
+
+
+def present_roads_delta(
+    campaign: Campaign,
+    game: Game,
+    user,
+    changed: list[Hex],
+) -> dict[str, object]:
+    body = project_roads_delta(game, str(user.pk), changed)
     body["id"] = str(campaign.id)
     body["joined"] = True
     return body

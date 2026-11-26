@@ -1,9 +1,19 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 
-import { ApiError, getCampaign, identityOptions, saveIdentity, type CampaignDetail, type IdentityOptions } from "../api"
+import {
+  ApiError,
+  getCampaign,
+  identityOptions,
+  saveIdentity,
+  type CampaignDetail,
+  type IdentityOptions,
+  type Visibility,
+  type Victory,
+} from "../api"
 import { Chronicle } from "./Chronicle"
 import { PlayerIdentity } from "./PlayerIdentity"
+import { RoadPreparation, isKnownHex, toggleOwnRoad } from "./RoadPreparation"
 import { Banner } from "../form"
 import { HexBoard } from "../game/hex/HexBoard"
 import { clientNotice, type MessageKey } from "../i18n/catalog"
@@ -13,6 +23,7 @@ import { presentError } from "../presentError"
 const PHASE_KEYS: Record<CampaignDetail["phase"], MessageKey> = {
   recruiting: "phaseRecruiting",
   placing: "phasePlacing",
+  preparing: "phasePreparing",
   orders: "phaseOrders",
   battles: "phaseBattles",
   finished: "phaseFinished",
@@ -27,6 +38,7 @@ export function CampaignDetailPage() {
   const [campaign, setCampaign] = useState<CampaignDetail | null>(null)
   const [options, setOptions] = useState<IdentityOptions | null>(null)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     mounted.current = true
@@ -53,19 +65,59 @@ export function CampaignDetailPage() {
     }
   }, [id])
 
+  function accept(updated: CampaignDetail) {
+    if (mounted.current && routeId.current === updated.id) setCampaign(updated)
+  }
+
+  async function refresh(campaignId: string) {
+    accept(await getCampaign(campaignId))
+  }
+
+  async function applyCampaign(action: () => Promise<CampaignDetail>) {
+    if (!campaign || busy) return
+    setBusy(true)
+    try {
+      accept(await action())
+      if (mounted.current) setErrors({})
+    } catch (error: unknown) {
+      if (error instanceof ApiError && error.status === 409) {
+        try {
+          await refresh(campaign.id)
+        } catch {
+          /* keep the mutation error below */
+        }
+      }
+      if (mounted.current) setErrors(presentError(error, "campaignLoadFailed"))
+    } finally {
+      if (mounted.current) setBusy(false)
+    }
+  }
+
   async function saveBanner(faction: string, color: string) {
     if (!campaign) throw new Error("Campaign not loaded")
     try {
-      const updated = await saveIdentity(campaign.id, campaign.revision, faction, color)
-      if (mounted.current && routeId.current === updated.id) setCampaign(updated)
+      accept(await saveIdentity(campaign.id, campaign.revision, faction, color))
     } catch (error: unknown) {
-      if (error instanceof ApiError && error.status === 409) {
-        const current = await getCampaign(campaign.id)
-        if (mounted.current && routeId.current === current.id) setCampaign(current)
-      }
+      if (error instanceof ApiError && error.status === 409) await refresh(campaign.id)
       throw error
     }
   }
+
+  const preparing = campaign?.phase === "preparing" && campaign.roads !== null
+  const known = useMemo(
+    () => (campaign ? campaign.hexes.filter(isKnownHex) : []),
+    [campaign],
+  )
+  const unknown = useMemo(
+    () => (campaign ? campaign.hexes.filter(cell => !cell.known) : []),
+    [campaign],
+  )
+  const players = useMemo(
+    () => (campaign ? campaign.members.map(member => ({
+      player_id: member.player_id, color: member.color, label: member.alias,
+    })) : []),
+    [campaign],
+  )
 
   if (!campaign && Object.keys(errors).length === 0) {
     return <p className="quiet">{t("loadingCampaign")}</p>
@@ -87,7 +139,7 @@ export function CampaignDetailPage() {
         </div>
       </header>
 
-      <Banner errors={errors} fields={["form", "session", "campaign"]} />
+      <Banner errors={errors} fields={["form", "session", "campaign", "origin", "csrf", "revision"]} />
 
       {campaign?.you && options ? (
         <PlayerIdentity key={campaign.id} campaign={campaign} options={options} onSave={saveBanner} />
@@ -95,7 +147,14 @@ export function CampaignDetailPage() {
       {campaign && campaign.hexes.length > 0 ? (
         <section className="campaign-map" aria-labelledby="territory-title">
           <h2 id="territory-title">{t("territoryTitle")}</h2>
-          <p className="hint">{t("territoryHint")}</p>
+          <p className="hint">{t(preparing ? "roadsHint" : "territoryHint")}</p>
+          {preparing ? (
+            <RoadPreparation
+              campaign={campaign}
+              busy={busy}
+              onChange={action => { void applyCampaign(action) }}
+            />
+          ) : null}
           <ul className="territory-legend">
             {campaign.members.filter(member => member.color).map(member => {
               const faction = options?.factions.find(item => item.id === member.faction)
@@ -108,12 +167,15 @@ export function CampaignDetailPage() {
             })}
           </ul>
           <HexBoard
-            cells={campaign.hexes.filter(cell => cell.known)}
-            unknown={campaign.hexes.filter(cell => !cell.known)}
+            cells={known}
+            unknown={unknown}
             anchors={campaign.fortresses}
-            players={campaign.members.map(member => ({
-              player_id: member.player_id, color: member.color, label: member.alias,
-            }))}
+            players={players}
+            onCellClick={
+              preparing && campaign.roads && !campaign.roads.ready && !busy
+                ? cell => toggleOwnRoad(campaign, cell, action => { void applyCampaign(action) })
+                : undefined
+            }
           />
         </section>
       ) : null}
@@ -181,9 +243,18 @@ export function CampaignDetailPage() {
   )
 }
 
-function visibilityKey(value: CampaignDetail["rules"]["visibility"]) {
+function visibilityKey(value: Visibility) {
   if (value === "full") {
     return "visibilityFull" as const
+  }
+  if (value === "total") {
+    return "visibilityTotal" as const
+  }
+  if (value === "charted") {
+    return "visibilityCharted" as const
+  }
+  if (value === "home") {
+    return "visibilityHome" as const
   }
   if (value === "adjacent") {
     return "visibilityAdjacent" as const
@@ -191,7 +262,7 @@ function visibilityKey(value: CampaignDetail["rules"]["visibility"]) {
   return "visibilityAnonymous" as const
 }
 
-function victoryKey(value: CampaignDetail["rules"]["victory"]) {
+function victoryKey(value: Victory) {
   if (value === "armies") {
     return "victoryArmies" as const
   }

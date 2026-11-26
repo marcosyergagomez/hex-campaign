@@ -1,9 +1,7 @@
-"""Local road networks and arrival times, without changing the movement rules."""
+"""Arrival times and map balance checks. Players lay roads after the map exists."""
 
 import heapq
 import random
-from collections import deque
-from dataclasses import replace
 
 from hexcampaign.domain.hexes import Hex, distance, neighbors
 from hexcampaign.domain.land import initial_area, owned
@@ -14,6 +12,9 @@ from hexcampaign.domain.terrain import (
     passable,
     terrain_groups,
 )
+
+_OPEN = frozenset({"llanura", "playa", "rio"})
+_ORIGIN = Hex(0, 0)
 
 
 def arrival_times(plots: dict[Hex, Plot], start: Hex, budget: int = 3) -> dict[Hex, int]:
@@ -34,7 +35,8 @@ def arrival_times(plots: dict[Hex, Plot], start: Hex, budget: int = 3) -> dict[H
             left = budget - ((unpaid - 1) % budget + 1)
         else:
             left -= need
-        left += int(plots[cell].road)
+        # Open tracks leave the village for the eye; only rough roads repay a point.
+        left += int(plots[cell].road and plots[cell].ground not in _OPEN)
         candidate = (turn, -left)
         for other in neighbors(cell):
             if other not in plots or not passable(plots[other]):
@@ -45,7 +47,8 @@ def arrival_times(plots: dict[Hex, Plot], start: Hex, budget: int = 3) -> dict[H
     return {cell: state[0] for cell, state in best.items()}
 
 
-def local_roads(plots: dict[Hex, Plot], forts: tuple[Hex, ...], rng: random.Random) -> bool:
+def raise_lookouts(plots: dict[Hex, Plot], forts: tuple[Hex, ...], rng: random.Random) -> bool:
+    """Give each home a watch hill on the frontier. Roads are laid by players later."""
     board = set(plots)
     area = initial_area(len(board))
     for fort in forts:
@@ -54,7 +57,7 @@ def local_roads(plots: dict[Hex, Plot], forts: tuple[Hex, ...], rng: random.Rand
         lookouts = [
             cell for cell in sorted(home)
             if any(other in outside for other in neighbors(cell))
-            and distance(cell, Hex(0, 0)) <= distance(fort, Hex(0, 0))
+            and distance(cell, _ORIGIN) <= distance(fort, _ORIGIN)
             and plots[cell].ground in {
                 "llanura", "colina", "desierto", "tundra", "montana", "campo",
             }
@@ -64,24 +67,16 @@ def local_roads(plots: dict[Hex, Plot], forts: tuple[Hex, ...], rng: random.Rand
             return False
         rng.shuffle(lookouts)
         lookout = min(lookouts, key=lambda cell: (
-            gaze_from(plots[cell]) < 3, distance(cell, Hex(0, 0)),
+            gaze_from(plots[cell]) < 3, distance(cell, _ORIGIN),
         ))
         if gaze_from(plots[lookout]) < 3:
             plots[lookout] = Plot("colina")
-        land = {cell: plots[cell] for cell in home if cell != fort and passable(plots[cell])}
-        masses = road_masses(land)
-        roads: set[Hex] = set()
-        for mass in masses:
-            entry = min(mass, key=lambda cell: (distance(cell, fort), cell))
-            roads.update(_trunk(mass, entry))
-        reachable = arrival_times({cell: plots[cell] for cell in home}, fort)
-        if not roads <= reachable.keys():
+        gates = [
+            cell for cell in home
+            if any(other in outside and passable(plots[other]) for other in neighbors(cell))
+        ]
+        if len(gates) < 3:
             return False
-        if len(roads) > (len(home) - 1) // 2:
-            return False
-        for cell in roads:
-            plot = plots[cell]
-            plots[cell] = replace(plot, road=True, bridge=plot.bridge or plot.ground == "rio")
     return True
 
 
@@ -94,23 +89,6 @@ def road_masses(plots: dict[Hex, Plot]) -> list[set[Hex]]:
         )
         for group in terrain_groups(plots, grounds)
     ]
-
-
-def _trunk(mass: set[Hex], entry: Hex) -> set[Hex]:
-    previous: dict[Hex, Hex | None] = {entry: None}
-    queue = deque([entry])
-    while queue:
-        cell = queue.popleft()
-        for other in neighbors(cell):
-            if other in mass and other not in previous:
-                previous[other] = cell
-                queue.append(other)
-    cursor: Hex | None = next(reversed(previous))
-    path: set[Hex] = set()
-    while cursor is not None:
-        path.add(cursor)
-        cursor = previous[cursor]
-    return path
 
 
 def balance_problems(

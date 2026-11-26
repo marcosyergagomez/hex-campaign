@@ -113,7 +113,7 @@ def _arrive(walker: Walker, plots, dest: Hex, stopped: set[str], *, fight: bool)
     walker.trail.append(dest)
     walker.path = walker.path[1:]
     walker.paid = 0
-    if left.road:
+    if left.road and left.ground not in {"llanura", "playa", "rio"}:
         walker.budget += 1
     if fight or not walker.path:
         walker.path = []

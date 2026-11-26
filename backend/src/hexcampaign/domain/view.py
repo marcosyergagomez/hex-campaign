@@ -3,16 +3,20 @@
 from datetime import datetime
 
 from hexcampaign.domain.clock import overdue
+from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import Game, find_member, living
 from hexcampaign.domain.hexes import Hex, distance
-from hexcampaign.domain.land import home_radius, owned
+from hexcampaign.domain.roads import road_progress
 from hexcampaign.domain.sight import gazed_cells, in_home, known_hex, sees_army
+from hexcampaign.domain.territory import home_land, homes_by_player
 
 
 def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
     member = find_member(game, viewer)
     staff = member is not None and member.role in {"owner", "admin"} and member.status == "active"
-    owners = _territorial_owners(game)
+    board = set(game.hexes)
+    home = home_land(game, viewer, board=board) if game.plots is not None else set()
+    owners = _territorial_owners(game, board)
     body = {
         "revision": game.revision,
         "name": game.name,
@@ -33,9 +37,12 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
         },
         "you": None if member is None else _you(member),
         "members": [_member_view(item, staff or item.player_id == viewer) for item in game.members],
-        "hexes": [_hex_view(game, viewer, cell, owners.get(cell)) for cell in game.hexes],
-        "armies": _armies(game, viewer),
-        "fortresses": _fortresses(game, viewer),
+        "hexes": [
+            _hex_view(game, viewer, cell, owners.get(cell), home=home, board=board)
+            for cell in game.hexes
+        ],
+        "armies": _armies(game, viewer, home=home, board=board),
+        "fortresses": _fortresses(game, viewer, home=home, board=board),
         "orders": {
             army_id: [{"q": cell.q, "r": cell.r} for cell in path]
             for army_id, path in game.orders.get(viewer, {}).items()
@@ -43,7 +50,7 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
         "battles": [
             _battle_view(game, battle, viewer, staff, now)
             for battle in game.battles
-            if _show_battle(game, battle, viewer, staff)
+            if _show_battle(game, battle, viewer, staff, home=home, board=board)
         ],
         "notices": list(game.notices) if staff else [],
         "events": list(game.events),
@@ -51,8 +58,62 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
         "winners": list(game.winners),
         "orders_due": game.phase == "orders"
         and overdue(game.orders_opened_at, game.rules.order_days, now),
+        "road_ready": sorted(game.road_ready),
+        "roads": _roads_view(game, viewer),
     }
     return body
+
+
+def project_roads_delta(
+    game: Game,
+    viewer: str,
+    changed: list[Hex],
+) -> dict[str, object]:
+    """Slim preparing-phase patch: road counters plus only the hexes that moved."""
+    board = set(game.hexes)
+    home = home_land(game, viewer, board=board) if game.plots is not None else set()
+    owners = _owners_for(game, changed, board)
+    return {
+        "kind": "roads_delta",
+        "revision": game.revision,
+        "phase": game.phase,
+        "turn": game.turn,
+        "road_ready": sorted(game.road_ready),
+        "roads": _roads_view(game, viewer),
+        "hexes": [
+            _hex_view(game, viewer, cell, owners.get(cell), home=home, board=board)
+            for cell in changed
+            if cell in board
+        ],
+    }
+
+
+def _roads_view(game: Game, viewer: str) -> dict[str, object] | None:
+    if game.phase != "preparing" or game.plots is None or find_member(game, viewer) is None:
+        return None
+    try:
+        budget, laid = road_progress(game, viewer)
+    except DomainError:
+        return None
+    return {
+        "budget": budget,
+        "laid": laid,
+        "left": max(0, budget - laid),
+        "ready": viewer in game.road_ready,
+    }
+
+
+def _owners_for(game: Game, cells: list[Hex], board: set[Hex]) -> dict[Hex, str]:
+    if not cells or game.plots is None:
+        return {}
+    wanted = set(cells)
+    owners: dict[Hex, str] = {}
+    for player_id, home in homes_by_player(game, board=board).items():
+        for cell in wanted & home:
+            owners[cell] = player_id
+        if len(owners) == len(wanted):
+            break
+    return owners
 
 
 def _you(member) -> dict[str, object]:
@@ -81,7 +142,7 @@ def _member_view(member, show_missed: bool) -> dict[str, object]:
     return shown
 
 
-def _territorial_owners(game: Game) -> dict[Hex, str]:
+def _territorial_owners(game: Game, board: set[Hex] | None = None) -> dict[Hex, str]:
     if game.plots is None:
         owners: dict[Hex, str] = {}
         for cell in game.hexes:
@@ -91,16 +152,24 @@ def _territorial_owners(game: Game) -> dict[Hex, str]:
             if nearest and (len(nearest) == 1 or nearest[0][0] < nearest[1][0]):
                 owners[cell] = nearest[0][1]
         return owners
-    board = set(game.hexes)
+    cells = set(game.hexes) if board is None else board
     return {
-        cell: fort.player_id
-        for fort in game.fortresses
-        for cell in owned(fort.at(), home_radius(game.rules.map_size), board, count=game.home_size)
+        cell: player_id
+        for player_id, home in homes_by_player(game, board=cells).items()
+        for cell in home
     }
 
 
-def _hex_view(game: Game, viewer: str, cell: Hex, owner: str | None) -> dict[str, object]:
-    known = known_hex(game, viewer, cell)
+def _hex_view(
+    game: Game,
+    viewer: str,
+    cell: Hex,
+    owner: str | None,
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> dict[str, object]:
+    known = known_hex(game, viewer, cell, home=home, board=board)
     shown: dict[str, object] = {"q": cell.q, "r": cell.r, "known": known}
     plot = None if game.plots is None else game.plots.get(cell)
     if known:
@@ -111,10 +180,16 @@ def _hex_view(game: Game, viewer: str, cell: Hex, owner: str | None) -> dict[str
     return shown
 
 
-def _armies(game: Game, viewer: str) -> list[dict[str, object]]:
+def _armies(
+    game: Game,
+    viewer: str,
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> list[dict[str, object]]:
     shown: list[dict[str, object]] = []
     for army in game.armies:
-        if not sees_army(game, viewer, army):
+        if not sees_army(game, viewer, army, home=home, board=board):
             continue
         if army.player_id != viewer and game.rules.visibility == "anonymous":
             shown.append({"id": army.id, "q": army.q, "r": army.r, "anonymous": True})
@@ -136,15 +211,21 @@ def _armies(game: Game, viewer: str) -> list[dict[str, object]]:
     return shown
 
 
-def _fortresses(game: Game, viewer: str) -> list[dict[str, object]]:
+def _fortresses(
+    game: Game,
+    viewer: str,
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> list[dict[str, object]]:
     shown: list[dict[str, object]] = []
     live: set[Hex] = set()
     for fort in game.fortresses:
         cell = Hex(fort.q, fort.r)
         live.add(cell)
-        if fort.player_id != viewer and not known_hex(game, viewer, cell):
+        if fort.player_id != viewer and not known_hex(game, viewer, cell, home=home, board=board):
             continue
-        visible = _hold_visible(game, viewer, fort)
+        visible = _hold_visible(game, viewer, fort, home=home, board=board)
         shown.append(
             {
                 "player_id": fort.player_id,
@@ -154,11 +235,18 @@ def _fortresses(game: Game, viewer: str) -> list[dict[str, object]]:
                 "hold": fort.hold if visible else 0,
             }
         )
-    shown.extend(_remembered_fortresses(game, viewer, live))
+    shown.extend(_remembered_fortresses(game, viewer, live, home=home, board=board))
     return shown
 
 
-def _remembered_fortresses(game: Game, viewer: str, live: set[Hex]) -> list[dict[str, object]]:
+def _remembered_fortresses(
+    game: Game,
+    viewer: str,
+    live: set[Hex],
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> list[dict[str, object]]:
     if game.plots is None:
         return []
     remembered: list[dict[str, object]] = []
@@ -167,7 +255,11 @@ def _remembered_fortresses(game: Game, viewer: str, live: set[Hex]) -> list[dict
             continue
         q_text, r_text = key.split(",")
         cell = Hex(int(q_text), int(r_text))
-        if cell in live or _looking(game, viewer, cell) or not known_hex(game, viewer, cell):
+        if (
+            cell in live
+            or _looking(game, viewer, cell, home=home, board=board)
+            or not known_hex(game, viewer, cell, home=home, board=board)
+        ):
             continue
         remembered.append(
             {"player_id": owner, "q": cell.q, "r": cell.r, "holder_id": None, "hold": 0}
@@ -175,26 +267,41 @@ def _remembered_fortresses(game: Game, viewer: str, live: set[Hex]) -> list[dict
     return remembered
 
 
-def _show_battle(game: Game, battle, viewer: str, staff: bool) -> bool:
+def _show_battle(
+    game: Game,
+    battle,
+    viewer: str,
+    staff: bool,
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> bool:
     if game.plots is not None:
-        return _show_terrain_battle(game, battle, viewer, staff)
+        return _show_terrain_battle(game, battle, viewer, staff, home=home, board=board)
     if staff or viewer in battle.players or game.rules.visibility == "full":
         return True
     # An anonymous token has no name. A battle list would put the name back.
     if game.rules.visibility == "anonymous":
         return False
     cell = Hex(battle.q, battle.r)
-    if not known_hex(game, viewer, cell):
+    if not known_hex(game, viewer, cell, home=home, board=board):
         return False
     involved = [army for army in game.armies if army.id in set(battle.army_ids)]
-    if any(sees_army(game, viewer, army) for army in involved):
+    if any(sees_army(game, viewer, army, home=home, board=board) for army in involved):
         return True
     spots = [army.at() for army in living(game, viewer)]
     return any(spot is not None and distance(cell, spot) <= 1 for spot in spots)
 
 
-def _hold_visible(game: Game, viewer: str, fort) -> bool:
-    if game.plots is not None and not _looking(game, viewer, fort.at()):
+def _hold_visible(
+    game: Game,
+    viewer: str,
+    fort,
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> bool:
+    if game.plots is not None and not _looking(game, viewer, fort.at(), home=home, board=board):
         return False
     if not fort.holder_id or fort.holder_id == viewer or game.rules.visibility in {"full", "total"}:
         return bool(fort.holder_id)
@@ -202,7 +309,9 @@ def _hold_visible(game: Game, viewer: str, fort) -> bool:
         return False
     cell = fort.at()
     return any(
-        sees_army(game, viewer, army) and army.player_id == fort.holder_id and army.at() == cell
+        sees_army(game, viewer, army, home=home, board=board)
+        and army.player_id == fort.holder_id
+        and army.at() == cell
         for army in game.armies
     )
 
@@ -227,22 +336,39 @@ def _battle_view(game: Game, battle, viewer: str, staff: bool, now: datetime) ->
     return shown
 
 
-def _show_terrain_battle(game: Game, battle, viewer: str, staff: bool) -> bool:
+def _show_terrain_battle(
+    game: Game,
+    battle,
+    viewer: str,
+    staff: bool,
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> bool:
     if viewer in battle.players or game.rules.visibility in {"full", "total"}:
         return True
     if staff and battle.result is None:
         return True
     cell = Hex(battle.q, battle.r)
-    if not known_hex(game, viewer, cell):
+    if not known_hex(game, viewer, cell, home=home, board=board):
         return False
     involved = [army for army in game.armies if army.id in set(battle.army_ids)]
-    return any(sees_army(game, viewer, army) for army in involved) or _looking(game, viewer, cell)
+    return any(
+        sees_army(game, viewer, army, home=home, board=board) for army in involved
+    ) or _looking(game, viewer, cell, home=home, board=board)
 
 
-def _looking(game: Game, viewer: str, cell: Hex) -> bool:
+def _looking(
+    game: Game,
+    viewer: str,
+    cell: Hex,
+    *,
+    home: set[Hex] | None = None,
+    board: set[Hex] | None = None,
+) -> bool:
     if game.rules.visibility in {"full", "total"}:
         return True
-    if in_home(game, viewer, cell):
+    if in_home(game, viewer, cell, home=home, board=board):
         return True
     for army in living(game, viewer):
         spot = army.at()

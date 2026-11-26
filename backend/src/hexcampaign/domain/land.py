@@ -1,5 +1,6 @@
 """Compact territories and the rotations used to distribute fortresses."""
 
+import heapq
 import math
 
 from hexcampaign.domain.errors import DomainError
@@ -43,7 +44,7 @@ def rotate(cell: Hex, sixths: int) -> Hex:
 
 def owned(fort: Hex, radius: int, board: set[Hex], *, count: int | None = None) -> set[Hex]:
     if count is not None:
-        return set(sorted(board, key=lambda cell: (
+        return set(heapq.nsmallest(count, board, key=lambda cell: (
             distance(cell, fort), distance(cell, Hex(0, 0)), cell,
-        ))[:count])
+        )))
     return {cell for cell in board if distance(cell, fort) <= radius}

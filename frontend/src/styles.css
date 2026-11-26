@@ -723,6 +723,22 @@ button:disabled {
   margin: 0;
 }
 
+.roads-prep {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin: 8px 0 14px;
+}
+
+.roads-prep p {
+  margin: 0;
+}
+
+.roads-prep button {
+  width: auto;
+}
+
 .territory-legend {
   display: flex;
   flex-wrap: wrap;

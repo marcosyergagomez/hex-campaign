@@ -10,7 +10,7 @@ from hexcampaign.domain.rules import Rules, rules_from
 from hexcampaign.domain.terrain import Plot, checked_plot
 
 VERSION = 2
-PHASES = frozenset({"recruiting", "placing", "orders", "battles", "finished"})
+PHASES = frozenset({"recruiting", "placing", "preparing", "orders", "battles", "finished"})
 
 
 @dataclass
@@ -97,6 +97,7 @@ class Game:
     fort_memory: dict[str, dict[str, str | None]] = field(default_factory=dict)
     home_size: int | None = None
     identity_required: bool = False
+    road_ready: set[str] = field(default_factory=set)
 
 
 def find_member(game: Game, player_id: str) -> Member | None:
@@ -204,6 +205,7 @@ def to_dict(game: Game) -> dict[str, object]:
         "surveyor": game.surveyor,
         "home_size": game.home_size,
         "identity_required": game.identity_required,
+        "road_ready": sorted(game.road_ready),
         "fort_memory": {
             player_id: [
                 {"q": int(key.split(",")[0]), "r": int(key.split(",")[1]), "owner": owner}
@@ -269,6 +271,10 @@ def from_dict(data: object) -> Game:
     surveyor = data.get("surveyor")
     game.surveyor = None if surveyor is None else str(surveyor)
     game.fort_memory = _memory(data.get("fort_memory", {}))
+    ready = data.get("road_ready", [])
+    if not isinstance(ready, list) or any(not isinstance(item, str) for item in ready):
+        raise DomainError("rules_invalid")
+    game.road_ready = set(ready)
     return game
 
 
