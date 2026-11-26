@@ -33,8 +33,15 @@ async def get_events(request: Request):
         return user
     user_id = int(user.pk)
 
-    async def stream():
+    try:
         queue = live_bus.subscribe(user_id)
+    except RuntimeError:
+        return JSONResponse(
+            {"errors": {"form": ["Demasiadas conexiones en vivo. Cierra otras pestañas."]}},
+            status_code=429,
+        )
+
+    async def stream():
         try:
             yield _frame({"type": "ready"})
             while True:

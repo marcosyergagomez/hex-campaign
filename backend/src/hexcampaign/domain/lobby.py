@@ -206,9 +206,21 @@ def place_armies(game: Game, actor: str, fortress: Hex, spots: dict[str, Hex]) -
         raise DomainError("order_illegal")
     if home is not None and any(spot not in home for spot in spots.values()):
         raise DomainError("order_illegal")
-    if len({fortress, *spots.values()}) != 1 + len(spots):
+    fighters = [army for army in own if army.kind == "army"]
+    explorers = [army for army in own if army.kind == "explorer"]
+    fighter_cells = [spots[army.id] for army in fighters]
+    if len(set(fighter_cells)) != len(fighter_cells):
         raise DomainError("order_illegal")
-    _reject_overlap(game, actor, {fortress, *spots.values()})
+    forts = {fortress, *(fort.at() for fort in game.fortresses)}
+    if any(spots[army.id] in forts for army in explorers):
+        raise DomainError("order_illegal")
+    _reject_overlap(
+        game,
+        actor,
+        fortress,
+        {army.id: spots[army.id] for army in fighters},
+        {army.id: spots[army.id] for army in explorers},
+    )
     current = next((fort for fort in game.fortresses if fort.player_id == actor), None)
     if current is None:
         game.fortresses.append(Fortress(actor, fortress.q, fortress.r))
@@ -264,12 +276,22 @@ def describe_army(
     return bump(game)
 
 
-def _reject_overlap(game: Game, actor: str, cells: set[Hex]) -> None:
+def _reject_overlap(
+    game: Game,
+    actor: str,
+    fortress: Hex,
+    fighters: dict[str, Hex],
+    explorers: dict[str, Hex],
+) -> None:
+    cells = {fortress, *fighters.values(), *explorers.values()}
     for fort in game.fortresses:
         if fort.player_id != actor and fort.at() in cells:
             raise DomainError("order_illegal")
     for army in game.armies:
-        if army.player_id != actor and army.at() in cells:
+        if army.player_id == actor or army.at() is None:
+            continue
+        # Fighting armies may not start on an enemy token; explorers may share.
+        if army.at() in fighters.values():
             raise DomainError("order_illegal")
 
 
@@ -325,36 +347,51 @@ def _deploy(game: Game) -> None:
     chosen = _seat_centers(game, players)
     game.anchors = list(chosen)
     taken = set(chosen)
+    board = _stand_board(game)
     for member, fort in zip(players, chosen, strict=True):
         if game.plots is not None and not _standable(game, fort):
             raise DomainError("rules_invalid")
         game.fortresses.append(Fortress(member.player_id, fort.q, fort.r))
-        spots = [fort]
-        if game.rules.armies == 2:
-            spots.append(_beside(fort, taken, _stand_board(game)))
-            taken.add(spots[-1])
-        for number, spot in enumerate(spots, start=1):
-            game.armies.append(_army(game, member.player_id, str(number), spot))
+        army_spot = fort
+        explorer_spot = _beside(fort, taken, board)
+        taken.add(explorer_spot)
+        race = member.faction
+        game.armies.append(_army(game, member.player_id, "1", army_spot, kind="army", race=race))
+        game.armies.append(
+            _army(game, member.player_id, "Explorador", explorer_spot, kind="explorer", race=race)
+        )
     _territory(game)
     _home_notice(game)
 
 
 def _blank_armies(game: Game) -> None:
     for member in seated(game):
-        for number in range(1, game.rules.armies + 1):
-            game.armies.append(_army(game, member.player_id, str(number), None))
+        race = member.faction
+        game.armies.append(_army(game, member.player_id, "1", None, kind="army", race=race))
+        game.armies.append(
+            _army(game, member.player_id, "Explorador", None, kind="explorer", race=race)
+        )
 
 
-def _army(game: Game, player_id: str, name: str, spot: Hex | None) -> Army:
+def _army(
+    game: Game,
+    player_id: str,
+    name: str,
+    spot: Hex | None,
+    *,
+    kind: str = "army",
+    race: str = "",
+) -> Army:
     army = Army(
         id=f"a{game.next_id}",
         player_id=player_id,
         name=name,
         commander="",
-        race="",
+        race=race,
         roster="",
         q=None if spot is None else spot.q,
         r=None if spot is None else spot.r,
+        kind=kind,
     )
     game.next_id += 1
     return army

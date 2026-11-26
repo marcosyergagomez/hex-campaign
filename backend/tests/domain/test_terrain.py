@@ -597,13 +597,16 @@ def test_changing_rules_cannot_detach_the_ground() -> None:
     assert game.rules.hold_turns == 4
 
 
-def test_two_armies_of_one_player_cannot_lock_the_same_hex() -> None:
-    game = create_game("Norte", _table(armies=2, map_size=271), "ana", "Ana")
+def test_two_fighting_armies_of_one_player_cannot_lock_the_same_hex() -> None:
+    game = create_game("Norte", _table(map_size=271), "ana", "Ana")
     lay(game, generate(271, 2, random.Random(1)), surveyor=None)
     accept_seat(game, "boa", "Boa")
     begin(_ready_table(game), "ana", [], NOW)
     _finish_prep(game)
-    own = [army for army in game.armies if army.player_id == "ana"]
+    fighters = [army for army in game.armies if army.player_id == "ana" and army.kind == "army"]
+    scout = next(army for army in game.armies if army.player_id == "ana" and army.kind == "explorer")
+    scout.kind = "army"
+    own = fighters + [scout]
     fort = next(item for item in game.fortresses if item.player_id == "ana").at()
     assert game.plots is not None
     side = next(cell for cell in neighbors(fort) if exit_cost(game.plots[cell]) == 1)
@@ -615,7 +618,17 @@ def test_two_armies_of_one_player_cannot_lock_the_same_hex() -> None:
     own[0].q, own[0].r = fort.q, fort.r
     own[1].q, own[1].r = side.q, side.r
     with pytest.raises(DomainError):
-        lock_orders(game, "ana", {own[0].id: (target,), own[1].id: (target,)}, NOW)
+        lock_orders(
+            game,
+            "ana",
+            {
+                unit.id: ()
+                for unit in game.armies
+                if unit.player_id == "ana" and not unit.destroyed
+            }
+            | {own[0].id: (target,), own[1].id: (target,)},
+            NOW,
+        )
 
 
 def test_a_seen_fortress_stays_until_the_player_looks_again() -> None:

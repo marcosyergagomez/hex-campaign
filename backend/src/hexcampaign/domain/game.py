@@ -8,6 +8,7 @@ from hexcampaign.domain.identity import checked_identity
 from hexcampaign.domain.land import checked_home_size
 from hexcampaign.domain.rules import Rules, campaign_description, rules_from
 from hexcampaign.domain.terrain import Plot, checked_plot
+from hexcampaign.domain.units import checked_kind
 
 VERSION = 2
 PHASES = frozenset({"recruiting", "placing", "preparing", "orders", "battles", "finished"})
@@ -37,6 +38,7 @@ class Army:
     r: int | None
     destroyed: bool = False
     paid: int = 0
+    kind: str = "army"
 
     def at(self) -> Hex | None:
         if self.q is None or self.r is None:
@@ -131,6 +133,10 @@ def living(game: Game, player_id: str | None = None) -> list[Army]:
     return found
 
 
+def living_fighters(game: Game, player_id: str | None = None) -> list[Army]:
+    return [army for army in living(game, player_id) if army.kind == "army"]
+
+
 def require_member(game: Game, player_id: str) -> Member:
     member = find_member(game, player_id)
     if member is None or member.status == "expelled":
@@ -139,8 +145,9 @@ def require_member(game: Game, player_id: str) -> Member:
 
 
 def require_player(game: Game, player_id: str) -> Member:
+    """Only an active seat may issue player commands (orders, roads, ready, …)."""
     member = require_member(game, player_id)
-    if member.status == "eliminated":
+    if member.status != "active":
         raise DomainError("forbidden")
     return member
 
@@ -328,6 +335,7 @@ def _army_dict(army: Army) -> dict[str, object]:
         "r": army.r,
         "destroyed": army.destroyed,
         "paid": army.paid,
+        "kind": army.kind,
     }
 
 
@@ -384,6 +392,7 @@ def _army(data: object) -> Army:
         r=_optional_whole(raw["r"]),
         destroyed=bool(raw["destroyed"]),
         paid=_whole(raw["paid"]) if "paid" in raw else 0,
+        kind=checked_kind(raw["kind"]) if "kind" in raw else "army",
     )
 
 

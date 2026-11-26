@@ -21,6 +21,7 @@ import { InvitePanel } from "./InvitePanel"
 import { PlayerIdentity } from "./PlayerIdentity"
 import { RoadPreparation, isKnownHex, toggleOwnRoad } from "./RoadPreparation"
 import { Banner } from "../form"
+import { toBoardTokens } from "../game/hex/boardTokens"
 import { HexBoard } from "../game/hex/HexBoard"
 import { clientNotice, type MessageKey } from "../i18n/catalog"
 import { useI18n } from "../i18n/language"
@@ -98,20 +99,30 @@ export function CampaignDetailPage() {
 
   useCampaignLive(campaign?.id ?? null, campaign?.revision ?? null, busy, pullLive)
 
-  async function applyCampaign(action: () => Promise<CampaignDetail>) {
-    if (!campaign || busy) return
-    setBusy(true)
+  async function mutateCampaign(action: () => Promise<CampaignDetail>) {
+    if (!campaign) throw new Error("Campaign not loaded")
+    const snapshot = campaign
     try {
       accept(await action())
-      if (mounted.current) setErrors({})
     } catch (error: unknown) {
       if (error instanceof ApiError && error.status === 409) {
         try {
-          await refresh(campaign.id)
+          await refresh(snapshot.id)
         } catch {
           /* keep the mutation error below */
         }
       }
+      throw error
+    }
+  }
+
+  async function applyCampaign(action: () => Promise<CampaignDetail>) {
+    if (!campaign || busy) return
+    setBusy(true)
+    try {
+      await mutateCampaign(action)
+      if (mounted.current) setErrors({})
+    } catch (error: unknown) {
       if (mounted.current) setErrors(presentError(error, "campaignLoadFailed"))
     } finally {
       if (mounted.current) setBusy(false)
@@ -120,22 +131,12 @@ export function CampaignDetailPage() {
 
   async function saveBanner(faction: string, color: string) {
     if (!campaign) throw new Error("Campaign not loaded")
-    try {
-      accept(await saveIdentity(campaign.id, campaign.revision, faction, color))
-    } catch (error: unknown) {
-      if (error instanceof ApiError && error.status === 409) await refresh(campaign.id)
-      throw error
-    }
+    await mutateCampaign(() => saveIdentity(campaign.id, campaign.revision, faction, color))
   }
 
   async function markReady() {
     if (!campaign) throw new Error("Campaign not loaded")
-    try {
-      accept(await markCampaignReady(campaign.id, campaign.revision))
-    } catch (error: unknown) {
-      if (error instanceof ApiError && error.status === 409) await refresh(campaign.id)
-      throw error
-    }
+    await mutateCampaign(() => markCampaignReady(campaign.id, campaign.revision))
   }
 
   const preparing = campaign?.phase === "preparing" && campaign.roads !== null
@@ -169,6 +170,10 @@ export function CampaignDetailPage() {
       player_id: member.player_id, color: member.color, label: member.alias,
     })) : []),
     [campaign],
+  )
+  const tokens = useMemo(
+    () => (campaign ? toBoardTokens(campaign, t) : []),
+    [campaign, t],
   )
 
   if (!campaign && Object.keys(errors).length === 0) {
@@ -295,6 +300,7 @@ export function CampaignDetailPage() {
             unknown={unknown}
             anchors={campaign.fortresses}
             players={players}
+            tokens={tokens}
             onCellClick={
               preparing && campaign.roads && !campaign.roads.ready && !busy
                 ? cell => toggleOwnRoad(campaign, cell, action => { void applyCampaign(action) })
@@ -318,24 +324,9 @@ export function CampaignDetailPage() {
             onInvite={
               canInvite
                 ? async (alias) => {
-                    try {
-                      accept(
-                        await inviteCampaignPlayer(
-                          campaign.id,
-                          campaign.revision,
-                          alias,
-                        ),
-                      )
-                    } catch (error: unknown) {
-                      if (error instanceof ApiError && error.status === 409) {
-                        try {
-                          await refresh(campaign.id)
-                        } catch {
-                          /* keep invite error */
-                        }
-                      }
-                      throw error
-                    }
+                    await mutateCampaign(() =>
+                      inviteCampaignPlayer(campaign.id, campaign.revision, alias),
+                    )
                   }
                 : undefined
             }
@@ -372,7 +363,7 @@ function RulesPanel({ campaign }: { campaign: CampaignDetail }) {
           {t("ruleSeats")}: {campaign.rules.seats}
         </li>
         <li>
-          {t("ruleArmies")}: {campaign.rules.armies}
+          {t("ruleArmies")}: {t("ruleArmiesHint")}
         </li>
         <li>
           {t("ruleMovement")}: {campaign.rules.movement}

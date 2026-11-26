@@ -28,7 +28,7 @@ Queda fijo en ese momento:
 
 - Jugadores: 2, 3 o 4.
 - Ejércitos iniciales de cada jugador: 1 o 2.
-- Movimiento de cada ejército: de 1 a 5 puntos. En esta versión es el mismo para todos. Al crear, se recomienda 3 en mapa pequeño, 4 en mediano y 5 en grande; el creador puede cambiarlo.
+- Movimiento base de cada ejército: de 1 a 5 puntos. El explorador suma 4 a ese valor. Al crear, se recomienda 3 en mapa pequeño, 4 en mediano y 5 en grande; el creador puede cambiarlo.
 - Tamaño del mapa: pequeño, mediano o grande. En la creación de campaña se autogenera un paisaje o se elige uno generado; el tamaño lo fija ese mapa (hoy 271, 397 o 547 casillas). Los mapas guardados de otros tamaños siguen siendo compatibles.
 - Visibilidad de los ejércitos enemigos: todo el mapa, solo los adyacentes, o una ficha sin nombre ni composición. Con un mapa de terrenos, esta elección pasa a ser la de «Mapa y terrenos»: total, mapa conocido con niebla, o solo el territorio propio.
 - Victoria: destruir todos los ejércitos rivales, retener una fortaleza enemiga un número de turnos seguidos, o cualquiera de las dos.
@@ -46,13 +46,15 @@ Si la campaña lleva mapa de terrenos, tras empezar —o tras cerrar la colocaci
 
 En preparación, todos los asientos activos colocan a la vez. Cada uno dispone de un presupuesto de piezas igual al doble de la distancia máxima, en hexágonos, desde su fortaleza hasta el borde de su territorio. Solo puede poner camino en casillas transitables de su territorio, nunca en la fortaleza. Cada pieza nueva tiene que tocar la fortaleza o una pieza ya puesta, de modo que la red quede conectada. Poner camino sobre un río completo añade puente. Puede quitar una pieza propia mientras el resto siga unido a la fortaleza. Quien ha terminado se marca listo; cuando todos los asientos activos lo están, se abre el turno 1 de órdenes. Los mapas generados salen sin caminos locales: las piezas las pone cada jugador en esta fase. Un mapa dibujado a mano puede traer caminos o puentes ya puestos.
 
-## Ejército
+## Ejército y explorador
 
-Un ejército es una ficha con nombre, comandante, raza y lista. La lista no cambia el movimiento ni las bajas de esta versión.
+Al empezar, cada jugador recibe dos fichas: un ejército y un explorador. El aspecto de cada ficha sigue la raza del estandarte y toma el color elegido.
 
-Dos ejércitos del mismo jugador no comparten hexágono. Cada uno gasta su propio movimiento: puede avanzar menos hexágonos o quedarse quieto, y no se transfiere movimiento de uno a otro.
+Un ejército es la ficha de combate: puede pelear, ocupar fortalezas y cuenta para la victoria por destrucción. Dos ejércitos del mismo jugador no comparten hexágono. Cada uno gasta su propio movimiento; no se transfiere de uno a otro.
 
-Un jugador sin ejércitos queda eliminado. Sus órdenes pendientes se cancelan. La campaña sigue entre los demás.
+El explorador es un jinete que no lucha. Se mueve 4 puntos más que el ejército y mira 5 casillas más lejos. Las reglas de coste del terreno le afectan igual. Puede compartir casilla con cualquier ejército o explorador, propio o ajeno, y no provoca batalla. No puede entrar en ninguna fortaleza.
+
+Un jugador sin ejércitos de combate queda eliminado, aunque le quede el explorador. Sus órdenes pendientes se cancelan. La campaña sigue entre los demás.
 
 ## Territorio y visibilidad
 
@@ -145,7 +147,7 @@ Al crear se elige una de tres, al modo de un mapa de estrategia:
 - Mapa conocido con niebla. El terreno se conoce entero desde el principio. Un ejército enemigo solo se ve dentro de la mirada o dentro del territorio propio.
 - Solo el territorio propio. Al empezar, cada jugador conoce y ve su disco, y el resto está por descubrir. Salta un aviso en la campaña de que empieza así.
 
-En las dos con niebla, un ejército mira a 2 casillas. La distancia cuenta la propia como 0 y llega hasta N inclusive. La colina lo deja en 3, la montaña que se puede subir lo deja en 4, y el bosque profundo lo deja en 0: solo la casilla que pisa, además del territorio propio, que se sigue viendo entero. El resto de terrenos no cambia la mirada. La mirada del jugador es la suma de la de sus ejércitos. Cuando la niebla deja ver a un enemigo, se ve su nombre. Un choque contra un ejército que la niebla tapaba se resuelve igual.
+En las dos con niebla, un ejército mira a 2 casillas. La distancia cuenta la propia como 0 y llega hasta N inclusive. La colina lo deja en 3, la montaña que se puede subir lo deja en 4, y el bosque profundo lo deja en 0: solo la casilla que pisa, además del territorio propio, que se sigue viendo entero. El explorador suma 5 a esa mirada. El resto de terrenos no cambia la mirada. La mirada del jugador es la suma de la de sus fichas. Cuando la niebla deja ver a un enemigo, se ve su nombre. Un choque contra un ejército que la niebla tapaba se resuelve igual.
 
 Mientras las órdenes están abiertas, cada cual ve lo que conoce y lo que la niebla le deja en las posiciones de salida. Cerrar la orden no descubre nada. Cuando las órdenes se ejecutan a la vez, cada paso que entra en una casilla descubre lo que se miraría desde ahí y actualiza la niebla. Al cerrar el turno, la niebla queda en las posiciones finales, más el territorio propio. El terreno descubierto por el camino se queda. Un enemigo que solo estuvo a la vista a mitad del camino deja de verse si al final no cae en la mirada ni en el territorio propio.
 
@@ -161,7 +163,7 @@ En un mapa nuevo generado, cada territorio ocupa aproximadamente el 7 % del tabl
 
 La fortaleza, y cualquier ejército, solo se colocan donde se puede entrar. El territorio de una fortaleza no puede compartir casilla con el de otra. Tiene que quedar terreno neutral. Si con esas plazas no cabe, esas fortalezas no valen y hay que moverlas o bajar plazas.
 
-Si colocan los jugadores, al empezar cada asiento recibe un territorio de casa ya marcado (el mismo disco que usaría una fortaleza sembrada). Solo puede poner la fortaleza y los ejércitos iniciales en casillas transitables de ese territorio; la fortaleza tiene que seguir cumpliendo los límites territoriales entre vecinos. Un ejército inicial puede quedar en la fortaleza. El segundo, si lo hay, en otra casilla libre de ese mismo territorio.
+Si colocan los jugadores, al empezar cada asiento recibe un territorio de casa ya marcado (el mismo disco que usaría una fortaleza sembrada). Solo puede poner la fortaleza y las fichas iniciales en casillas transitables de ese territorio; la fortaleza tiene que seguir cumpliendo los límites territoriales entre vecinos. El ejército puede quedar en la fortaleza. El explorador no puede entrar en ella, pero sí puede compartir casilla con el ejército.
 
 En un mapa hecho a mano, si coloca la aplicación, reparte las fortalezas junto al borde, lo más lejos posible unas de otras, cumpliendo lo de arriba. El mapa en sí es libre: puede tener un río suelto, una cordillera partida o el transitable cortado en dos.
 

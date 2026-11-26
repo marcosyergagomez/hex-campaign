@@ -332,6 +332,20 @@ export type ChronicleEntry = {
   winners?: string[]
 }
 
+export type UnitKind = "army" | "explorer"
+
+export type CampaignArmy = {
+  id: string
+  player_id: string | null
+  name: string
+  q: number | null
+  r: number | null
+  kind: UnitKind
+  race: string
+  anonymous: boolean
+  destroyed: boolean
+}
+
 export type CampaignDetail = {
   id: string
   name: string
@@ -345,6 +359,7 @@ export type CampaignDetail = {
   you: CampaignMember | null
   hexes: CampaignHex[]
   fortresses: { q: number; r: number; player_id: string }[]
+  armies: CampaignArmy[]
   chronicle: ChronicleEntry[]
   road_ready: string[]
   lobby_ready: string[]
@@ -571,12 +586,14 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
   const you = record.you === null || !record.joined ? null : readMember(record.you)
   const hexes: CampaignHex[] = []
   const fortresses: CampaignDetail["fortresses"] = []
+  const armies: CampaignArmy[] = []
   if (record.joined) {
     // Recruiting seals the atlas (empty hexes). Drawn atlases may keep a subset later.
     if (!you || !Array.isArray(record.hexes) ||
       (record.hexes.length < 1 && record.phase !== "recruiting") ||
       record.hexes.length > rules.map_size ||
-      !Array.isArray(record.fortresses) || record.fortresses.length > 8) return null
+      !Array.isArray(record.fortresses) || record.fortresses.length > 8 ||
+      !Array.isArray(record.armies) || record.armies.length > 32) return null
     for (const value of record.hexes) {
       const cell = readCampaignHex(value)
       if (!cell || (cell.known && cell.owner_id !== null &&
@@ -591,6 +608,11 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
         !members.some(member => member.player_id === value.player_id) ||
         !hexes.some(cell => cell.q === spot.q && cell.r === spot.r)) return null
       fortresses.push({ ...spot, player_id: value.player_id })
+    }
+    for (const value of record.armies) {
+      const army = readCampaignArmy(value, members)
+      if (!army) return null
+      armies.push(army)
     }
   }
   const road_ready = readIdList(record.road_ready)
@@ -613,10 +635,52 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
     you,
     hexes,
     fortresses,
+    armies,
     chronicle: record.phase === "finished" ? readChronicle(record.chronicle) : [],
     road_ready: road_ready ?? [],
     lobby_ready: lobby_ready ?? [],
     roads: record.phase === "preparing" ? roads : null,
+  }
+}
+
+function readCampaignArmy(value: unknown, members: CampaignMember[]): CampaignArmy | null {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  const id = readLabel(record.id, 64)
+  const kind = record.kind === "explorer" || record.kind === "army" ? record.kind : null
+  const q = record.q === null ? null : readInt(record.q, -64, 64)
+  const r = record.r === null ? null : readInt(record.r, -64, 64)
+  if (!id || !kind || typeof record.anonymous !== "boolean") return null
+  if (record.q !== null && q === null) return null
+  if (record.r !== null && r === null) return null
+  if (record.anonymous) {
+    return {
+      id,
+      player_id: null,
+      name: "",
+      q,
+      r,
+      kind,
+      race: "",
+      anonymous: true,
+      destroyed: false,
+    }
+  }
+  const player_id = readLabel(record.player_id, 64)
+  const name = typeof record.name === "string" && record.name.length <= 40 ? record.name : null
+  const race = typeof record.race === "string" && record.race.length <= 40 ? record.race : ""
+  if (!player_id || name === null || typeof record.destroyed !== "boolean") return null
+  if (!members.some(member => member.player_id === player_id)) return null
+  return {
+    id,
+    player_id,
+    name,
+    q,
+    r,
+    kind,
+    race,
+    anonymous: false,
+    destroyed: record.destroyed,
   }
 }
 

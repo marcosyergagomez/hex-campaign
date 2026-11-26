@@ -12,6 +12,9 @@ from typing import Any
 
 
 class LiveBus:
+    # Soft cap per signed-in user so a leaked session cannot open unbounded SSE fans.
+    MAX_SUBSCRIPTIONS = 3
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -20,8 +23,11 @@ class LiveBus:
     def subscribe(self, user_id: int) -> asyncio.Queue[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=64)
         with self._lock:
+            holders = self._subs.setdefault(user_id, set())
+            if len(holders) >= self.MAX_SUBSCRIPTIONS:
+                raise RuntimeError("too_many_streams")
             self._loop = asyncio.get_running_loop()
-            self._subs.setdefault(user_id, set()).add(queue)
+            holders.add(queue)
         return queue
 
     def unsubscribe(self, user_id: int, queue: asyncio.Queue[dict[str, Any]]) -> None:

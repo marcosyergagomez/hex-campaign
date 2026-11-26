@@ -25,6 +25,7 @@ from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.lobby import drop_seat_count
 from hexcampaign.domain.march import check_order, march
 from hexcampaign.domain.sight import gazed_cells, remember_fort
+from hexcampaign.domain.units import is_fighter, move_budget, unit_gaze
 
 
 def lock_orders(
@@ -70,6 +71,7 @@ def report_battle(
     now: datetime,
     rng: random.Random | None = None,
 ) -> Game:
+    require_player(game, actor)
     battle = _pending(game, battle_id)
     if overdue(battle.opened_at, game.rules.battle_days, now):
         raise DomainError("phase_invalid")
@@ -206,13 +208,16 @@ def _resolve(game: Game, now: datetime, defaulted: set[str], rng: random.Random)
     starts: dict[str, Hex] = {}
     paths: dict[str, tuple[Hex, ...]] = {}
     owners: dict[str, str] = {}
-    for army in living(game):
+    kinds: dict[str, str] = {}
+    by_id = {army.id: army for army in living(game)}
+    for army in by_id.values():
         assert army.q is not None and army.r is not None
         starts[army.id] = Hex(army.q, army.r)
         owners[army.id] = army.player_id
+        kinds[army.id] = army.kind
         paths[army.id] = game.orders.get(army.player_id, {}).get(army.id, ())
     if game.plots is None:
-        moved = march(starts, paths, owners)
+        moved = march(starts, paths, owners, kinds)
     else:
         moved = walk(
             [
@@ -221,8 +226,9 @@ def _resolve(game: Game, now: datetime, defaulted: set[str], rng: random.Random)
                     owners[army_id],
                     starts[army_id],
                     list(paths.get(army_id, ())),
-                    game.rules.movement,
-                    next(army.paid for army in game.armies if army.id == army_id),
+                    move_budget(game.rules.movement, by_id[army_id]),
+                    by_id[army_id].paid,
+                    kinds[army_id],
                 )
                 for army_id in starts
             ],
@@ -236,7 +242,7 @@ def _resolve(game: Game, now: datetime, defaulted: set[str], rng: random.Random)
         army.r = cell.r
         if game.plots is not None:
             army.paid = moved.paid[army.id]
-            _reveal_gaze(game, army.player_id, moved.trails.get(army.id, ()))
+            _reveal_gaze(game, army, moved.trails.get(army.id, ()))
         else:
             _reveal(game, army.player_id, moved.trails.get(army.id, ()))
     for contact in moved.contacts:
@@ -323,7 +329,10 @@ def _winners(game: Game) -> list[str] | None:
     alive = [
         member.player_id
         for member in standing
-        if any(army.player_id == member.player_id and not army.destroyed for army in game.armies)
+        if any(
+            army.player_id == member.player_id and not army.destroyed and is_fighter(army)
+            for army in game.armies
+        )
     ]
     if game.rules.victory == "fortress":
         return hold or None
@@ -338,7 +347,11 @@ def _eliminate(game: Game) -> None:
     for member in game.members:
         if member.status not in {"active", "inactive"}:
             continue
-        owned = [army for army in game.armies if army.player_id == member.player_id]
+        owned = [
+            army
+            for army in game.armies
+            if army.player_id == member.player_id and is_fighter(army)
+        ]
         if owned and all(army.destroyed for army in owned):
             member.status = "eliminated"
             member.cause = ""
@@ -351,6 +364,7 @@ def _holds(game: Game) -> None:
             army
             for army in game.armies
             if not army.destroyed
+            and is_fighter(army)
             and army.q == fort.q
             and army.r == fort.r
             and army.player_id != fort.player_id
@@ -450,15 +464,18 @@ def _reveal(game: Game, player_id: str, cells: tuple[Hex, ...]) -> None:
     known.update(cell for cell in cells if cell in board)
 
 
-def _reveal_gaze(game: Game, player_id: str, cells: tuple[Hex, ...]) -> None:
+def _reveal_gaze(game: Game, army, cells: tuple[Hex, ...]) -> None:
+    player_id = army.player_id
     if game.rules.visibility in {"full", "total", "charted"}:
         game.discovered[player_id] = set(game.hexes)
     else:
         known = game.discovered.setdefault(player_id, set())
         for cell in cells:
-            known.update(gazed_cells(game, cell))
+            reach = unit_gaze(army, None if game.plots is None else game.plots.get(cell))
+            known.update(gazed_cells(game, cell, reach=reach))
     for cell in cells:
-        for seen in gazed_cells(game, cell):
+        reach = unit_gaze(army, None if game.plots is None else game.plots.get(cell))
+        for seen in gazed_cells(game, cell, reach=reach):
             remember_fort(game, player_id, seen)
 
 

@@ -9,6 +9,7 @@ from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.roads import road_progress
 from hexcampaign.domain.sight import gazed_cells, in_home, known_hex, sees_army
 from hexcampaign.domain.territory import homes_by_player
+from hexcampaign.domain.units import unit_gaze
 
 
 def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
@@ -220,7 +221,15 @@ def _armies(
         if not sees_army(game, viewer, army, home=home, board=board):
             continue
         if army.player_id != viewer and game.rules.visibility == "anonymous":
-            shown.append({"id": army.id, "q": army.q, "r": army.r, "anonymous": True})
+            shown.append(
+                {
+                    "id": army.id,
+                    "q": army.q,
+                    "r": army.r,
+                    "kind": army.kind,
+                    "anonymous": True,
+                }
+            )
             continue
         shown.append(
             {
@@ -233,6 +242,7 @@ def _armies(
                 "q": army.q,
                 "r": army.r,
                 "destroyed": army.destroyed,
+                "kind": army.kind,
                 "anonymous": False,
             }
         )
@@ -304,12 +314,17 @@ def _show_battle(
     home: set[Hex] | None = None,
     board: set[Hex] | None = None,
 ) -> bool:
-    if game.plots is not None:
-        return _show_terrain_battle(game, battle, viewer, staff, home=home, board=board)
-    if staff or viewer in battle.players or game.rules.visibility == "full":
+    from hexcampaign.domain.terrain import has_terrain
+
+    if viewer in battle.players or game.rules.visibility in {"full", "total"}:
+        return True
+    if has_terrain(game):
+        if staff and battle.result is None:
+            return True
+    elif staff or game.rules.visibility == "full":
         return True
     # An anonymous token has no name. A battle list would put the name back.
-    if game.rules.visibility == "anonymous":
+    if not has_terrain(game) and game.rules.visibility == "anonymous":
         return False
     cell = Hex(battle.q, battle.r)
     if not known_hex(game, viewer, cell, home=home, board=board):
@@ -317,6 +332,8 @@ def _show_battle(
     involved = [army for army in game.armies if army.id in set(battle.army_ids)]
     if any(sees_army(game, viewer, army, home=home, board=board) for army in involved):
         return True
+    if has_terrain(game):
+        return _looking(game, viewer, cell, home=home, board=board)
     spots = [army.at() for army in living(game, viewer)]
     return any(spot is not None and distance(cell, spot) <= 1 for spot in spots)
 
@@ -364,28 +381,6 @@ def _battle_view(game: Game, battle, viewer: str, staff: bool, now: datetime) ->
     return shown
 
 
-def _show_terrain_battle(
-    game: Game,
-    battle,
-    viewer: str,
-    staff: bool,
-    *,
-    home: set[Hex] | None = None,
-    board: set[Hex] | None = None,
-) -> bool:
-    if viewer in battle.players or game.rules.visibility in {"full", "total"}:
-        return True
-    if staff and battle.result is None:
-        return True
-    cell = Hex(battle.q, battle.r)
-    if not known_hex(game, viewer, cell, home=home, board=board):
-        return False
-    involved = [army for army in game.armies if army.id in set(battle.army_ids)]
-    return any(
-        sees_army(game, viewer, army, home=home, board=board) for army in involved
-    ) or _looking(game, viewer, cell, home=home, board=board)
-
-
 def _looking(
     game: Game,
     viewer: str,
@@ -400,7 +395,10 @@ def _looking(
         return True
     for army in living(game, viewer):
         spot = army.at()
-        if spot is not None and cell in gazed_cells(game, spot):
+        if spot is None:
+            continue
+        reach = unit_gaze(army, None if game.plots is None else game.plots.get(spot))
+        if cell in gazed_cells(game, spot, reach=reach):
             return True
     return False
 

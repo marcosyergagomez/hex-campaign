@@ -6,6 +6,20 @@
   padding: 18px 12px 8px;
 }
 
+.hex-token-disk {
+  fill: rgba(12, 9, 6, 0.72);
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.hex-token-explorer .hex-token-disk {
+  stroke-dasharray: 3 2;
+}
+
+.hex-tokens {
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
+}
+
 .hex-board {
   display: block;
   width: 100%;

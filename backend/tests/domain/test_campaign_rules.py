@@ -124,8 +124,22 @@ def _opened(**overrides: object):
     return begin(_ready_table(game), "1", [], NOW)
 
 
-def _army(game, player_id: str):
-    return next(army for army in game.armies if army.player_id == player_id)
+def _army(game, player_id: str, *, living: bool = True):
+    return next(
+        army
+        for army in game.armies
+        if army.player_id == player_id
+        and army.kind == "army"
+        and (not living or not army.destroyed)
+    )
+
+
+def _explorer(game, player_id: str):
+    return next(
+        army
+        for army in game.armies
+        if army.player_id == player_id and army.kind == "explorer" and not army.destroyed
+    )
 
 
 def _stay(game, player_id: str) -> dict[str, list]:
@@ -136,12 +150,19 @@ def _stay(game, player_id: str) -> dict[str, list]:
     }
 
 
+def _orders(game, player_id: str, paths: dict[str, list] | None = None) -> dict[str, list]:
+    body = _stay(game, player_id)
+    if paths:
+        body.update(paths)
+    return body
+
+
 def test_the_chronicle_hides_a_march_until_the_campaign_ends() -> None:
     game = _opened()
     left = _army(game, "1")
     origin = {"q": left.q, "r": left.r}
     step = next(cell for cell in neighbors(left.at()) if cell in set(game.hexes))
-    game = lock_orders(game, "1", {left.id: [step]}, NOW)
+    game = lock_orders(game, "1", _orders(game, "1", {left.id: [step]}), NOW)
     game = lock_orders(game, "2", _stay(game, "2"), NOW)
 
     marched = [
@@ -180,15 +201,27 @@ def test_document_round_trip_keeps_the_revision() -> None:
     assert to_dict(from_dict(to_dict(game))) == to_dict(game)
 
 
-def test_two_armies_of_one_player_cannot_close_on_the_same_hex() -> None:
-    game = _opened(armies=2)
-    first, second = [army for army in game.armies if army.player_id == "1"]
+def test_two_fighting_armies_of_one_player_cannot_close_on_the_same_hex() -> None:
+    game = _opened()
+    first = _army(game, "1")
+    second = _explorer(game, "1")
+    second.kind = "army"
     shared = next(cell for cell in neighbors(first.at()) if cell != second.at())
 
     with pytest.raises(DomainError) as caught:
-        lock_orders(game, "1", {first.id: [shared], second.id: [shared]}, NOW)
+        lock_orders(game, "1", _orders(game, "1", {first.id: [shared], second.id: [shared]}), NOW)
 
     assert caught.value.code == "order_illegal"
+
+
+def test_explorer_may_share_a_hex_with_the_army() -> None:
+    game = _opened()
+    army = _army(game, "1")
+    explorer = _explorer(game, "1")
+    shared = next(cell for cell in neighbors(army.at()) if cell != explorer.at() and cell in set(game.hexes))
+    lock_orders(game, "1", _orders(game, "1", {army.id: [shared], explorer.id: [shared]}), NOW)
+    assert game.orders["1"][army.id] == (shared,)
+    assert game.orders["1"][explorer.id] == (shared,)
 
 
 def test_a_visible_enemy_stops_the_path_but_can_be_the_last_hex() -> None:
@@ -201,9 +234,9 @@ def test_a_visible_enemy_stops_the_path_but_can_be_the_last_hex() -> None:
     attacker.q, attacker.r = approach.q, approach.r
 
     with pytest.raises(DomainError):
-        lock_orders(game, "1", {attacker.id: [goal, beyond]}, NOW)
+        lock_orders(game, "1", _orders(game, "1", {attacker.id: [goal, beyond]}), NOW)
 
-    locked = lock_orders(game, "1", {attacker.id: [goal]}, NOW)
+    locked = lock_orders(game, "1", _orders(game, "1", {attacker.id: [goal]}), NOW)
     assert locked.orders["1"][attacker.id] == (goal,)
 
 
@@ -246,7 +279,7 @@ def test_a_hidden_army_does_not_block_the_order_and_still_stops_the_move() -> No
     attacker.q, attacker.r = approach.q, approach.r
     game.discovered["1"] = {Hex(attacker.q, attacker.r)}
 
-    game = lock_orders(game, "1", {attacker.id: [goal]}, NOW)
+    game = lock_orders(game, "1", _orders(game, "1", {attacker.id: [goal]}), NOW)
     game = lock_orders(game, "2", _stay(game, "2"), NOW)
 
     assert game.phase == "battles"
@@ -261,7 +294,7 @@ def test_rival_view_omits_the_secret_order() -> None:
     game = _opened()
     attacker = _army(game, "1")
     dest = next(cell for cell in neighbors(attacker.at()) if cell in set(game.hexes))
-    game = lock_orders(game, "1", {attacker.id: [dest]}, NOW)
+    game = lock_orders(game, "1", _orders(game, "1", {attacker.id: [dest]}), NOW)
 
     rival = project(game, "2", NOW)
 
@@ -275,8 +308,8 @@ def test_winner_destroys_the_army_and_a_draw_destroys_none() -> None:
     right = _army(game, "2")
     right.q, right.r = 1, 0
     left.q, left.r = 0, 0
-    game = lock_orders(game, "1", {left.id: [Hex(1, 0)]}, NOW)
-    game = lock_orders(game, "2", {right.id: [Hex(0, 0)]}, NOW)
+    game = lock_orders(game, "1", _orders(game, "1", {left.id: [Hex(1, 0)]}), NOW)
+    game = lock_orders(game, "2", _orders(game, "2", {right.id: [Hex(0, 0)]}), NOW)
     battle = game.battles[-1]
     saved = from_dict(to_dict(game))
 
@@ -285,12 +318,12 @@ def test_winner_destroys_the_army_and_a_draw_destroys_none() -> None:
 
     assert agreed.phase == "finished"
     assert agreed.winners == ["1"]
-    assert _army(agreed, "2").destroyed is True
+    assert _army(agreed, "2", living=False).destroyed is True
 
     drawn = report_battle(saved, "1", battle.id, "draw", NOW)
     drawn = report_battle(drawn, "2", battle.id, "draw", NOW)
     assert drawn.phase == "orders"
-    assert _army(drawn, "2").destroyed is False
+    assert _army(drawn, "2", living=False).destroyed is False
 
 
 def test_holding_the_fortress_wins_when_both_conditions_finish_together() -> None:
@@ -300,8 +333,8 @@ def test_holding_the_fortress_wins_when_both_conditions_finish_together() -> Non
     defender = _army(game, "2")
     step = next(cell for cell in neighbors(fort.at()) if cell in set(game.hexes))
     attacker.q, attacker.r = step.q, step.r
-    game = lock_orders(game, "1", {attacker.id: [fort.at()]}, NOW)
-    game = lock_orders(game, "2", {defender.id: []}, NOW)
+    game = lock_orders(game, "1", _orders(game, "1", {attacker.id: [fort.at()]}), NOW)
+    game = lock_orders(game, "2", _orders(game, "2", {defender.id: []}), NOW)
     battle = game.battles[-1]
     game = report_battle(game, "1", battle.id, "1", NOW)
     game = report_battle(game, "2", battle.id, "1", NOW)
@@ -342,8 +375,8 @@ def test_revert_restores_the_order_and_marks_the_battle_undone() -> None:
     right = _army(game, "2")
     right.q, right.r = 1, 0
     left.q, left.r = 0, 0
-    game = lock_orders(game, "1", {left.id: [Hex(1, 0)]}, NOW)
-    game = lock_orders(game, "2", {right.id: [Hex(0, 0)]}, NOW)
+    game = lock_orders(game, "1", _orders(game, "1", {left.id: [Hex(1, 0)]}), NOW)
+    game = lock_orders(game, "2", _orders(game, "2", {right.id: [Hex(0, 0)]}), NOW)
     battle_id = game.battles[-1].id
 
     restored = revert_turn(game, "1")
@@ -431,7 +464,7 @@ def test_an_eliminated_owner_passes_the_table_when_the_war_continues() -> None:
     owner.q, owner.r = 0, 0
     rival.q, rival.r = 1, 0
     third.q, third.r = 2, 0
-    game = lock_orders(game, "1", {owner.id: [Hex(1, 0)]}, NOW)
+    game = lock_orders(game, "1", _orders(game, "1", {owner.id: [Hex(1, 0)]}), NOW)
     game = lock_orders(game, "2", _stay(game, "2"), NOW)
     game = lock_orders(game, "3", _stay(game, "3"), NOW)
     battle = game.battles[-1]
@@ -455,7 +488,7 @@ def test_a_hidden_battle_and_its_occupier_stay_out_of_the_other_view() -> None:
     left.q, left.r = 0, 0
     right.q, right.r = 1, 0
     bystander.q, bystander.r = 2, -2
-    game = lock_orders(game, "1", {left.id: [Hex(1, 0)]}, NOW)
+    game = lock_orders(game, "1", _orders(game, "1", {left.id: [Hex(1, 0)]}), NOW)
     game = lock_orders(game, "2", _stay(game, "2"), NOW)
     game = lock_orders(game, "3", _stay(game, "3"), NOW)
     game.discovered["3"] = set()
@@ -515,9 +548,11 @@ def test_a_placed_army_discovers_the_hex_it_stands_on() -> None:
     ]
     first, second = border[0], border[len(border) // 2]
     own = _army(game, "1")
+    scout = _explorer(game, "1")
     other = _army(game, "2")
-    game = place_armies(game, "1", first, {own.id: Hex(0, 0)})
-    game = place_armies(game, "2", second, {other.id: Hex(1, 0)})
+    other_scout = _explorer(game, "2")
+    game = place_armies(game, "1", first, {own.id: Hex(0, 0), scout.id: Hex(0, 0)})
+    game = place_armies(game, "2", second, {other.id: Hex(1, 0), other_scout.id: Hex(1, 0)})
     game = close_placement(game, "1", NOW)
 
     assert known_hex(game, "1", Hex(0, 0))
@@ -541,12 +576,14 @@ def test_players_place_forts_inside_pre_marked_home_land() -> None:
     home_two = set(game.discovered["2"])
     assert home_one and home_two and home_one.isdisjoint(home_two)
     outsider = next(cell for cell in game.hexes if cell not in home_one)
-    own = next(army for army in game.armies if army.player_id == "1")
+    own = _army(game, "1")
+    scout = _explorer(game, "1")
+    home_cell = next(iter(home_one))
     with pytest.raises(DomainError, match="order_illegal"):
-        place_armies(game, "1", outsider, {own.id: next(iter(home_one))})
+        place_armies(game, "1", outsider, {own.id: home_cell, scout.id: home_cell})
     fort = next(iter(home_one))
     army_spot = next(cell for cell in home_one if cell != fort)
-    game = place_armies(game, "1", fort, {own.id: army_spot})
+    game = place_armies(game, "1", fort, {own.id: army_spot, scout.id: army_spot})
     assert next(item for item in game.fortresses if item.player_id == "1").at() == fort
 
 

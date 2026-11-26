@@ -18,6 +18,7 @@ from hexcampaign.domain.game import (
     from_dict,
     require_owner,
     require_phase,
+    require_staff,
     seated,
     to_dict,
 )
@@ -132,24 +133,32 @@ def scrap_campaign(user, campaign_id, confirm_name: object) -> None:
         if game.phase == "finished":
             raise CampaignError("campaign_delete_locked")
         if game.phase in PREPARED_PHASES and member.role == "owner":
-            watchers = _seat_user_ids(campaign)
-            campaign_key = str(campaign.id)
-            campaign.delete()
-            _push_after_commit(
-                watchers,
-                {"type": "campaigns", "campaign_id": campaign_key, "gone": True},
-            )
+            _scrap_prepared(campaign)
             return
-        rng = random.Random()
-        now = timezone.now()
-        try:
-            if member.role in {"owner", "admin"}:
-                updated = leave_campaign(game, actor, rng, now)
-            else:
-                updated = withdraw_player(game, actor, rng, now)
-        except DomainError as exc:
-            raise CampaignError(exc.code) from exc
-        _save(campaign, updated)
+        _leave_running(campaign, game, actor, member.role)
+
+
+def _scrap_prepared(campaign: Campaign) -> None:
+    watchers = _seat_user_ids(campaign)
+    campaign_key = str(campaign.id)
+    campaign.delete()
+    _push_after_commit(
+        watchers,
+        {"type": "campaigns", "campaign_id": campaign_key, "gone": True},
+    )
+
+
+def _leave_running(campaign: Campaign, game: Game, actor: str, role: str) -> None:
+    rng = random.Random()
+    now = timezone.now()
+    try:
+        if role in {"owner", "admin"}:
+            updated = leave_campaign(game, actor, rng, now)
+        else:
+            updated = withdraw_player(game, actor, rng, now)
+    except DomainError as exc:
+        raise CampaignError(exc.code) from exc
+    _save(campaign, updated)
 
 
 def play(
@@ -238,17 +247,28 @@ def invite_alias(user, campaign_id, revision: int, alias: str) -> tuple[Campaign
             if exc.code == "campaign_limit":
                 raise CampaignError("invitee_campaign_limit") from exc
             raise
+        campaign = _locked(campaign_id)
+        pending = (
+            Invitation.objects.select_for_update()
+            .filter(campaign=campaign, invited_user=invited, accepted_at__isnull=True)
+            .first()
+        )
+        if pending is not None:
+            # Already invited: do not bump revision or spam notifications/SSE.
+            game = _document(campaign)
+            if game.revision != revision:
+                raise RevisionConflict()
+            try:
+                require_staff(game, str(user.pk))
+            except DomainError as exc:
+                raise CampaignError(exc.code) from exc
+            return campaign, game
         campaign, game = play(user, campaign_id, revision, command)
-        if not Invitation.objects.filter(
+        Invitation.objects.create(
             campaign=campaign,
+            token_hash=_digest(secrets.token_urlsafe(32)),
             invited_user=invited,
-            accepted_at__isnull=True,
-        ).exists():
-            Invitation.objects.create(
-                campaign=campaign,
-                token_hash=_digest(secrets.token_urlsafe(32)),
-                invited_user=invited,
-            )
+        )
         _notify_campaign_invite(invited, campaign, game.revision)
         return campaign, game
 
@@ -259,7 +279,13 @@ def search_players(user, query: object) -> list[dict[str, str]]:
     if not isinstance(query, str):
         return []
     needle = query.strip()
-    if len(needle) < 1 or len(needle) > 24 or not re.fullmatch(r"[A-Za-z0-9_]+", needle):
+    # Two characters minimum slows alias enumeration without hurting lobby search.
+    if len(needle) < 2 or len(needle) > 24 or not re.fullmatch(r"[A-Za-z0-9_]+", needle):
+        return []
+    from apps.accounts.throttle import account_posts
+
+    key = f"player-search:{user.pk}"
+    if not account_posts.allow(key, limit=30, window=60):
         return []
     rows = (
         User.objects.filter(
@@ -385,7 +411,8 @@ def accept_alias(user, campaign_id, revision: int) -> tuple[Campaign, Game]:
 def read_campaign(user, campaign_id, now) -> dict[str, object]:
     campaign = _campaign(campaign_id)
     game = _document(campaign)
-    if find_member(game, str(user.pk)) is None:
+    # Match list_campaigns / pulse: expelled and inactive seats get no live intel.
+    if not _readable_member(game, str(user.pk)):
         # Do not leak name, phase or seat counts to anyone who is not seated.
         # Invitation previews go through preview_link with a secret token.
         raise CampaignError("not_found")
@@ -394,11 +421,16 @@ def read_campaign(user, campaign_id, now) -> dict[str, object]:
             _actor(user)
             campaign = _locked(campaign_id)
             game = _document(campaign)
-            if find_member(game, str(user.pk)) is None:
+            if not _readable_member(game, str(user.pk)):
                 raise CampaignError("not_found")
             if equalize_fog(game):
                 _save(campaign, bump(game))
     return present(campaign, game, user, now)
+
+
+def _readable_member(game: Game, player_id: str) -> bool:
+    member = find_member(game, player_id)
+    return member is not None and member.status in {"active", "eliminated"}
 
 
 def campaign_pulse(user, campaign_id) -> dict[str, object]:

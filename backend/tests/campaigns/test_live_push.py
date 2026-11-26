@@ -70,6 +70,19 @@ def test_live_bus_delivers_to_subscriber() -> None:
     asyncio.run(run())
 
 
+def test_live_bus_caps_subscriptions_per_user() -> None:
+    async def run() -> None:
+        bus = LiveBus()
+        held = [bus.subscribe(9) for _ in range(LiveBus.MAX_SUBSCRIPTIONS)]
+        with pytest.raises(RuntimeError, match="too_many_streams"):
+            bus.subscribe(9)
+        for queue in held:
+            bus.unsubscribe(9, queue)
+        bus.subscribe(9)
+
+    asyncio.run(run())
+
+
 @pytest.mark.django_db(transaction=True)
 def test_invite_pushes_notification_event(monkeypatch) -> None:
     seen: list[dict] = []
@@ -82,9 +95,14 @@ def test_invite_pushes_notification_event(monkeypatch) -> None:
     owner = _player("push_owner@example.com", "push_owner")
     guest = _player("push_guest@example.com", "push_guest")
     campaign, game = create_campaign(owner, "Push", RULES)
-    invite_alias(owner, campaign.id, game.revision, guest.alias)
+    campaign, game = invite_alias(owner, campaign.id, game.revision, guest.alias)
+    before = len(seen)
+    revision = game.revision
+    campaign, game = invite_alias(owner, campaign.id, game.revision, guest.alias)
 
-    assert Notification.objects.filter(user=guest, kind="campaign_invite").exists()
+    assert game.revision == revision
+    assert len(seen) == before
+    assert Notification.objects.filter(user=guest, kind="campaign_invite").count() == 1
     assert any(
         row["event"].get("type") == "notification" and guest.pk in row["users"]
         for row in seen

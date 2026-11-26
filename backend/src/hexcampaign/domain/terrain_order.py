@@ -6,6 +6,7 @@ from hexcampaign.domain.game import Army, Game, living
 from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.sight import sees_army
 from hexcampaign.domain.terrain import passable
+from hexcampaign.domain.units import is_explorer, move_budget
 
 
 def check_terrain_order(game: Game, player_id: str, paths: dict[str, tuple[Hex, ...]]) -> None:
@@ -19,8 +20,13 @@ def check_terrain_order(game: Game, player_id: str, paths: dict[str, tuple[Hex, 
 
 
 def _reject_illegal_steps(game, player_id, own, paths, board, plots) -> None:
-    blocked = {Hex(army.q, army.r) for army in game.armies if sees_army(game, player_id, army)}
+    blocked = {
+        Hex(army.q, army.r)
+        for army in game.armies
+        if army.kind == "army" and sees_army(game, player_id, army)
+    }
     blocked.difference_update(army.at() for army in own if army.at() is not None)
+    forts = {fort.at() for fort in game.fortresses}
     for army in own:
         path = paths[army.id]
         if len(path) > len(board):
@@ -34,6 +40,8 @@ def _reject_illegal_steps(game, player_id, own, paths, board, plots) -> None:
                 raise DomainError("order_illegal")
             if known and not passable(plot):
                 raise DomainError("order_illegal")
+            if is_explorer(army) and step in forts:
+                raise DomainError("order_illegal")
             if step in blocked and index != len(path) - 1:
                 raise DomainError("order_illegal")
             previous = step
@@ -45,14 +53,25 @@ def _reject_allies_in_the_way(game, own, paths, board, plots) -> None:
         solo = walk([_walker(game, army, paths[army.id])], plots, board)
         if moved.positions[army.id] != solo.positions[army.id]:
             raise DomainError("order_illegal")
-    occupied: set[Hex] = set()
-    for cell in moved.positions.values():
+    occupied: dict[Hex, str] = {}
+    for army in own:
+        if is_explorer(army):
+            continue
+        cell = moved.positions[army.id]
         if cell in occupied:
             raise DomainError("order_illegal")
-        occupied.add(cell)
+        occupied[cell] = army.id
 
 
 def _walker(game: Game, army: Army, path: tuple[Hex, ...]) -> Walker:
     spot = army.at()
     assert spot is not None
-    return Walker(army.id, army.player_id, spot, list(path), game.rules.movement, army.paid)
+    return Walker(
+        army.id,
+        army.player_id,
+        spot,
+        list(path),
+        move_budget(game.rules.movement, army),
+        army.paid,
+        army.kind,
+    )

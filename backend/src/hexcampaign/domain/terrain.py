@@ -84,6 +84,11 @@ def gaze_from(plot: Plot | None) -> int:
     return _GAZE.get(plot.ground, _BASE_GAZE)
 
 
+def has_terrain(game) -> bool:
+    """True when the campaign document carries a terrain atlas."""
+    return getattr(game, "plots", None) is not None
+
+
 def terrain_groups(plots: dict[Hex, Plot], grounds: set[str] | frozenset[str]) -> list[set[Hex]]:
     pending = {cell for cell, plot in plots.items() if plot.ground in grounds}
     groups: list[set[Hex]] = []

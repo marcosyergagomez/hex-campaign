@@ -4,6 +4,7 @@ from hexcampaign.domain.game import Army, Game, living
 from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.terrain import gaze_from
 from hexcampaign.domain.territory import home_land
+from hexcampaign.domain.units import unit_gaze
 
 
 def equalize_fog(game: Game) -> bool:
@@ -99,8 +100,9 @@ def in_home(
     return cell in claimed
 
 
-def gazed_cells(game: Game, origin: Hex) -> set[Hex]:
-    reach = gaze_from(None if game.plots is None else game.plots.get(origin))
+def gazed_cells(game: Game, origin: Hex, *, reach: int | None = None) -> set[Hex]:
+    if reach is None:
+        reach = gaze_from(None if game.plots is None else game.plots.get(origin))
     return {cell for cell in game.hexes if distance(cell, origin) <= reach}
 
 
@@ -108,7 +110,7 @@ def _reaches(game: Game, army: Army, cell: Hex) -> bool:
     spot = army.at()
     if spot is None:
         return False
-    reach = gaze_from(None if game.plots is None else game.plots.get(spot))
+    reach = unit_gaze(army, None if game.plots is None else game.plots.get(spot))
     return distance(cell, spot) <= reach
 
 

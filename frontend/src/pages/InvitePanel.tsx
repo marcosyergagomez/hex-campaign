@@ -31,7 +31,7 @@ export function InvitePanel({ busy = false, onInvite }: Props) {
   useEffect(() => {
     if (!open) return
     const needle = query.trim()
-    if (needle.length < 1) {
+    if (needle.length < 2) {
       setSuggestions([])
       return
     }

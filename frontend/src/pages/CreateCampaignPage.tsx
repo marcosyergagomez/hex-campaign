@@ -348,17 +348,10 @@ export function CreateCampaignPage() {
         {step === 2 ? (
           <div className="wizard-fields">
             <h2>{t("stepWar")}</h2>
-            <SelectField
-              label={t("ruleArmies")}
-              name="armies"
-              value={String(rules.armies)}
-              hint={t("ruleArmiesHint")}
-              options={[
-                { value: "1", label: "1" },
-                { value: "2", label: "2" },
-              ]}
-              onChange={(value) => patchRules({ armies: Number(value) })}
-            />
+            <p className="field-note">
+              <strong>{t("ruleArmies")}</strong>
+              <span>{t("ruleArmiesHint")}</span>
+            </p>
             <SelectField
               label={t("ruleMovement")}
               name="movement"

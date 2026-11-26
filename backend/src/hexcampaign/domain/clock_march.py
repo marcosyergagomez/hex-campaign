@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.march import Contact
-from hexcampaign.domain.occupy import who_can_leave, without_own_stack
+from hexcampaign.domain.occupy import fighter_swaps, plan_step
 from hexcampaign.domain.terrain import Plot, exit_cost, passable
 
 
@@ -16,6 +16,7 @@ class Walker:
     path: list[Hex]
     budget: int
     paid: int
+    kind: str = "army"
     trail: list[Hex] = field(default_factory=list)
 
 
@@ -73,38 +74,34 @@ def _paying(walkers, plots, board, stopped) -> list[Walker]:
 def _step(ready, by_id, plots, stopped, contacts) -> None:
     position = {army_id: walker.at for army_id, walker in by_id.items()}
     owners = {army_id: walker.player_id for army_id, walker in by_id.items()}
+    kinds = {army_id: walker.kind for army_id, walker in by_id.items()}
     intended = {walker.army_id: walker.path[0] for walker in ready}
-    moving = who_can_leave(intended, position, owners, stopped)
-    for army_id in intended:
-        if army_id not in moving:
+    plan = plan_step(intended, position, owners, stopped, kinds)
+    for army_id in plan.blocked_leavers:
+        _halt(by_id[army_id], stopped)
+    for clash in plan.destinations:
+        for army_id in clash.blocked:
             _halt(by_id[army_id], stopped)
-    origin = {army_id: position[army_id] for army_id in moving}
-    groups: dict[Hex, list[str]] = {}
-    for army_id in moving:
-        groups.setdefault(intended[army_id], []).append(army_id)
-    for dest, group in groups.items():
-        entering = without_own_stack(group, owners)
-        for army_id in group:
-            if army_id not in entering:
-                _halt(by_id[army_id], stopped)
-        if not entering:
+        if not clash.entering:
             continue
-        holders = [
-            other
-            for other, cell in position.items()
-            if cell == dest and other not in moving
-        ]
-        players = {owners[army_id] for army_id in entering} | {owners[other] for other in holders}
-        fight = len(players) > 1
-        for army_id in entering:
-            _arrive(by_id[army_id], plots, dest, stopped, fight=fight)
-        if fight:
-            contacts.append(Contact(tuple(sorted({*entering, *holders})), dest))
-            for other in holders:
-                held = by_id[other]
-                held.path = []
-                stopped.add(other)
-    _swaps(origin, by_id, stopped, contacts)
+        for army_id in clash.entering:
+            _arrive(
+                by_id[army_id],
+                plots,
+                clash.dest,
+                stopped,
+                fight=clash.fight and kinds.get(army_id) == "army",
+            )
+        if clash.fight:
+            contacts.append(Contact(tuple(sorted(clash.fighting)), clash.dest))
+            for other in clash.holders:
+                if kinds.get(other) == "army":
+                    _halt(by_id[other], stopped)
+    position = {army_id: walker.at for army_id, walker in by_id.items()}
+    for left, right, _cell in fighter_swaps(plan.origins, position, owners, kinds):
+        for army_id in (left, right):
+            _halt(by_id[army_id], stopped)
+        contacts.append(Contact(tuple(sorted({left, right})), by_id[left].at))
 
 
 def _arrive(walker: Walker, plots, dest: Hex, stopped: set[str], *, fight: bool) -> None:
@@ -125,18 +122,3 @@ def _halt(walker: Walker, stopped: set[str]) -> None:
     stopped.add(walker.army_id)
     if walker.paid:
         walker.paid -= 1
-
-
-def _swaps(origin, by_id, stopped, contacts) -> None:
-    seen: list[tuple[str, str]] = []
-    owners = {army_id: walker.player_id for army_id, walker in by_id.items()}
-    for left, start in origin.items():
-        for right, other_start in origin.items():
-            if left >= right or owners[left] == owners[right]:
-                continue
-            if by_id[left].at == other_start and by_id[right].at == start:
-                seen.append((left, right))
-    for left, right in seen:
-        for army_id in (left, right):
-            _halt(by_id[army_id], stopped)
-        contacts.append(Contact(tuple(sorted({left, right})), by_id[left].at))

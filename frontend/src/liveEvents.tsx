@@ -78,6 +78,7 @@ export function LiveConnection({ active }: { active: boolean }): ReactNode {
     let closed = false
     let retryTimer = 0
     let openedOnce = false
+    let attempt = 0
 
     function connect() {
       if (closed) return
@@ -91,6 +92,7 @@ export function LiveConnection({ active }: { active: boolean }): ReactNode {
       }
 
       stream.onopen = () => {
+        attempt = 0
         if (!openedOnce) {
           openedOnce = true
           return
@@ -103,7 +105,9 @@ export function LiveConnection({ active }: { active: boolean }): ReactNode {
         if (source.current === stream) source.current = null
         if (closed) return
         window.clearTimeout(retryTimer)
-        retryTimer = window.setTimeout(connect, 2500)
+        const delay = Math.min(15000, 1500 * 2 ** Math.min(attempt, 3))
+        attempt += 1
+        retryTimer = window.setTimeout(connect, delay)
       }
     }
 

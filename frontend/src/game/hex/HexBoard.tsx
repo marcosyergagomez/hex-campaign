@@ -2,11 +2,12 @@ import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useSt
 
 import type { MapCell } from "../../api"
 import { useI18n } from "../../i18n/language"
-import { hexLine } from "./disk"
-import { axialFromPixel, hexCenter, hexPoints } from "./geometry"
+import { hexCenter, hexPoints } from "./geometry"
 import { GROUND_LABEL, GROUND_TIP, GROUND_TIP_ON_ROAD } from "./grounds"
 import { lakeOutlines, riverShapes, roadPaths, terrainOutlines, territoryOutlines } from "./courses"
 import { ArtDefinitions, EARTH, Fields, noise, OrnamentArt, ornaments } from "./TerrainArt"
+import { TokenDefinitions, UnitToken, type UnitKind } from "./tokens"
+import { useHexPaint } from "./useHexPaint"
 import "./board.css"
 
 const SIZE = 28
@@ -16,8 +17,18 @@ type Spot = { q: number; r: number }
 type OwnedCell = MapCell & { owner_id?: string | null }
 type Placed = OwnedCell & { x: number; y: number }
 export type TerritoryPlayer = { player_id: string; label: string; color: string }
+export type BoardToken = {
+  id: string
+  q: number
+  r: number
+  kind: UnitKind
+  faction: string
+  color: string
+  label: string
+}
 const NO_PLAYERS: TerritoryPlayer[] = []
 const NO_SPOTS: Spot[] = []
+const NO_TOKENS: BoardToken[] = []
 
 const SAMPLES = ["rio", "lago", "playa", "pantano", "bosque", "montana", "desierto"]
 const STEPS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]
@@ -40,6 +51,7 @@ export function HexBoard({
   players = NO_PLAYERS,
   unknown = NO_SPOTS,
   ghosts = NO_SPOTS,
+  tokens = NO_TOKENS,
   onCellClick,
   onPaint,
 }: {
@@ -49,6 +61,7 @@ export function HexBoard({
   players?: TerritoryPlayer[]
   unknown?: Spot[]
   ghosts?: Spot[]
+  tokens?: BoardToken[]
   onCellClick?: (cell: OwnedCell) => void
   onPaint?: (cells: Array<OwnedCell | Spot>) => void
 }) {
@@ -56,16 +69,12 @@ export function HexBoard({
   const [zoom, setZoom] = useState(1)
   const [grid, setGrid] = useState(true)
   const [showTerritories, setShowTerritories] = useState(true)
-  const painting = useRef(false)
-  const painted = useRef(new Set<string>())
-  const lastHex = useRef<Spot | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const byKey = useRef(new Map<string, OwnedCell | Spot>())
-  const onPaintRef = useRef(onPaint)
   const sizeRef = useRef(size)
-  onPaintRef.current = onPaint
   sizeRef.current = size
+  const { beginPaint } = useHexPaint(onPaint, svgRef, byKey, sizeRef)
   const caption = useRef<HTMLParagraphElement>(null)
   const playersById = useMemo(
     () => new Map(players.map(player => [player.player_id, player])),
@@ -128,68 +137,6 @@ export function HexBoard({
     () => artCells.map(cell => ({ ...cell, ...hexCenter(cell.q, cell.r, size) })),
     [artCells, size],
   )
-  const emitPaint = useCallback((batch: Array<OwnedCell | Spot>) => {
-    if (!batch.length || !onPaintRef.current) return
-    onPaintRef.current(batch)
-  }, [])
-  const paintStroke = useCallback((target: Spot, bridgeFromLast: boolean) => {
-    if (!onPaintRef.current || !painting.current) return
-    const origin = bridgeFromLast ? lastHex.current : null
-    lastHex.current = { q: target.q, r: target.r }
-    const line = origin ? hexLine(origin, target) : [target]
-    const batch: Array<OwnedCell | Spot> = []
-    for (const spot of line) {
-      const key = `${spot.q},${spot.r}`
-      if (painted.current.has(key)) continue
-      const cell = byKey.current.get(key)
-      if (!cell) continue
-      painted.current.add(key)
-      batch.push(cell)
-    }
-    emitPaint(batch)
-  }, [emitPaint])
-  const paintAt = useCallback((clientX: number, clientY: number) => {
-    if (!onPaintRef.current || !painting.current) return
-    const svg = svgRef.current
-    if (!svg) return
-    const matrix = svg.getScreenCTM()
-    if (!matrix) return
-    const point = svg.createSVGPoint()
-    point.x = clientX
-    point.y = clientY
-    const local = point.matrixTransform(matrix.inverse())
-    const axial = axialFromPixel(local.x, local.y, sizeRef.current)
-    if (!byKey.current.has(`${axial.q},${axial.r}`)) return
-    paintStroke(axial, true)
-  }, [paintStroke])
-  const endPaint = useCallback(() => {
-    painting.current = false
-    painted.current.clear()
-    lastHex.current = null
-  }, [])
-  const beginPaint = useCallback((cell: OwnedCell | Spot) => {
-    painting.current = true
-    painted.current.clear()
-    lastHex.current = null
-    paintStroke(cell, false)
-  }, [paintStroke])
-  useEffect(() => {
-    if (!onPaint) return
-    const move = (event: PointerEvent) => {
-      if (!painting.current) return
-      if (event.buttons !== 0 && (event.buttons & 1) === 0) return
-      paintAt(event.clientX, event.clientY)
-    }
-    const up = () => endPaint()
-    window.addEventListener("pointermove", move)
-    window.addEventListener("pointerup", up)
-    window.addEventListener("pointercancel", up)
-    return () => {
-      window.removeEventListener("pointermove", move)
-      window.removeEventListener("pointerup", up)
-      window.removeEventListener("pointercancel", up)
-    }
-  }, [onPaint, paintAt, endPaint])
   useEffect(() => {
     const viewport = viewportRef.current
     const board = svgRef.current
@@ -240,6 +187,13 @@ export function HexBoard({
   const minY = Math.min(...extent.map((cell) => cell.y)) - pad
   const width = Math.max(...extent.map((cell) => cell.x)) - minX + pad
   const height = Math.max(...extent.map((cell) => cell.y)) - minY + pad
+  const tokenStacks = new Map<string, BoardToken[]>()
+  for (const token of tokens) {
+    const key = `${token.q},${token.r}`
+    const row = tokenStacks.get(key)
+    if (row) row.push(token)
+    else tokenStacks.set(key, [token])
+  }
 
   return (
     <div className="hex-stage">
@@ -272,6 +226,7 @@ export function HexBoard({
         aria-label={t("mapsTitle")}
       >
         <ArtDefinitions id={boardId} size={size} />
+        {tokens.length > 0 ? <TokenDefinitions id={boardId} /> : null}
         <defs>
           {territories.map((region, index) => (
             <clipPath key={region.owner_id} id={`${boardId}-territory-${index}`}>
@@ -395,6 +350,29 @@ export function HexBoard({
             </polygon>
           ))}
         </g>
+        {tokens.length > 0 ? (
+          <g className="hex-tokens" pointerEvents="none">
+            {tokens.map((token) => {
+              const spot = hexCenter(token.q, token.r, size)
+              const stack = tokenStacks.get(`${token.q},${token.r}`) ?? [token]
+              const slot = stack.findIndex(item => item.id === token.id)
+              const spread = stack.length > 1 ? (slot - (stack.length - 1) / 2) * size * 0.42 : 0
+              return (
+                <UnitToken
+                  key={token.id}
+                  boardId={boardId}
+                  faction={token.faction}
+                  kind={token.kind}
+                  color={token.color}
+                  x={spot.x + spread}
+                  y={spot.y}
+                  size={size}
+                  label={token.label}
+                />
+              )
+            })}
+          </g>
+        ) : null}
       </svg>
       </div>
       <p ref={caption} className="hex-caption" />
