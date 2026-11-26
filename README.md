@@ -16,7 +16,7 @@ The campaign rules are original. The project does not include official artwork o
 
 PostgreSQL runs in Docker. Django migrations create the tables, including the campaign row that stores the living state.
 
-Campaigns, the map studio, banners, and the terrain board are in the browser. With a terrain map, starting a campaign opens a preparation phase where each seat lays roads on home land before turn 1; road clicks return a slim delta until that phase ends. Orders and battles are still domain-only. The rules live in `docs/reglas-de-campana.md`; the backend contract is in `docs/requisitos-tecnicos-backend.md`.
+Campaigns, the map studio, the freehand map editor, banners, and the terrain board are in the browser. Drawn maps may use an irregular subset of the chosen table size. With a terrain map, starting a campaign opens a preparation phase where each seat lays roads on home land before turn 1; road clicks return a slim delta until that phase ends. Orders and battles are still domain-only. The rules live in `docs/reglas-de-campana.md`; the backend contract is in `docs/requisitos-tecnicos-backend.md`.
 
 A person registers with email and a password of 12 to 128 characters, plus a unique alias of 3 to 24 letters, digits, or underscore. The date of birth must make them at least 16. Sex is one of woman, man, other, or undisclosed. If that email belongs to a confirmed account, ignoring case and surrounding spaces, the API responds with 422 and “Este correo ya está registrado.” and leaves the account unchanged. An unconfirmed signup can be replaced by a later registration for the same email: the previous link stops working and a new message is sent. Confirming the link requires the password from that signup. Staff, inactive, and admin-created accounts are left untouched. A taken alias is reported when it belongs to someone else. Birth date and sex are shown in the Django admin only.
 
@@ -65,7 +65,7 @@ Mapa de campaña en el navegador para partidas de miniaturas. Los jugadores cier
 
 Las reglas de campaña son propias. No hay arte oficial ni texto de reglamento copiado.
 
-En el navegador ya están las campañas, el estudio de mapas, los estandartes y el tablero con terrenos. Con mapa de terrenos, al empezar se abre una preparación en la que cada asiento pone caminos en su territorio antes del turno 1; cada clic de camino responde un delta hasta que esa fase termina. Órdenes y batallas siguen solo en el dominio.
+En el navegador ya están las campañas, el estudio de mapas, el editor a mano alzada, los estandartes y el tablero con terrenos. Un mapa dibujado puede usar solo parte del disco del tamaño elegido. Con mapa de terrenos, al empezar se abre una preparación en la que cada asiento pone caminos en su territorio antes del turno 1; cada clic de camino responde un delta hasta que esa fase termina. Órdenes y batallas siguen solo en el dominio.
 
 El alta pide correo, contraseña de 12 a 128 caracteres, alias de 3 a 24 letras, números o guion bajo, fecha de nacimiento con un mínimo de 16 años, y sexo (`woman`, `man`, `other` o `undisclosed`). Si el correo ya está confirmado, sin distinguir mayúsculas ni espacios alrededor, la respuesta es 422 con «Este correo ya está registrado» y la cuenta no cambia. Un alta sin confirmar se puede repetir: el enlace anterior deja de valer y se envía otro. Para confirmar hay que escribir la contraseña del alta. Las cuentas de administración, las inactivas y las creadas en el admin no se sustituyen. Si el alias pertenece a otra persona, se avisa. La fecha y el sexo solo se ven en el admin.
 

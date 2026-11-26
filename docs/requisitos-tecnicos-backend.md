@@ -20,7 +20,7 @@ Las fases son reclutamiento, colocación si colocan los jugadores, preparación 
 
 Hasta que el propietario pulsa empezar puede cambiar las reglas y bajar el número de plazas, sin bajar de 2 ni de las plazas ya ocupadas. Al empezar quedan fijas. En ese momento se nombran el resto de administradores. Antes solo administra quien creó la campaña.
 
-Sin mapa de terrenos, el tablero sigue midiendo 19, 37 o 61 hexágonos axiales y no hay casillas infranqueables. Con un mapa guardado o generado, el tamaño es el del mapa (hoy 271, 397 o 547 en los preajustes) y el dominio aplica el catálogo de terrenos. `/api/map-scales` publica esos preajustes. El propietario borra un atlas suyo con `DELETE /api/maps/{id}`.
+Sin mapa de terrenos, el tablero sigue midiendo 19, 37 o 61 hexágonos axiales y no hay casillas infranqueables. Con un mapa guardado o generado, el tamaño es el del mapa (hoy 271, 397 o 547 en los preajustes) y el dominio aplica el catálogo de terrenos. El documento dibujado puede ser un subconjunto del disco: `game.hexes` copia esas casillas. `/api/map-scales` publica los preajustes. `POST /api/maps` con `cells` guarda un dibujo; `PUT /api/maps/{id}` actualiza solo dibujos; `POST /api/maps/{id}/copy` clona uno (también generado) a dibujo editable; `DELETE /api/maps/{id}` borra el atlas.
 
 Tras empezar o cerrar la colocación, si la campaña tiene terrenos, la fase pasa a preparación. Ahí viven `POST .../roads`, `POST .../roads/clear` y `POST .../roads/ready`. Mientras la partida sigue en preparación, esas escrituras responden un delta (`kind: roads_delta`): revisión, fase, contadores de camino, `road_ready` y solo las casillas tocadas. Al abrirse el primer turno, `roads/ready` del último asiento devuelve la vista completa.
 
