@@ -36,6 +36,22 @@ export const GROUND_TIP: Record<string, MessageKey> = {
   campo: "groundTipField",
 }
 
+/** Movement penalty is cancelled by a road or bridge; vision modifiers remain. */
+export const GROUND_TIP_ON_ROAD: Record<string, MessageKey> = {
+  llanura: "groundTipRoadClear",
+  colina: "groundTipRoadHill",
+  bosque: "groundTipRoadClear",
+  bosque_profundo: "groundTipRoadDeepForest",
+  montana: "groundTipRoadMountain",
+  desierto: "groundTipRoadClear",
+  tundra: "groundTipRoadClear",
+  rio: "groundTipRoadClear",
+  pantano: "groundTipRoadClear",
+  playa: "groundTipRoadClear",
+  mina: "groundTipRoadClear",
+  campo: "groundTipRoadClear",
+}
+
 export const GROUND_ART: Record<string, string> = {
   llanura: "/terrain/llanura.jpg",
   colina: "/terrain/colina.jpg",

@@ -4,7 +4,7 @@ import type { MapCell } from "../../api"
 import { useI18n } from "../../i18n/language"
 import { hexLine } from "./disk"
 import { axialFromPixel, hexCenter, hexPoints } from "./geometry"
-import { GROUND_LABEL } from "./grounds"
+import { GROUND_LABEL, GROUND_TIP, GROUND_TIP_ON_ROAD } from "./grounds"
 import { lakeOutlines, riverShapes, roadPaths, terrainOutlines, territoryOutlines } from "./courses"
 import { ArtDefinitions, EARTH, Fields, noise, OrnamentArt, ornaments } from "./TerrainArt"
 import "./board.css"
@@ -60,6 +60,7 @@ export function HexBoard({
   const painted = useRef(new Set<string>())
   const lastHex = useRef<Spot | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
   const byKey = useRef(new Map<string, OwnedCell | Spot>())
   const onPaintRef = useRef(onPaint)
   const sizeRef = useRef(size)
@@ -79,13 +80,29 @@ export function HexBoard({
       ...(owner ? [t("territoryOwner", { player: owner.label })] : []),
     ].join(" · ")
   }
+  function terrainEffect(cell: OwnedCell) {
+    if (cell.road || cell.bridge) {
+      return t(GROUND_TIP_ON_ROAD[cell.ground] ?? "groundTipRoadClear")
+    }
+    return t(GROUND_TIP[cell.ground] ?? "groundTipPlain")
+  }
   const label = useRef<(cell: OwnedCell | null) => void>(() => {})
   label.current = (cell) => {
     const node = caption.current
     if (!node) {
       return
     }
-    node.textContent = cell ? terrainName(cell) : ""
+    if (!cell) {
+      node.replaceChildren()
+      return
+    }
+    const title = document.createElement("span")
+    title.className = "hex-caption-title"
+    title.textContent = terrainName(cell)
+    const tip = document.createElement("span")
+    tip.className = "hex-caption-tip"
+    tip.textContent = terrainEffect(cell)
+    node.replaceChildren(title, tip)
   }
   const onHover = useCallback((cell: OwnedCell | null) => {
     label.current(cell)
@@ -173,6 +190,18 @@ export function HexBoard({
       window.removeEventListener("pointercancel", up)
     }
   }, [onPaint, paintAt, endPaint])
+  useEffect(() => {
+    const viewport = viewportRef.current
+    const board = svgRef.current
+    if (!viewport || !board) return
+    const center = () => {
+      viewport.scrollLeft = Math.max(0, (board.scrollWidth - viewport.clientWidth) / 2)
+      viewport.scrollTop = Math.max(0, (board.scrollHeight - viewport.clientHeight) / 2)
+    }
+    center()
+    const frame = requestAnimationFrame(center)
+    return () => cancelAnimationFrame(frame)
+  }, [zoom, extent])
   const territories = useMemo(() => territoryOutlines(artPlaced, size).flatMap(region => {
     const player = players.find(item => item.player_id === region.owner_id)
     return player?.color ? [{ ...region, player }] : []
@@ -216,7 +245,7 @@ export function HexBoard({
     <div className="hex-stage">
       {extent.length > 8 ? (
         <div className="hex-tools">
-          <button type="button" onClick={() => setZoom((value) => Math.max(1, value - .5))} disabled={zoom === 1} aria-label={t("mapZoomOut")}>−</button>
+          <button type="button" onClick={() => setZoom((value) => Math.max(0.5, value - .5))} disabled={zoom === 0.5} aria-label={t("mapZoomOut")}>−</button>
           <button type="button" onClick={() => setZoom(1)} aria-label={t("mapFit")}>{Math.round(zoom * 100)}%</button>
           <button type="button" onClick={() => setZoom((value) => Math.min(3, value + .5))} disabled={zoom === 3} aria-label={t("mapZoomIn")}>+</button>
           <button type="button" onClick={() => setGrid((value) => !value)} aria-pressed={grid}>{t("mapGrid")}</button>
@@ -227,7 +256,13 @@ export function HexBoard({
           ) : null}
         </div>
       ) : null}
-      <div className={extent.length > 8 ? "hex-viewport" : undefined} tabIndex={extent.length > 8 ? 0 : undefined} role="group" aria-label={t("mapsTitle")}>
+      <div
+        ref={extent.length > 8 ? viewportRef : undefined}
+        className={extent.length > 8 ? "hex-viewport" : undefined}
+        tabIndex={extent.length > 8 ? 0 : undefined}
+        role="group"
+        aria-label={t("mapsTitle")}
+      >
       <svg
         ref={svgRef}
         className="hex-board"
@@ -356,7 +391,7 @@ export function HexBoard({
                 beginPaint(cell)
               } : undefined}
             >
-              <title>{terrainName(cell)}</title>
+              <title>{`${terrainName(cell)}. ${terrainEffect(cell)}`}</title>
             </polygon>
           ))}
         </g>

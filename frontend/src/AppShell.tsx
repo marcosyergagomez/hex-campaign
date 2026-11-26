@@ -4,6 +4,8 @@ import { Link, Navigate, NavLink, Outlet } from "react-router-dom"
 import { currentPlayer, logout, type Player } from "./api"
 import { Banner } from "./form"
 import { LanguageSelect, useI18n } from "./i18n/language"
+import { LiveConnection } from "./liveEvents"
+import { NotificationBell } from "./NotificationBell"
 import { presentError } from "./presentError"
 import { UserMenu } from "./UserMenu"
 
@@ -91,6 +93,7 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
+      <LiveConnection active />
       <header className="app-bar">
         <div className="app-brand">
           <p className="mark">Hex Campaign</p>
@@ -100,6 +103,7 @@ export function AppShell() {
           </nav>
         </div>
         <div className="app-user">
+          <NotificationBell />
           <LanguageSelect />
           <UserMenu alias={player.alias} pending={pending} onLogout={onLogout} />
         </div>

@@ -16,17 +16,21 @@ from apps.campaigns.records import (
     RevisionConflict,
     accept_alias,
     accept_link,
+    campaign_pulse,
     create_campaign,
     inbox,
     invite_alias,
     invite_link,
     list_campaigns,
+    list_notifications,
+    mark_notification_read,
     play,
     present,
     present_roads_delta,
     preview_link,
     read_campaign,
     scrap_campaign,
+    search_players,
 )
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex
@@ -73,6 +77,7 @@ _MESSAGES = {
     "invitation_invalid": "La invitación no es válida.",
     "revision_conflict": "La campaña ha cambiado. Vuelve a leerla.",
     "campaign_limit": "Ya tienes tres campañas en curso.",
+    "invitee_campaign_limit": "Ese jugador ya tiene tres campañas en curso.",
     "campaign_delete_locked": "Esa campaña no se puede eliminar así.",
     "confirm_name_mismatch": "Escribe el nombre exacto de la campaña para confirmar.",
     "map_unknown": "No hay ningún mapa con ese identificador.",
@@ -326,6 +331,18 @@ def get_campaign(campaign_id: str, request: Request) -> JSONResponse:
         return _failure(exc)
 
 
+@router.get("/api/campaigns/{campaign_id}/pulse")
+@django_sync
+def get_campaign_pulse(campaign_id: str, request: Request) -> JSONResponse:
+    user = _reader(request)
+    if isinstance(user, JSONResponse):
+        return user
+    try:
+        return JSONResponse(campaign_pulse(user, campaign_id))
+    except CampaignError as exc:
+        return _failure(exc)
+
+
 @router.get("/api/invitations")
 @django_sync
 def get_invitations(request: Request) -> JSONResponse:
@@ -333,6 +350,34 @@ def get_invitations(request: Request) -> JSONResponse:
     if isinstance(user, JSONResponse):
         return user
     return JSONResponse(inbox(user))
+
+
+@router.get("/api/players")
+@django_sync
+def get_players(request: Request) -> JSONResponse:
+    user = _reader(request)
+    if isinstance(user, JSONResponse):
+        return user
+    query = request.query_params.get("q", "")
+    return JSONResponse(search_players(user, query))
+
+
+@router.get("/api/notifications")
+@django_sync
+def get_notifications(request: Request) -> JSONResponse:
+    user = _reader(request)
+    if isinstance(user, JSONResponse):
+        return user
+    return JSONResponse(list_notifications(user))
+
+
+@router.post("/api/notifications/{notification_id}/read")
+@django_sync
+def post_notification_read(notification_id: str, request: Request) -> JSONResponse:
+    def action(user):
+        return JSONResponse(mark_notification_read(user, notification_id))
+
+    return _run(request, action)
 
 
 @router.get("/api/invitations/{token}")

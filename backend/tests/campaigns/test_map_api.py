@@ -150,10 +150,13 @@ def _table(ana, boa, *, blind: bool, map_id: str, size: int = 271) -> dict:
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(("size", "home"), [(271, 19), (397, 28), (547, 38)])
-def test_a_generated_map_stays_hidden_when_the_owner_does_not_look(clients, size, home) -> None:
+def test_a_generated_map_stays_hidden_when_the_owner_does_not_look(
+    clients, size, home, settings,
+) -> None:
+    settings.API_ORIGIN = ORIGIN
     ana, boa = clients
     owner = _player("ana-map@example.com", "AnaMapa")
-    _player("boa-map@example.com", "BoaMapa")
+    guest = _player("boa-map@example.com", "BoaMapa")
     _login(ana, owner.email)
     _login(boa, "boa-map@example.com")
     created = _write(ana, "/api/maps", {"name": "Disco", "size": size, "seats": 2})
@@ -166,7 +169,8 @@ def test_a_generated_map_stays_hidden_when_the_owner_does_not_look(clients, size
     assert all(not item["road"] for item in chart.json()["cells"])
     assert _read(boa, f"/api/maps/{created.json()['id']}").status_code == 404
 
-    hidden = _table(ana, boa, blind=True, map_id=created.json()["id"], size=size)
+    # Fog binds every seat, including the creator who saw the atlas beforehand.
+    hidden = _table(ana, boa, blind=False, map_id=created.json()["id"], size=size)
     known = [item for item in hidden["hexes"] if item["known"]]
     assert len(known) == home
     assert len(hidden["hexes"]) == size
@@ -176,6 +180,12 @@ def test_a_generated_map_stays_hidden_when_the_owner_does_not_look(clients, size
     assert all("road" not in item for item in hidden["hexes"] if not item["known"])
     assert all(item["owner_id"] == str(owner.pk) for item in known)
     assert all("owner_id" not in item for item in hidden["hexes"] if not item["known"])
+
+    guest_view = _read(boa, f"/api/campaigns/{hidden['id']}")
+    assert guest_view.status_code == 200, guest_view.text
+    guest_known = [item for item in guest_view.json()["hexes"] if item["known"]]
+    assert len(guest_known) == home
+    assert all(item["owner_id"] == str(guest.pk) for item in guest_known)
 
 
 @pytest.mark.django_db(transaction=True)

@@ -2,6 +2,7 @@
 
 import hashlib
 import random
+import re
 import secrets
 import uuid
 from collections.abc import Callable
@@ -12,6 +13,7 @@ from django.utils import timezone
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import (
     Game,
+    bump,
     find_member,
     from_dict,
     require_owner,
@@ -22,6 +24,7 @@ from hexcampaign.domain.game import (
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.lobby import accept_seat, create_game, invite_player
 from hexcampaign.domain.rules import campaign_name, rules_from
+from hexcampaign.domain.sight import equalize_fog
 from hexcampaign.domain.turn import (
     deactivate_player,
     leave_campaign,
@@ -30,6 +33,7 @@ from hexcampaign.domain.turn import (
 )
 from hexcampaign.domain.view import project, project_roads_delta
 
+from .live import live_bus
 from .models import Campaign, Invitation, Seat
 
 
@@ -58,6 +62,7 @@ def create_campaign(
     blind: bool = False,
     description: str = "",
 ) -> tuple[Campaign, Game]:
+    del blind  # Kept on the API; fog no longer privileges the creator.
     try:
         parsed = rules_from(rules)
     except DomainError as exc:
@@ -70,11 +75,9 @@ def create_campaign(
             if template is not None:
                 from hexcampaign.domain.maps import lay
 
-                # Atlas stays sealed in recruiting. After kickoff, a non-blind
-                # surveyor gets the full chart; blind owners only learn home land.
+                # Fog binds every seat the same way; the atlas stays sealed until kickoff.
                 lay(game, template, None)
-                if not blind:
-                    game.surveyor = str(account.pk)
+                game.surveyor = None
         except DomainError as exc:
             raise CampaignError(exc.code) from exc
         campaign = Campaign.objects.create(
@@ -83,6 +86,10 @@ def create_campaign(
             created_by=account,
         )
         _sync(campaign, game)
+        _push_after_commit(
+            [account.pk],
+            {"type": "campaigns", "campaign_id": str(campaign.id)},
+        )
     return campaign, game
 
 
@@ -125,7 +132,13 @@ def scrap_campaign(user, campaign_id, confirm_name: object) -> None:
         if game.phase == "finished":
             raise CampaignError("campaign_delete_locked")
         if game.phase in PREPARED_PHASES and member.role == "owner":
+            watchers = _seat_user_ids(campaign)
+            campaign_key = str(campaign.id)
             campaign.delete()
+            _push_after_commit(
+                watchers,
+                {"type": "campaigns", "campaign_id": campaign_key, "gone": True},
+            )
             return
         rng = random.Random()
         now = timezone.now()
@@ -212,18 +225,121 @@ def invite_alias(user, campaign_id, revision: int, alias: str) -> tuple[Campaign
     invited = _player_by_alias(alias)
     if invited is None or not invited.is_active or invited.email_verified_at is None:
         raise CampaignError("unknown_player")
+    if invited.pk == user.pk:
+        raise CampaignError("forbidden")
 
     def command(game: Game) -> Game:
         return invite_player(game, str(user.pk), str(invited.pk), invited.alias)
 
     with transaction.atomic():
+        try:
+            _assert_running_capacity(invited, campaign_id)
+        except CampaignError as exc:
+            if exc.code == "campaign_limit":
+                raise CampaignError("invitee_campaign_limit") from exc
+            raise
         campaign, game = play(user, campaign_id, revision, command)
-        Invitation.objects.create(
+        if not Invitation.objects.filter(
             campaign=campaign,
-            token_hash=_digest(secrets.token_urlsafe(32)),
             invited_user=invited,
-        )
+            accepted_at__isnull=True,
+        ).exists():
+            Invitation.objects.create(
+                campaign=campaign,
+                token_hash=_digest(secrets.token_urlsafe(32)),
+                invited_user=invited,
+            )
+        _notify_campaign_invite(invited, campaign, game.revision)
         return campaign, game
+
+
+def search_players(user, query: object) -> list[dict[str, str]]:
+    from apps.accounts.models import User
+
+    if not isinstance(query, str):
+        return []
+    needle = query.strip()
+    if len(needle) < 1 or len(needle) > 24 or not re.fullmatch(r"[A-Za-z0-9_]+", needle):
+        return []
+    rows = (
+        User.objects.filter(
+            is_active=True,
+            email_verified_at__isnull=False,
+            alias__istartswith=needle,
+        )
+        .exclude(pk=user.pk)
+        .order_by("alias")[:12]
+    )
+    return [{"alias": row.alias} for row in rows]
+
+
+def list_notifications(user) -> list[dict[str, object]]:
+    from .models import Notification
+
+    rows = Notification.objects.filter(user=user).order_by("-created_at")[:40]
+    return [_notification_view(row) for row in rows]
+
+
+def mark_notification_read(user, notification_id: object) -> dict[str, object]:
+    from .models import Notification
+
+    try:
+        key = int(notification_id)
+    except (TypeError, ValueError):
+        raise CampaignError("not_found") from None
+    row = Notification.objects.filter(pk=key, user=user).first()
+    if row is None:
+        raise CampaignError("not_found")
+    if row.read_at is None:
+        row.read_at = timezone.now()
+        row.save(update_fields=["read_at"])
+    return _notification_view(row)
+
+
+def _notify_campaign_invite(invited, campaign: Campaign, revision: int) -> None:
+    from .models import Notification
+
+    Notification.objects.filter(
+        user=invited,
+        kind=Notification.KIND_CAMPAIGN_INVITE,
+        read_at__isnull=True,
+        payload__campaign_id=str(campaign.id),
+    ).delete()
+    Notification.objects.create(
+        user=invited,
+        kind=Notification.KIND_CAMPAIGN_INVITE,
+        payload={
+            "campaign_id": str(campaign.id),
+            "campaign_name": campaign.name,
+            "revision": revision,
+        },
+    )
+    _push_after_commit([invited.pk], {"type": "notification"})
+
+
+def _notification_view(row) -> dict[str, object]:
+    from .models import Notification
+
+    payload = row.payload if isinstance(row.payload, dict) else {}
+    if row.kind == Notification.KIND_CAMPAIGN_INVITE:
+        campaign_id = payload.get("campaign_id")
+        if isinstance(campaign_id, str) and campaign_id:
+            campaign = Campaign.objects.filter(pk=campaign_id).only("name", "state").first()
+            if campaign is not None:
+                state = campaign.state if isinstance(campaign.state, dict) else {}
+                revision = state.get("revision")
+                payload = {
+                    **payload,
+                    "campaign_name": campaign.name,
+                    "revision": revision if isinstance(revision, int) else payload.get("revision"),
+                }
+    return {
+        "id": str(row.pk),
+        "kind": row.kind,
+        "payload": payload,
+        "created_at": row.created_at.isoformat(),
+        "read": row.read_at is not None,
+    }
 
 
 def invite_link(user, campaign_id) -> str:
@@ -273,7 +389,35 @@ def read_campaign(user, campaign_id, now) -> dict[str, object]:
         # Do not leak name, phase or seat counts to anyone who is not seated.
         # Invitation previews go through preview_link with a secret token.
         raise CampaignError("not_found")
+    if game.surveyor:
+        with transaction.atomic():
+            _actor(user)
+            campaign = _locked(campaign_id)
+            game = _document(campaign)
+            if find_member(game, str(user.pk)) is None:
+                raise CampaignError("not_found")
+            if equalize_fog(game):
+                _save(campaign, bump(game))
     return present(campaign, game, user, now)
+
+
+def campaign_pulse(user, campaign_id) -> dict[str, object]:
+    """Cheap revision check so clients can refresh when another player acts."""
+    seated = Seat.objects.filter(
+        campaign_id=campaign_id,
+        user=user,
+        status__in=["active", "eliminated"],
+    ).exists()
+    if not seated:
+        raise CampaignError("not_found")
+    campaign = Campaign.objects.filter(pk=campaign_id).only("phase", "state").first()
+    if campaign is None:
+        raise CampaignError("not_found")
+    state = campaign.state if isinstance(campaign.state, dict) else {}
+    revision = state.get("revision")
+    if not isinstance(revision, int) or revision < 1:
+        raise CampaignError("not_found")
+    return {"revision": revision, "phase": campaign.phase}
 
 
 def list_campaigns(user) -> list[dict[str, object]]:
@@ -377,6 +521,8 @@ def _accept_locked(
     found: Invitation,
     revision: int,
 ) -> tuple[Campaign, Game]:
+    from .models import Notification
+
     game = _document(campaign)
     if game.revision != revision:
         raise RevisionConflict()
@@ -386,6 +532,12 @@ def _accept_locked(
         raise CampaignError(exc.code) from exc
     found.accepted_at = timezone.now()
     found.save(update_fields=["accepted_at"])
+    Notification.objects.filter(
+        user=account,
+        kind=Notification.KIND_CAMPAIGN_INVITE,
+        read_at__isnull=True,
+        payload__campaign_id=str(campaign.id),
+    ).update(read_at=timezone.now())
     _save(campaign, updated)
     return campaign, updated
 
@@ -454,6 +606,21 @@ def _save(campaign: Campaign, game: Game) -> None:
     campaign.state = to_dict(game)
     campaign.save(update_fields=["name", "state", "updated_at"])
     _sync(campaign, game)
+    watchers = [
+        int(member.player_id)
+        for member in game.members
+        if member.status in {"active", "eliminated", "inactive"}
+    ]
+    _push_after_commit(
+        watchers,
+        {
+            "type": "campaign",
+            "campaign_id": str(campaign.id),
+            "revision": game.revision,
+            "phase": game.phase,
+        },
+    )
+    _push_after_commit(watchers, {"type": "campaigns", "campaign_id": str(campaign.id)})
 
 
 def _sync(campaign: Campaign, game: Game) -> None:
@@ -467,6 +634,22 @@ def _sync(campaign: Campaign, game: Game) -> None:
         )
         seen.append(user_id)
     Seat.objects.filter(campaign=campaign).exclude(user_id__in=seen).delete()
+
+
+def _seat_user_ids(campaign: Campaign) -> list[int]:
+    return list(Seat.objects.filter(campaign=campaign).values_list("user_id", flat=True))
+
+
+def _push_after_commit(user_ids: list[int], event: dict[str, object]) -> None:
+    recipients = list(dict.fromkeys(int(user_id) for user_id in user_ids))
+    if not recipients:
+        return
+    payload = dict(event)
+
+    def deliver() -> None:
+        live_bus.publish_users(recipients, payload)
+
+    transaction.on_commit(deliver)
 
 
 def _digest(raw: str) -> str:

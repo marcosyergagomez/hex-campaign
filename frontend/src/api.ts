@@ -767,6 +767,114 @@ export async function listCampaigns(): Promise<CampaignSummary[]> {
   return rows
 }
 
+export type PlayerSuggestion = { alias: string }
+
+export type AppNotification = {
+  id: string
+  kind: string
+  payload: Record<string, unknown>
+  created_at: string
+  read: boolean
+}
+
+export async function searchPlayers(query: string): Promise<PlayerSuggestion[]> {
+  const data = await request(`/api/players?q=${encodeURIComponent(query)}`, { method: "GET" })
+  if (!Array.isArray(data) || data.length > 20) {
+    throw new ApiError(200, {})
+  }
+  const rows: PlayerSuggestion[] = []
+  for (const item of data) {
+    if (!item || typeof item !== "object" || !("alias" in item) || typeof item.alias !== "string") {
+      throw new ApiError(200, {})
+    }
+    if (!ALIAS.test(item.alias)) {
+      throw new ApiError(200, {})
+    }
+    rows.push({ alias: item.alias })
+  }
+  return rows
+}
+
+export async function inviteCampaignPlayer(
+  id: string,
+  revision: number,
+  alias: string,
+): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(
+    await request(`/api/campaigns/${encodeURIComponent(id)}/invitations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ revision, alias }),
+    }),
+  )
+  if (!campaign) throw new ApiError(200, {})
+  return campaign
+}
+
+export async function joinCampaign(id: string, revision: number): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(
+    await request(`/api/campaigns/${encodeURIComponent(id)}/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ revision }),
+    }),
+  )
+  if (!campaign) throw new ApiError(200, {})
+  return campaign
+}
+
+export async function listNotifications(): Promise<AppNotification[]> {
+  const data = await request("/api/notifications", { method: "GET" })
+  if (!Array.isArray(data) || data.length > 60) {
+    throw new ApiError(200, {})
+  }
+  const rows: AppNotification[] = []
+  for (const item of data) {
+    const row = readNotification(item)
+    if (!row) throw new ApiError(200, {})
+    rows.push(row)
+  }
+  return rows
+}
+
+export async function markNotificationRead(id: string): Promise<AppNotification> {
+  const row = readNotification(
+    await request(`/api/notifications/${encodeURIComponent(id)}/read`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: "{}",
+    }),
+  )
+  if (!row) throw new ApiError(200, {})
+  return row
+}
+
+function readNotification(value: unknown): AppNotification | null {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.id !== "string" ||
+    record.id.length === 0 ||
+    record.id.length > 32 ||
+    typeof record.kind !== "string" ||
+    record.kind.length === 0 ||
+    record.kind.length > 32 ||
+    typeof record.created_at !== "string" ||
+    typeof record.read !== "boolean" ||
+    !record.payload ||
+    typeof record.payload !== "object"
+  ) {
+    return null
+  }
+  return {
+    id: record.id,
+    kind: record.kind,
+    created_at: record.created_at,
+    read: record.read,
+    payload: record.payload as Record<string, unknown>,
+  }
+}
+
 export async function createCampaign(
   name: string,
   rules: CampaignRules,
@@ -803,6 +911,27 @@ export async function getCampaign(id: string): Promise<CampaignDetail> {
     throw new ApiError(200, {})
   }
   return campaign
+}
+
+export type CampaignPulse = {
+  revision: number
+  phase: CampaignDetail["phase"]
+}
+
+export async function getCampaignPulse(id: string): Promise<CampaignPulse> {
+  const data = await request(`/api/campaigns/${encodeURIComponent(id)}/pulse`, { method: "GET" })
+  if (!data || typeof data !== "object") throw new ApiError(200, {})
+  const record = data as Record<string, unknown>
+  const revision = readInt(record.revision, 1, 1_000_000_000)
+  const phase = record.phase
+  if (
+    revision === null ||
+    typeof phase !== "string" ||
+    !["recruiting", "placing", "preparing", "orders", "battles", "finished"].includes(phase)
+  ) {
+    throw new ApiError(200, {})
+  }
+  return { revision, phase: phase as CampaignDetail["phase"] }
 }
 
 export async function deleteCampaign(id: string, confirmName: string): Promise<void> {

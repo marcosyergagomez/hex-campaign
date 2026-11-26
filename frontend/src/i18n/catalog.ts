@@ -61,6 +61,7 @@ const fromSpanish = [
   "campaignNotFound",
   "campaignRevisionConflict",
   "campaignOpenLimit",
+  "inviteeCampaignLimit",
   "campaignDeleteLocked",
   "confirmNameMismatch",
   "deleteCampaignFailed",

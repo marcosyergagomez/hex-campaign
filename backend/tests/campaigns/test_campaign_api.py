@@ -426,3 +426,114 @@ def test_the_list_reads_the_phase_column() -> None:
     ]
     sql = " ".join(query["sql"] for query in captured.captured_queries)
     assert "state" not in sql
+
+
+@pytest.mark.django_db(transaction=True)
+def test_campaign_pulse_tracks_revision_after_ready(clients, settings) -> None:
+    settings.API_ORIGIN = ORIGIN
+    ana, boa = clients
+    _player("pulso_a@example.com", "pulso_a")
+    _player("pulso_b@example.com", "pulso_b")
+    _login(ana, "pulso_a@example.com")
+    _login(boa, "pulso_b@example.com")
+
+    created = _write(ana, "/api/campaigns", {"name": "Pulso", "rules": RULES}).json()
+    campaign_id = created["id"]
+    link = _write(ana, f"/api/campaigns/{campaign_id}/links", {}).json()["token"]
+    preview = _read(boa, f"/api/invitations/{link}").json()
+    joined = _write(
+        boa,
+        f"/api/invitations/{link}/accept",
+        {"revision": preview["revision"]},
+    ).json()
+
+    pulse = _read(ana, f"/api/campaigns/{campaign_id}/pulse")
+    assert pulse.status_code == 200, pulse.text
+    assert pulse.json() == {"revision": joined["revision"], "phase": "recruiting"}
+
+    revision = joined["revision"]
+    for client, faction, color in (
+        (ana, "empire", "#c62828"),
+        (boa, "skaven", "#1565c0"),
+    ):
+        identity = _write(
+            client,
+            f"/api/campaigns/{campaign_id}/identity",
+            {"revision": revision, "faction": faction, "color": color},
+        )
+        assert identity.status_code == 200, identity.text
+        revision = identity.json()["revision"]
+        ready = _write(client, f"/api/campaigns/{campaign_id}/ready", {"revision": revision})
+        assert ready.status_code == 200, ready.text
+        revision = ready.json()["revision"]
+
+    later = _read(ana, f"/api/campaigns/{campaign_id}/pulse")
+    assert later.status_code == 200, later.text
+    assert later.json() == {"revision": revision, "phase": "recruiting"}
+    assert later.json()["revision"] > pulse.json()["revision"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_admin_invite_creates_notification_and_guest_can_join(clients, settings) -> None:
+    from apps.campaigns.models import Notification
+
+    settings.API_ORIGIN = ORIGIN
+    ana, boa = clients
+    owner = _player("invita@example.com", "anfitrion")
+    guest = _player("invitado@example.com", "convidado")
+    _login(ana, owner.email)
+    _login(boa, guest.email)
+
+    created = _write(ana, "/api/campaigns", {"name": "Mesa", "rules": RULES})
+    assert created.status_code == 201, created.text
+    campaign = created.json()
+
+    found = _read(ana, "/api/players?q=con")
+    assert found.status_code == 200, found.text
+    assert found.json() == [{"alias": "convidado"}]
+
+    invited = _write(
+        ana,
+        f"/api/campaigns/{campaign['id']}/invitations",
+        {"revision": campaign["revision"], "alias": "convidado"},
+    )
+    assert invited.status_code == 200, invited.text
+    assert invited.json()["revision"] == campaign["revision"] + 1
+    assert Notification.objects.filter(user=guest, kind="campaign_invite").count() == 1
+
+    notes = _read(boa, "/api/notifications")
+    assert notes.status_code == 200, notes.text
+    rows = notes.json()
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "campaign_invite"
+    assert rows[0]["read"] is False
+    assert rows[0]["payload"]["campaign_id"] == campaign["id"]
+    assert rows[0]["payload"]["campaign_name"] == "Mesa"
+    assert isinstance(rows[0]["payload"]["revision"], int)
+
+    joined = _write(
+        boa,
+        f"/api/campaigns/{campaign['id']}/join",
+        {"revision": rows[0]["payload"]["revision"]},
+    )
+    assert joined.status_code == 200, joined.text
+    assert joined.json()["you"]["alias"] == "convidado"
+    assert Notification.objects.filter(user=guest, read_at__isnull=False).count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_cannot_invite_player_already_in_three_running() -> None:
+    from apps.campaigns.models import Campaign
+    from apps.campaigns.records import invite_alias
+
+    owner = _player("dueno_limite@example.com", "dueno_lim")
+    guest = _player("lleno@example.com", "lleno_tres")
+    lobby, game = create_campaign(owner, "Lobby", {**RULES, "seats": 3})
+
+    for name in ("Uno", "Dos", "Tres"):
+        campaign, _doc = create_campaign(guest, name, RULES)
+        Campaign.objects.filter(pk=campaign.pk).update(phase="orders")
+
+    with pytest.raises(CampaignError) as refused:
+        invite_alias(owner, lobby.id, game.revision, guest.alias)
+    assert refused.value.code == "invitee_campaign_limit"

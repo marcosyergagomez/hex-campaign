@@ -171,22 +171,46 @@ test("a road approaches a fortress without painting a road through its courtyard
   const road = { ...mark(1, 0, "bosque"), road: true }
   const paths = roadPaths([fort, road], 28, [fort])
   assert.equal(paths.length, 1)
-  const endpoint = paths[0].split(" ").at(-1).split(",").map(Number)
-  assert.ok(endpoint[0] > fort.x)
-  assert.ok(endpoint[0] < road.x)
+  const entranceX = fort.x + (road.x - fort.x) * .28
+  assert.ok(paths[0].includes(`${entranceX},`))
+  assert.ok(!paths[0].includes(`${fort.x},${fort.y}`))
 })
 
-test("roads avoid triangular meshes while preserving junctions and longer loops", () => {
+test("road triangles become a crossing hub instead of a bent corridor", () => {
   const triangle = [[0, 0], [1, 0], [0, 1]]
     .map(([q, r]) => ({ ...mark(q, r, "bosque"), road: true }))
   const paths = roadPaths(triangle, 28)
-  assert.equal(paths.length, 2)
+  assert.equal(paths.length, 3)
   assert.deepEqual(paths, roadPaths([...triangle].reverse(), 28))
-  for (const cell of triangle) {
-    assert.ok(paths.some(path => path.startsWith(`M${cell.x},${cell.y} `)
-      || path.endsWith(` ${cell.x},${cell.y}`)))
+  const hubX = (triangle[0].x + triangle[1].x + triangle[2].x) / 3
+  const hubY = (triangle[0].y + triangle[1].y + triangle[2].y) / 3
+  for (const path of paths) {
+    assert.ok(path.includes(`${hubX},${hubY}`))
   }
+  for (const cell of triangle) {
+    assert.ok(paths.some(path => path.includes(`${cell.x},${cell.y}`)))
+  }
+})
+
+test("a longer road loop stays one continuous ring", () => {
   const loop = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]
     .map(([q, r]) => ({ ...mark(q, r, "llanura"), road: true }))
-  assert.equal(roadPaths(loop, 28).length, 6)
+  const paths = roadPaths(loop, 28)
+  assert.equal(paths.length, 1)
+  for (const cell of loop) {
+    assert.ok(paths[0].includes(`${cell.x},${cell.y}`))
+  }
+})
+
+test("every road beside a fortress keeps an entrance into the keep", () => {
+  const fort = { ...mark(0, 0, "llanura"), road: false }
+  const roads = [[1, 0], [0, 1], [-1, 1]]
+    .map(([q, r]) => ({ ...mark(q, r, "bosque"), road: true }))
+  const paths = roadPaths([fort, ...roads], 28, [fort])
+  assert.equal(paths.length, 3)
+  for (const road of roads) {
+    const entrance = paths.find(path => path.includes(`${road.x},${road.y}`))
+    assert.ok(entrance)
+    assert.ok(entrance.includes(`${fort.x + (road.x - fort.x) * .28},${fort.y + (road.y - fort.y) * .28}`))
+  }
 })
