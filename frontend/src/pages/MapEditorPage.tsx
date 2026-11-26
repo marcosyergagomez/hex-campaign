@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 
 import {
@@ -14,12 +14,26 @@ import {
 import { Banner, Field } from "../form"
 import { HexBoard } from "../game/hex/HexBoard"
 import { axialKey, brushCells, diskCells, type Axial } from "../game/hex/disk"
-import { GROUND_LABEL } from "../game/hex/grounds"
+import { GROUND_ART, GROUND_LABEL, GROUND_TIP } from "../game/hex/grounds"
 import { useI18n } from "../i18n/language"
+import type { MessageKey } from "../i18n/catalog"
 import { presentError } from "../presentError"
+import {
+  IconAddHex,
+  IconBridge,
+  IconBrush,
+  IconBrushArea,
+  IconErase,
+  IconRedo,
+  IconRemoveHex,
+  IconRoad,
+  IconUndo,
+} from "./mapEditorIcons"
 import "../game/hex/board.css"
 
 type Tool = "terrain" | "road" | "bridge" | "erase" | "add" | "remove" | "fort"
+type EditTool = "erase" | "add" | "remove"
+type BuildTool = "fort" | "road" | "bridge"
 
 type Snapshot = {
   cells: MapCell[]
@@ -69,8 +83,16 @@ export function MapEditorPage() {
   const strokeBase = useRef<Snapshot | null>(null)
   const cellsRef = useRef<MapCell[]>([])
   const anchorsRef = useRef<Axial[]>([])
+  const paintQueue = useRef<Axial[]>([])
+  const paintFrame = useRef<number | null>(null)
+  const paintOpts = useRef({ tool, ground, areaBrush, size })
   cellsRef.current = cells
   anchorsRef.current = anchors
+  paintOpts.current = { tool, ground, areaBrush, size }
+  const diskKeys = useMemo(
+    () => (size === null ? null : new Set(diskCells(size).map(axialKey))),
+    [size],
+  )
 
   useEffect(() => {
     let current = true
@@ -151,65 +173,66 @@ export function MapEditorPage() {
     }
   }
 
-  function applyPaint(target: Axial) {
-    if (size === null) return
+  function applyPaintBatch(targets: Axial[]) {
+    const { tool: active, ground: soil, areaBrush: area, size: board } = paintOpts.current
+    if (board === null || targets.length === 0 || !diskKeys) return
     beginStroke()
-    const spots = brushCells(target, areaBrush && tool !== "fort" && tool !== "add" && tool !== "remove")
     let nextCells = cellsRef.current.map(cell => ({ ...cell }))
     let nextAnchors = anchorsRef.current.map(spot => ({ ...spot }))
     const index = new Map(nextCells.map((cell, i) => [axialKey(cell), i]))
-    const disk = diskCells(size)
-    const inDisk = new Set(disk.map(axialKey))
+    const widen = area && active !== "fort" && active !== "add" && active !== "remove"
 
-    for (const spot of spots) {
-      const key = axialKey(spot)
-      if (tool === "add") {
-        if (index.has(key) || !inDisk.has(key)) continue
-        nextCells.push({ q: spot.q, r: spot.r, ground: "llanura", road: false, bridge: false })
-        index.set(key, nextCells.length - 1)
-        continue
-      }
-      const at = index.get(key)
-      if (at === undefined) continue
-      if (tool === "remove") {
-        nextCells[at] = null as unknown as MapCell
-        nextAnchors = nextAnchors.filter(item => axialKey(item) !== key)
-        continue
-      }
-      if (tool === "fort") {
-        const cell = nextCells[at]
-        if (cell.ground === "lago" || cell.ground === "montana_rocosa" || cell.ground === "acantilado") {
+    for (const target of targets) {
+      for (const spot of brushCells(target, widen)) {
+        const key = axialKey(spot)
+        if (active === "add") {
+          if (index.has(key) || !diskKeys.has(key)) continue
+          nextCells.push({ q: spot.q, r: spot.r, ground: "llanura", road: false, bridge: false })
+          index.set(key, nextCells.length - 1)
           continue
         }
-        const exists = nextAnchors.some(item => axialKey(item) === key)
-        nextAnchors = exists
-          ? nextAnchors.filter(item => axialKey(item) !== key)
-          : nextAnchors.length >= 4
-            ? nextAnchors
-            : [...nextAnchors, { q: spot.q, r: spot.r }]
-        continue
-      }
-      const cell = { ...nextCells[at] }
-      if (tool === "erase") {
-        cell.ground = "llanura"
-        cell.road = false
-        cell.bridge = false
-      } else if (tool === "terrain") {
-        cell.ground = ground
-        if (ground === "lago" || ground === "montana_rocosa" || ground === "acantilado") {
+        const at = index.get(key)
+        if (at === undefined) continue
+        if (active === "remove") {
+          nextCells[at] = null as unknown as MapCell
+          nextAnchors = nextAnchors.filter(item => axialKey(item) !== key)
+          continue
+        }
+        if (active === "fort") {
+          const cell = nextCells[at]
+          if (cell.ground === "lago" || cell.ground === "montana_rocosa" || cell.ground === "acantilado") {
+            continue
+          }
+          const exists = nextAnchors.some(item => axialKey(item) === key)
+          nextAnchors = exists
+            ? nextAnchors.filter(item => axialKey(item) !== key)
+            : nextAnchors.length >= 4
+              ? nextAnchors
+              : [...nextAnchors, { q: spot.q, r: spot.r }]
+          continue
+        }
+        const cell = { ...nextCells[at] }
+        if (active === "erase") {
+          cell.ground = "llanura"
           cell.road = false
           cell.bridge = false
-          nextAnchors = nextAnchors.filter(item => axialKey(item) !== key)
+        } else if (active === "terrain") {
+          cell.ground = soil
+          if (soil === "lago" || soil === "montana_rocosa" || soil === "acantilado") {
+            cell.road = false
+            cell.bridge = false
+            nextAnchors = nextAnchors.filter(item => axialKey(item) !== key)
+          }
+          if (soil === "rio" && cell.road) cell.bridge = true
+        } else if (active === "road") {
+          cell.road = true
+          if (cell.ground === "rio") cell.bridge = true
+        } else if (active === "bridge") {
+          cell.bridge = true
+          if (cell.ground !== "rio") cell.ground = "rio"
         }
-        if (ground === "rio" && cell.road) cell.bridge = true
-      } else if (tool === "road") {
-        cell.road = true
-        if (cell.ground === "rio") cell.bridge = true
-      } else if (tool === "bridge") {
-        cell.bridge = true
-        if (cell.ground !== "rio" && cell.ground !== "orilla") cell.ground = "rio"
+        nextCells[at] = cell
       }
-      nextCells[at] = cell
     }
 
     nextCells = nextCells.filter(Boolean)
@@ -220,13 +243,49 @@ export function MapEditorPage() {
     setSavedNote(false)
   }
 
+  const flushPaint = useCallback(() => {
+    paintFrame.current = null
+    const batch = paintQueue.current
+    paintQueue.current = []
+    if (batch.length) applyPaintBatch(batch)
+  }, [diskKeys])
+
+  const queuePaint = useCallback((spots: Axial[]) => {
+    if (!spots.length) return
+    paintQueue.current.push(...spots)
+    if (paintFrame.current !== null) return
+    paintFrame.current = requestAnimationFrame(flushPaint)
+  }, [flushPaint])
+
   function endStroke() {
+    if (paintFrame.current !== null) {
+      cancelAnimationFrame(paintFrame.current)
+      paintFrame.current = null
+    }
+    if (paintQueue.current.length) {
+      const batch = paintQueue.current
+      paintQueue.current = []
+      applyPaintBatch(batch)
+    }
     if (!strokeBase.current) return
     const base = strokeBase.current
     strokeBase.current = null
     setPast(history => [...history.slice(-40), base])
     setFuture([])
   }
+  const endStrokeRef = useRef(endStroke)
+  endStrokeRef.current = endStroke
+
+  useEffect(() => {
+    const up = () => endStrokeRef.current()
+    window.addEventListener("pointerup", up)
+    window.addEventListener("pointercancel", up)
+    return () => {
+      window.removeEventListener("pointerup", up)
+      window.removeEventListener("pointercancel", up)
+      if (paintFrame.current !== null) cancelAnimationFrame(paintFrame.current)
+    }
+  }, [])
 
   function undo() {
     setPast(history => {
@@ -284,14 +343,27 @@ export function MapEditorPage() {
     }
   }
 
-  const tools: { id: Tool; label: string }[] = [
-    { id: "terrain", label: t("mapEditorToolTerrain") },
-    { id: "road", label: t("mapEditorToolRoad") },
-    { id: "bridge", label: t("mapEditorToolBridge") },
-    { id: "erase", label: t("mapEditorToolErase") },
-    { id: "add", label: t("mapEditorToolAdd") },
-    { id: "remove", label: t("mapEditorToolRemove") },
-    { id: "fort", label: t("mapEditorToolFort") },
+  const editTools: {
+    id: EditTool
+    label: MessageKey
+    tip: MessageKey
+    icon: typeof IconErase
+  }[] = [
+    { id: "erase", label: "mapEditorToolErase", tip: "mapEditorTipErase", icon: IconErase },
+    { id: "add", label: "mapEditorToolAdd", tip: "mapEditorTipAdd", icon: IconAddHex },
+    { id: "remove", label: "mapEditorToolRemove", tip: "mapEditorTipRemove", icon: IconRemoveHex },
+  ]
+
+  const buildings: {
+    id: BuildTool
+    label: MessageKey
+    tip: MessageKey
+    art?: string
+    Icon?: typeof IconRoad
+  }[] = [
+    { id: "fort", label: "mapEditorToolFort", tip: "mapEditorTipFort", art: "/terrain/fortaleza.jpg" },
+    { id: "road", label: "mapEditorToolRoad", tip: "mapEditorTipRoad", Icon: IconRoad },
+    { id: "bridge", label: "mapEditorToolBridge", tip: "mapEditorTipBridge", Icon: IconBridge },
   ]
 
   return (
@@ -313,27 +385,34 @@ export function MapEditorPage() {
 
       <form className="map-editor-bar" onSubmit={onSave}>
         <Field label={t("mapName")} name="editor-map-name" value={name} onChange={setName} />
-        <div className="table-picks">
-          {tables.map(table => (
-            <button
-              key={table.size}
-              type="button"
-              disabled={Boolean(mapId) && size !== table.size}
-              className={size === table.size ? "table-pick is-selected" : "table-pick"}
-              onClick={() => changeSize(table.size)}
-            >
-              <span>{t(table.key === "small" ? "tableSmall" : table.key === "medium" ? "tableMedium" : "tableLarge")}</span>
-            </button>
-          ))}
+        <div className="map-size-field">
+          <span className="map-size-label" id="editor-map-size">{t("mapEditorSize")}</span>
+          <div className="map-size-picks" role="group" aria-labelledby="editor-map-size">
+            {tables.map(table => {
+              const label = t(
+                table.key === "small" ? "sizeSmall" : table.key === "medium" ? "sizeMedium" : "sizeLarge",
+              )
+              const full = t(
+                table.key === "small" ? "tableSmall" : table.key === "medium" ? "tableMedium" : "tableLarge",
+              )
+              return (
+                <button
+                  key={table.size}
+                  type="button"
+                  disabled={Boolean(mapId) && size !== table.size}
+                  className={size === table.size ? "map-size-pick is-selected" : "map-size-pick"}
+                  title={full}
+                  aria-pressed={size === table.size}
+                  onClick={() => changeSize(table.size)}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
         </div>
-        <p className="quiet">{t("mapEditorForts", { count: String(anchors.length) })}</p>
+        <p className="map-editor-forts quiet">{t("mapEditorForts", { count: String(anchors.length) })}</p>
         <div className="map-editor-actions">
-          <button type="button" className="button-quiet" disabled={past.length === 0} onClick={undo}>
-            {t("mapEditorUndo")}
-          </button>
-          <button type="button" className="button-quiet" disabled={future.length === 0} onClick={redo}>
-            {t("mapEditorRedo")}
-          </button>
           <button type="submit" disabled={pending || size === null || cells.length === 0}>
             {pending ? t("mapEditorSaving") : t("mapEditorSave")}
           </button>
@@ -341,68 +420,120 @@ export function MapEditorPage() {
       </form>
 
       <div className="map-editor-tools" role="toolbar" aria-label={t("mapEditorTitle")}>
-        {tools.map(item => (
-          <button
-            key={item.id}
-            type="button"
-            className={tool === item.id ? "choice is-selected" : "choice"}
-            onClick={() => setTool(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
+        {editTools.map(item => {
+          const Icon = item.icon
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={tool === item.id ? "map-tool-btn is-selected" : "map-tool-btn"}
+              title={`${t(item.label)}. ${t(item.tip)}`}
+              aria-label={t(item.label)}
+              aria-pressed={tool === item.id}
+              onClick={() => setTool(item.id)}
+            >
+              <Icon className="map-tool-icon" />
+            </button>
+          )
+        })}
+        <span className="map-tool-sep" aria-hidden="true" />
         <button
           type="button"
-          className={!areaBrush ? "choice is-selected" : "choice"}
+          className={!areaBrush ? "map-tool-btn is-selected" : "map-tool-btn"}
+          title={`${t("mapEditorBrush1")}. ${t("mapEditorTipBrush1")}`}
+          aria-label={t("mapEditorBrush1")}
+          aria-pressed={!areaBrush}
           onClick={() => setAreaBrush(false)}
         >
-          {t("mapEditorBrush1")}
+          <IconBrush className="map-tool-icon" />
         </button>
         <button
           type="button"
-          className={areaBrush ? "choice is-selected" : "choice"}
+          className={areaBrush ? "map-tool-btn is-selected" : "map-tool-btn"}
+          title={`${t("mapEditorBrushArea")}. ${t("mapEditorTipBrushArea")}`}
+          aria-label={t("mapEditorBrushArea")}
+          aria-pressed={areaBrush}
           onClick={() => setAreaBrush(true)}
         >
-          {t("mapEditorBrushArea")}
+          <IconBrushArea className="map-tool-icon" />
+        </button>
+        <span className="map-tool-sep" aria-hidden="true" />
+        <button
+          type="button"
+          className="map-tool-btn"
+          title={`${t("mapEditorUndo")}. ${t("mapEditorTipUndo")}`}
+          aria-label={t("mapEditorUndo")}
+          disabled={past.length === 0}
+          onClick={undo}
+        >
+          <IconUndo className="map-tool-icon" />
+        </button>
+        <button
+          type="button"
+          className="map-tool-btn"
+          title={`${t("mapEditorRedo")}. ${t("mapEditorTipRedo")}`}
+          aria-label={t("mapEditorRedo")}
+          disabled={future.length === 0}
+          onClick={redo}
+        >
+          <IconRedo className="map-tool-icon" />
         </button>
       </div>
 
-      {tool === "terrain" ? (
-        <div className="map-editor-grounds" role="listbox" aria-label={t("mapEditorToolTerrain")}>
+      <div className="map-editor-body">
+        <aside className="map-editor-palette" aria-label={t("mapEditorTerrains")}>
+          <p className="map-palette-title">{t("mapEditorTerrains")}</p>
           {GROUNDS.map(item => (
             <button
               key={item}
               type="button"
-              className={ground === item ? "choice is-selected" : "choice"}
-              onClick={() => setGround(item)}
+              className={tool === "terrain" && ground === item ? "map-ground-swatch is-selected" : "map-ground-swatch"}
+              title={`${t(GROUND_LABEL[item])}. ${t(GROUND_TIP[item])}`}
+              aria-label={t(GROUND_LABEL[item])}
+              aria-pressed={tool === "terrain" && ground === item}
+              onClick={() => {
+                setTool("terrain")
+                setGround(item)
+              }}
             >
-              {t(GROUND_LABEL[item])}
+              <img src={GROUND_ART[item]} alt="" />
+              <span>{t(GROUND_LABEL[item])}</span>
             </button>
           ))}
-        </div>
-      ) : null}
+        </aside>
 
-      {cells.length > 0 ? (
-        <div
-          className="map-editor-board"
-          onPointerUp={endStroke}
-          onPointerCancel={endStroke}
-          onPointerLeave={event => {
-            if (event.buttons === 0) endStroke()
-          }}
-        >
-          <HexBoard
-            cells={cells}
-            anchors={anchors}
-            ghosts={ghosts}
-            onPaint={spot => {
-              applyPaint(spot)
-            }}
-          />
-        </div>
-      ) : (
-        <p className="quiet">{t("loadingCampaigns")}</p>
-      )}
+        {cells.length > 0 ? (
+          <div className="map-editor-board">
+            <HexBoard
+              cells={cells}
+              anchors={anchors}
+              ghosts={ghosts}
+              onPaint={queuePaint}
+            />
+          </div>
+        ) : (
+          <p className="quiet">{t("loadingCampaigns")}</p>
+        )}
+
+        <aside className="map-editor-palette map-editor-buildings" aria-label={t("mapEditorBuildings")}>
+          <p className="map-palette-title">{t("mapEditorBuildings")}</p>
+          {buildings.map(item => (
+            <button
+              key={item.id}
+              type="button"
+              className={tool === item.id ? "map-ground-swatch is-selected" : "map-ground-swatch"}
+              title={`${t(item.label)}. ${t(item.tip)}`}
+              aria-label={t(item.label)}
+              aria-pressed={tool === item.id}
+              onClick={() => setTool(item.id)}
+            >
+              {item.art ? <img src={item.art} alt="" /> : null}
+              {item.Icon ? <item.Icon className="map-build-art" /> : null}
+              <span>{t(item.label)}</span>
+            </button>
+          ))}
+        </aside>
+      </div>
     </section>
   )
 }

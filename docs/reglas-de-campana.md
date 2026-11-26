@@ -133,7 +133,7 @@ Quien ya conoce una casilla infranqueable no puede cerrar una orden que entre en
 
 Mientras le faltan puntos para salir, el ejército sigue ocupando su casilla. Quien termina antes de pagar sale antes. Llegar a una casilla compara los puntos gastados en esa salida, no los hexágonos cruzados. Si dos enemigos completan la salida hacia la misma casilla con el mismo coste, hay batalla ahí. Un ejército que todavía está pagando no ha entrado.
 
-El camino y el puente no sustituyen al suelo. Van encima. Salir de una casilla con camino cuesta 1, aunque el suelo cueste más, y la mirada sigue siendo la del suelo. Al completar esa salida, el ejército suma 1 punto, que puede gastar en salidas posteriores de ese turno. El camino no abre una montaña rocosa, un acantilado ni un lago. El puente o el vado solo puede ir sobre una orilla o un río completo, y salir de ahí cuesta 1. Camino y puente pueden compartir casilla: salir cuesta 1 y, por el camino, suma el punto.
+El camino y el puente no sustituyen al suelo. Van encima. Salir de una casilla con camino cuesta 1, aunque el suelo cueste más, y la visión sigue siendo la del suelo. Completar un movimiento por camino da +1 movimiento ese turno. El camino no abre una montaña rocosa, un acantilado ni un lago. El puente o el vado solo puede ir sobre un río completo, y salir de ahí cuesta 1. Camino y puente pueden compartir casilla: salir cuesta 1 y, por el camino, se obtiene el +1 de movimiento.
 
 Hay dos velos, y no hacen lo mismo.
 
@@ -165,21 +165,20 @@ Si colocan los jugadores, la fortaleza y los ejércitos van en casillas distinta
 
 En un mapa hecho a mano, si coloca la aplicación, reparte las fortalezas junto al borde, lo más lejos posible unas de otras, cumpliendo lo de arriba. El mapa en sí es libre: puede tener un río suelto, una cordillera partida o el transitable cortado en dos.
 
-En un mapa generado, las fortalezas salen solas, lejos unas de otras, y cada semilla dibuja un país distinto. No es una copia girada del mismo reino: es un solo paisaje. El lago, el río y la sierra caen donde caigan, y el otro jugador no nace con el mismo dibujo, pero sí con una fortaleza transitable, un territorio que no pisa el del vecino y un viaje de al menos cinco turnos hasta cualquier fortaleza rival. No basta con contar trece casillas: el generador calcula el viaje más rápido con 3 puntos por turno, el coste al salir y los puntos que devuelven los caminos. El viaje puede rodear el lago: esa es la frontera, no una recta de llanura vacía. El centro del tablero queda fuera de los territorios. Nadie nace sobre el agua ni encerrado por una barrera que no se pueda rodear.
+En un mapa generado, las fortalezas salen solas, lejos unas de otras, y cada semilla dibuja un país distinto. No es una copia girada del mismo reino: es un solo paisaje. El lago, el río y la sierra caen donde caigan, y el otro jugador no nace con el mismo dibujo, pero sí con una fortaleza transitable, un territorio que no pisa el del vecino y un viaje de al menos cinco turnos hasta cualquier fortaleza rival. No basta con contar trece casillas: el generador calcula el viaje más rápido con 3 puntos por turno, el coste al salir y el +1 de movimiento de los caminos. El viaje puede rodear el lago: esa es la frontera, no una recta de llanura vacía. El centro del tablero queda fuera de los territorios. Nadie nace sobre el agua ni encerrado por una barrera que no se pueda rodear.
 
 El generado conecta las fortalezas por terreno transitable. Cada masa de terreno es contigua, pero puede haber muchas separadas por claros y valles; no tiene por qué usar todos los terrenos:
 
 - El río completo forma un curso. Cada casilla, salvo los extremos, tiene dos vecinas de río completo. Un extremo toca un lago o el borde del mapa. No hay un río de una sola casilla, ni una mancha, ni un cruce.
-- La orilla toca al menos un río completo.
 - El acantilado, si sale, forma una cadena de al menos dos casillas, y cada una toca un lago o el borde del mapa.
 - La playa toca un lago o el borde del mapa.
 - Un lago de varias casillas es contiguo.
 - La montaña y la montaña rocosa forman sierras cortas, separadas por pasos transitables.
 - Hay varias masas de bosque. El bosque profundo, si sale, toca al menos un bosque.
-- El pantano, si sale, toca un río completo, una orilla o un lago.
-- El puente o el vado está sobre una orilla o un río completo y une dos casillas en las que se puede entrar.
+- El pantano, si sale, toca un río completo o un lago.
+- El puente o el vado está sobre un río completo y une dos casillas en las que se puede entrar.
 
-Los mapas generados no pintan caminos ni puentes: salen limpios para la preparación. Conservan terreno transitable, frontera y miradores. La fortaleza conserva su salida normal. El puente, cuando lo pone un jugador o un mapa a mano, iguala el río a la llanura y, sin camino encima, no devuelve puntos. Un camino sobre río lleva puente. Salir por camino cuesta 1 y, al completar esa salida, suma 1 punto para salidas posteriores del mismo turno. No cambian la mirada del terreno ni abren casillas infranqueables.
+Los mapas generados no pintan caminos ni puentes: salen limpios para la preparación. Conservan terreno transitable, frontera y miradores. La fortaleza conserva su salida normal. El puente, cuando lo pone un jugador o un mapa a mano, iguala el río a la llanura y, sin camino encima, no da el +1 de movimiento. Un camino sobre río lleva puente. Salir por camino cuesta 1 y completar ese movimiento da +1 movimiento ese turno. No cambian la visión del terreno ni abren casillas infranqueables.
 
 En el editor de mapas el jugador parte de un disco de llanura del tamaño elegido, puede quitar o recuperar hexágonos dentro de ese disco, pintar terreno, caminos y puentes a pincel, y colocar de 0 o de 2 a 4 fortalezas. Un mapa generado se abre como copia editable; el original no se sobrescribe. Al guardar solo se exige que haya casillas y que las fortalezas, si las hay, sean transitables.
 
@@ -211,7 +210,6 @@ En el visor se puede ampliar hasta el 300 %, desplazarse por el mapa y volver al
 | Montaña rocosa | No se entra | No se ocupa |
 | Desierto | 1 | 2, la de partida |
 | Tundra | 2 | 2, la de partida |
-| Orilla | 2, o 1 con puente o vado | 2, la de partida |
 | Río completo | 3, o 1 con puente o vado | 2, la de partida |
 | Pantano | 3 | 2, la de partida |
 | Lago | No se entra | No se ocupa |
@@ -222,10 +220,10 @@ En el visor se puede ampliar hasta el 300 %, desplazarse por el mapa y volver al
 
 | Vía | Dónde puede ir | Qué cambia |
 | --- | --- | --- |
-| Camino | Encima de un terreno en el que se puede salir | Salir cuesta 1. Al completar esa salida, suma 1 punto para las salidas de después. |
-| Puente o vado | Encima de una orilla o de un río completo | Salir cuesta 1. |
+| Camino | Encima de un terreno en el que se puede salir | Salir cuesta 1. Completar un movimiento por camino: +1 movimiento. |
+| Puente o vado | Encima de un río completo | Salir cuesta 1. |
 
-Desierto, mina y campo se salen y se ven como una llanura. Están en el catálogo porque el desgaste y la producción vendrán después, y el mapa no tendrá que cambiar de terreno. La playa es la costa por la que se puede entrar. El acantilado no se escala. No hay desembarco. Salir de la montaña cuesta 3 y, mientras se está encima, la mirada llega a 4. La montaña rocosa es la barrera.
+Desierto, mina y campo se salen y se ven como una llanura. Están en el catálogo porque el desgaste y la producción vendrán después, y el mapa no tendrá que cambiar de terreno. La playa es la costa por la que se puede entrar. El acantilado no se escala. No hay desembarco. Salir de la montaña cuesta 3 y, mientras se está encima, la visión llega a 4. La montaña rocosa es la barrera.
 
 ## Fuera de esta versión
 

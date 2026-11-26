@@ -97,59 +97,188 @@ export function shoreLines(cells: Mark[], size: number): string[] {
 }
 
 export function riverChains(cells: Mark[]): string[] {
-  return terrainChains(cells, new Set(["rio"]))
+  return riverRuns(cells).map(run =>
+    run.map(cell => `${cell.x.toFixed(1)},${cell.y.toFixed(1)}`).join(" "),
+  )
 }
 
 type Point = { x: number; y: number }
 type RiverPoint = Point & { cell: Mark | undefined }
 
+function edgeKey(a: { q: number; r: number }, b: { q: number; r: number }): string {
+  const left = key(a)
+  const right = key(b)
+  return left < right ? `${left}|${right}` : `${right}|${left}`
+}
+
+/** Path pieces between endpoints/junctions so branches meet instead of leaving gaps. */
+function riverRuns(cells: Mark[]): Mark[][] {
+  const want = new Map<string, Mark>()
+  for (const cell of cells) {
+    if (cell.ground === "rio") want.set(key(cell), cell)
+  }
+  const degree = (cell: Mark) => linked(cell, want).length
+  const used = new Set<string>()
+  const runs: Mark[][] = []
+  const ordered = [...want.values()].sort((left, right) => left.q - right.q || left.r - right.r)
+
+  function walkArm(start: Mark, first: Mark): Mark[] {
+    const run = [start, first]
+    used.add(edgeKey(start, first))
+    let previous = start
+    let current = first
+    while (degree(current) === 2) {
+      const next = linked(current, want).find(item => key(item) !== key(previous))
+      if (!next || used.has(edgeKey(current, next))) break
+      used.add(edgeKey(current, next))
+      run.push(next)
+      previous = current
+      current = next
+    }
+    return run
+  }
+
+  for (const cell of ordered) {
+    if (degree(cell) === 0) continue
+    if (degree(cell) === 2) continue
+    for (const next of linked(cell, want)) {
+      if (used.has(edgeKey(cell, next))) continue
+      runs.push(walkArm(cell, next))
+    }
+  }
+
+  for (const cell of ordered) {
+    for (const next of linked(cell, want)) {
+      if (used.has(edgeKey(cell, next))) continue
+      const run = walkArm(cell, next)
+      while (true) {
+        const head = run[0]
+        const tail = run[run.length - 1]
+        if (key(head) === key(tail) && run.length > 2) break
+        const prev = run[run.length - 2]
+        const step = linked(tail, want).find(
+          item => key(item) !== key(prev) && !used.has(edgeKey(tail, item)),
+        )
+        if (!step) break
+        used.add(edgeKey(tail, step))
+        run.push(step)
+        if (key(step) === key(head)) break
+      }
+      runs.push(run)
+    }
+  }
+
+  return runs
+}
+
 function riverCourses(cells: Mark[], size: number): RiverPoint[][] {
-  const byPosition = new Map(cells.map((cell) => [key(cell), cell]))
-  const byCenter = new Map(cells.map((cell) => [`${cell.x.toFixed(1)},${cell.y.toFixed(1)}`, cell]))
-  const courses = riverChains(cells).map((line) =>
-    line.split(" ").map((point) => {
-      const [x, y] = point.split(",").map(Number)
-      const cell = byCenter.get(point)
-      return { x: cell?.x ?? x, y: cell?.y ?? y, cell }
-    }),
+  const byPosition = new Map(cells.map(cell => [key(cell), cell]))
+  const courses: RiverPoint[][] = riverRuns(cells).map(run =>
+    run.map(cell => ({ x: cell.x, y: cell.y, cell })),
   )
-  const isolated = cells.filter((cell) => cell.ground === "rio" && !EDGE_STEPS.some(
-    ([q, r]) => byPosition.get(`${cell.q + q},${cell.r + r}`)?.ground === "rio",
-  ))
+  const isolated = cells.filter(cell =>
+    cell.ground === "rio"
+    && !EDGE_STEPS.some(([q, r]) => byPosition.get(`${cell.q + q},${cell.r + r}`)?.ground === "rio"),
+  )
   for (const cell of isolated) {
-    courses.push([{ x: cell.x - size / 2, y: cell.y, cell }, { x: cell.x + size / 2, y: cell.y, cell }])
+    courses.push([
+      { x: cell.x - size * Math.sqrt(3) / 2, y: cell.y, cell },
+      { x: cell.x + size * Math.sqrt(3) / 2, y: cell.y, cell },
+    ])
   }
   for (const course of courses) {
     for (const atStart of [false, true]) {
       const tip = course[atStart ? 0 : course.length - 1]
       if (!tip.cell) continue
       const cell = tip.cell
+      const riverAround = EDGE_STEPS
+        .map(([q, r]) => byPosition.get(`${cell.q + q},${cell.r + r}`))
+        .filter((other): other is Mark => other?.ground === "rio")
+      // Junction tips are shared by another arm; do not stretch them past the meeting point.
+      if (riverAround.length >= 2) continue
       const lake = EDGE_STEPS.map(([q, r]) => byPosition.get(`${cell.q + q},${cell.r + r}`))
-        .find((other) => other?.ground === "lago")
+        .find(other => other?.ground === "lago")
       if (lake) {
         const point = { x: lake.x, y: lake.y, cell: lake }
         if (atStart) course.unshift(point)
         else course.push(point)
-      } else if (course.length > 1) {
-        const inside = course[atStart ? 1 : course.length - 2]
-        const dx = tip.x - inside.x
-        const dy = tip.y - inside.y
-        const exits = EDGE_STEPS.filter(([q, r]) => !byPosition.has(`${cell.q + q},${cell.r + r}`))
-        exits.sort(([aq, ar], [bq, br]) =>
-          (bq + br / 2) * Math.sqrt(3) * dx + br * 1.5 * dy
-          - ((aq + ar / 2) * Math.sqrt(3) * dx + ar * 1.5 * dy),
-        )
-        if (exits.length) {
-          const [q, r] = exits[0]
-          const point = { x: cell.x + size * Math.sqrt(3) * (q + r / 2),
-            y: cell.y + size * 1.5 * r, cell: undefined }
-          if (atStart) course.unshift(point)
-          else course.push(point)
+        continue
+      }
+      if (course.length < 2) continue
+      const inside = course[atStart ? 1 : course.length - 2]
+      const dx = tip.x - inside.x
+      const dy = tip.y - inside.y
+      const exits = EDGE_STEPS.filter(([q, r]) => !byPosition.has(`${cell.q + q},${cell.r + r}`))
+      exits.sort(([aq, ar], [bq, br]) =>
+        (bq + br / 2) * Math.sqrt(3) * dx + br * 1.5 * dy
+        - ((aq + ar / 2) * Math.sqrt(3) * dx + ar * 1.5 * dy),
+      )
+      let point: RiverPoint
+      if (exits.length) {
+        const [q, r] = exits[0]
+        point = {
+          x: cell.x + size * Math.sqrt(3) * (q + r / 2),
+          y: cell.y + size * 1.5 * r,
+          cell: undefined,
+        }
+      } else {
+        // Interior mouth against land: reach the rim of the tip hex, not a blunt centre cap.
+        const length = Math.hypot(dx, dy) || 1
+        const reach = size * Math.sqrt(3) / 2
+        point = {
+          x: tip.x + dx / length * reach,
+          y: tip.y + dy / length * reach,
+          cell: undefined,
         }
       }
+      if (atStart) course.unshift(point)
+      else course.push(point)
     }
   }
   return courses
+}
+
+function sampleRiver(course: RiverPoint[]): Point[] {
+  if (course.length === 0) return []
+  if (course.length === 1) return [{ x: course[0].x, y: course[0].y }]
+  const samples: Point[] = []
+  // Centripetal Catmull-Rom keeps 60° hex bends from looping back on themselves.
+  for (let i = 0; i < course.length - 1; i += 1) {
+    const p0 = course[Math.max(0, i - 1)]
+    const p1 = course[i]
+    const p2 = course[i + 1]
+    const p3 = course[Math.min(course.length - 1, i + 2)]
+    const tj = (t: number, a: Point, b: Point) => {
+      const dist = Math.hypot(b.x - a.x, b.y - a.y) || 1e-6
+      return t + Math.sqrt(dist)
+    }
+    const t0 = 0
+    const t1 = tj(t0, p0, p1)
+    const t2 = tj(t1, p1, p2)
+    const t3 = tj(t2, p2, p3)
+    for (let step = 0; step < 12; step += 1) {
+      const t = t1 + (t2 - t1) * (step / 12)
+      const a1 = (t1 - t) / (t1 - t0 || 1e-6)
+      const a2 = (t - t0) / (t1 - t0 || 1e-6)
+      const b1 = (t2 - t) / (t2 - t1 || 1e-6)
+      const b2 = (t - t1) / (t2 - t1 || 1e-6)
+      const c1 = (t3 - t) / (t3 - t2 || 1e-6)
+      const c2 = (t - t2) / (t3 - t2 || 1e-6)
+      const d0 = { x: a1 * p0.x + a2 * p1.x, y: a1 * p0.y + a2 * p1.y }
+      const d1 = { x: b1 * p1.x + b2 * p2.x, y: b1 * p1.y + b2 * p2.y }
+      const d2 = { x: c1 * p2.x + c2 * p3.x, y: c1 * p2.y + c2 * p3.y }
+      const e0x = ((t2 - t) / (t2 - t0 || 1e-6)) * d0.x + ((t - t0) / (t2 - t0 || 1e-6)) * d1.x
+      const e0y = ((t2 - t) / (t2 - t0 || 1e-6)) * d0.y + ((t - t0) / (t2 - t0 || 1e-6)) * d1.y
+      const e1x = ((t3 - t) / (t3 - t1 || 1e-6)) * d1.x + ((t - t1) / (t3 - t1 || 1e-6)) * d2.x
+      const e1y = ((t3 - t) / (t3 - t1 || 1e-6)) * d1.y + ((t - t1) / (t3 - t1 || 1e-6)) * d2.y
+      samples.push({
+        x: ((t2 - t) / (t2 - t1 || 1e-6)) * e0x + ((t - t1) / (t2 - t1 || 1e-6)) * e1x,
+        y: ((t2 - t) / (t2 - t1 || 1e-6)) * e0y + ((t - t1) / (t2 - t1 || 1e-6)) * e1y,
+      })
+    }
+  }
+  samples.push({ x: course[course.length - 1].x, y: course[course.length - 1].y })
+  return samples
 }
 
 export function riverPaths(cells: Mark[], size: number): string[] {
@@ -228,24 +357,8 @@ function cellOutlines(cells: Mark[], size: number, rounded = true): string[] {
 export type RiverShape = { banks: string; channel: string; current: string; widths: number[] }
 
 export function riverShapes(cells: Mark[], size: number): RiverShape[] {
-  return riverCourses(cells, size).map((course) => {
-    const samples: Point[] = []
-    // Interpolate through the cell centres: bridges stay on the channel.
-    for (let i = 0; i < course.length - 1; i += 1) {
-      const a = course[Math.max(0, i - 1)]
-      const b = course[i]
-      const c = course[i + 1]
-      const d = course[Math.min(course.length - 1, i + 2)]
-      for (let step = 0; step < 12; step += 1) {
-        const t = step / 12
-        const interpolate = (v0: number, v1: number, v2: number, v3: number) =>
-          .5 * ((2 * v1) + (-v0 + v2) * t
-            + (2 * v0 - 5 * v1 + 4 * v2 - v3) * t * t
-            + (-v0 + 3 * v1 - 3 * v2 + v3) * t * t * t)
-        samples.push({ x: interpolate(a.x, b.x, c.x, d.x), y: interpolate(a.y, b.y, c.y, d.y) })
-      }
-    }
-    samples.push(course[course.length - 1])
+  return riverCourses(cells, size).map(course => {
+    const samples = sampleRiver(course)
     const phase = (course[0].x + course[0].y) / size
     const widths = samples.map((_, i) =>
       size * (.27 + .065 * Math.sin(i * .24 + phase) + .025 * Math.sin(i * 1.17 + phase)),
@@ -263,7 +376,7 @@ export function riverShapes(cells: Mark[], size: number): RiverShape[] {
         left.push({ x: point.x + nx * w, y: point.y + ny * w })
         right.push({ x: point.x - nx * w, y: point.y - ny * w })
       })
-      return `M${[...left, ...right.reverse()].map((p) => `${p.x},${p.y}`).join(" L")} Z`
+      return `M${[...left, ...right.reverse()].map(p => `${p.x},${p.y}`).join(" L")} Z`
     }
     return { banks: ribbon(1.35), channel: ribbon(1), current: ribbon(.48), widths }
   })
