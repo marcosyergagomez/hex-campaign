@@ -5,7 +5,7 @@ import os
 from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F403
-from .base import DATABASES, SECRET_KEY, SESSION_PEPPER
+from .base import CACHE_URL, DATABASES, SECRET_KEY, SESSION_PEPPER, cache_from_url
 from .guards import require_https_origin, require_secret, require_session_pepper
 
 DEBUG = False
@@ -22,6 +22,9 @@ require_secret(SECRET_KEY)
 require_session_pepper(SESSION_PEPPER)
 if not DATABASES:
     raise ImproperlyConfigured("DATABASE_URL is required.")
+if not CACHE_URL:
+    raise ImproperlyConfigured("CACHE_URL is required (redis://… for shared rate limits).")
+CACHES = {"default": cache_from_url(CACHE_URL)}
 
 ALLOWED_HOSTS = [
     host.strip() for host in os.environ.get("ALLOWED_HOSTS", "").split(",") if host.strip()

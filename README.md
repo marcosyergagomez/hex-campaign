@@ -11,10 +11,11 @@ The campaign rules are original. The project does not include official artwork o
 - FastAPI as the only HTTP API the browser calls
 - React and TypeScript for the interface
 - PostgreSQL
+- Redis for rate limits shared across API workers (optional locally)
 
 ## Status
 
-PostgreSQL runs in Docker. Django migrations create the tables, including the campaign row that stores the living state.
+PostgreSQL runs in Docker. Redis is available in the same compose file when more than one uvicorn worker must share login and write limits. Django migrations create the tables, including the campaign row that stores the living state.
 
 Campaigns, the map studio, the freehand map editor, banners, and the terrain board are in the browser. Drawn maps may use an irregular subset of the chosen table size. With a terrain map, starting a campaign opens a preparation phase where each seat lays roads on home land before turn 1; road clicks return a slim delta until that phase ends. Orders and battles are still domain-only. The rules live in `docs/reglas-de-campana.md`; the backend contract is in `docs/requisitos-tecnicos-backend.md`.
 
@@ -43,6 +44,8 @@ pytest
 uvicorn config.asgi:application --reload
 ```
 
+A single local process can leave `CACHE_URL` empty (LocMem). For several workers, start Redis (`docker compose up -d redis`), set `CACHE_URL=redis://127.0.0.1:6379/1`, and install the `redis` package from the project dependencies. Production requires `CACHE_URL`.
+
 Swagger is at http://127.0.0.1:8000/api/docs while `DEBUG` is on. It is absent when debug is off.
 
 The login and registration screens are in `frontend/`. Vite serves them at http://localhost:5173 and proxies `/api` to uvicorn, so the session cookie is first-party. `API_ORIGIN` in `.env` has to be `http://localhost:5173`. Open that host: `127.0.0.1` is another origin and login rejects it.
@@ -57,7 +60,7 @@ Map drawing checks run with `npm run test:maps` from `frontend/`; they use Node'
 
 On macOS or Linux, activate the virtual environment with `source .venv/bin/activate`.
 
-`migrate` creates the tables on an empty database and applies later changes without deleting campaigns. The Docker volume keeps the data between restarts. Mailpit accepts the confirmation message on port 1025 and shows it at http://localhost:8025. The link uses `API_ORIGIN`. `config.settings.production` refuses to start unless that origin is `https`, `DJANGO_SECRET_KEY` is a unique secret of at least 50 characters, and `SESSION_PEPPER` is a different secret of that length. The sample pepper in `.env.example` is refused in production.
+`migrate` creates the tables on an empty database and applies later changes without deleting campaigns. The Docker volume keeps the data between restarts. Mailpit accepts the confirmation message on port 1025 and shows it at http://localhost:8025. The link uses `API_ORIGIN`. `config.settings.production` refuses to start unless that origin is `https`, `DJANGO_SECRET_KEY` is a unique secret of at least 50 characters, `SESSION_PEPPER` is a different secret of that length, and `CACHE_URL` points at Redis. The sample pepper in `.env.example` is refused in production.
 
 ## Español
 

@@ -8,15 +8,16 @@ from hexcampaign.domain.game import Game, find_member, living
 from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.roads import road_progress
 from hexcampaign.domain.sight import gazed_cells, in_home, known_hex, sees_army
-from hexcampaign.domain.territory import home_land, homes_by_player
+from hexcampaign.domain.territory import homes_by_player
 
 
 def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
     member = find_member(game, viewer)
     staff = member is not None and member.role in {"owner", "admin"} and member.status == "active"
     board = set(game.hexes)
-    home = home_land(game, viewer, board=board) if game.plots is not None else set()
-    owners = _territorial_owners(game, board)
+    homes = homes_by_player(game, board=board) if game.plots is not None else None
+    home = homes.get(viewer, set()) if homes is not None else set()
+    owners = _territorial_owners(game, board, homes=homes)
     body = {
         "revision": game.revision,
         "name": game.name,
@@ -71,8 +72,9 @@ def project_roads_delta(
 ) -> dict[str, object]:
     """Slim preparing-phase patch: road counters plus only the hexes that moved."""
     board = set(game.hexes)
-    home = home_land(game, viewer, board=board) if game.plots is not None else set()
-    owners = _owners_for(game, changed, board)
+    homes = homes_by_player(game, board=board) if game.plots is not None else None
+    home = homes.get(viewer, set()) if homes is not None else set()
+    owners = _owners_for(game, changed, board, homes=homes)
     return {
         "kind": "roads_delta",
         "revision": game.revision,
@@ -103,12 +105,19 @@ def _roads_view(game: Game, viewer: str) -> dict[str, object] | None:
     }
 
 
-def _owners_for(game: Game, cells: list[Hex], board: set[Hex]) -> dict[Hex, str]:
+def _owners_for(
+    game: Game,
+    cells: list[Hex],
+    board: set[Hex],
+    *,
+    homes: dict[str, set[Hex]] | None = None,
+) -> dict[Hex, str]:
     if not cells or game.plots is None:
         return {}
     wanted = set(cells)
     owners: dict[Hex, str] = {}
-    for player_id, home in homes_by_player(game, board=board).items():
+    claimed = homes if homes is not None else homes_by_player(game, board=board)
+    for player_id, home in claimed.items():
         for cell in wanted & home:
             owners[cell] = player_id
         if len(owners) == len(wanted):
@@ -142,7 +151,12 @@ def _member_view(member, show_missed: bool) -> dict[str, object]:
     return shown
 
 
-def _territorial_owners(game: Game, board: set[Hex] | None = None) -> dict[Hex, str]:
+def _territorial_owners(
+    game: Game,
+    board: set[Hex] | None = None,
+    *,
+    homes: dict[str, set[Hex]] | None = None,
+) -> dict[Hex, str]:
     if game.plots is None:
         owners: dict[Hex, str] = {}
         for cell in game.hexes:
@@ -153,9 +167,10 @@ def _territorial_owners(game: Game, board: set[Hex] | None = None) -> dict[Hex, 
                 owners[cell] = nearest[0][1]
         return owners
     cells = set(game.hexes) if board is None else board
+    claimed = homes if homes is not None else homes_by_player(game, board=cells)
     return {
         cell: player_id
-        for player_id, home in homes_by_player(game, board=cells).items()
+        for player_id, home in claimed.items()
         for cell in home
     }
 

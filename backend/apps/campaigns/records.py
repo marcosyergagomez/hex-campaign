@@ -16,6 +16,7 @@ from hexcampaign.domain.game import (
     from_dict,
     require_owner,
     require_phase,
+    seated,
     to_dict,
 )
 from hexcampaign.domain.hexes import Hex
@@ -127,6 +128,8 @@ def invite_link(user, campaign_id) -> str:
         try:
             require_owner(game, str(user.pk))
             require_phase(game, "recruiting")
+            if len(seated(game)) >= game.rules.seats:
+                raise DomainError("seat_full")
         except DomainError as exc:
             raise CampaignError(exc.code) from exc
         Invitation.objects.create(campaign=campaign, token_hash=_digest(raw))
@@ -160,7 +163,9 @@ def read_campaign(user, campaign_id, now) -> dict[str, object]:
     campaign = _campaign(campaign_id)
     game = _document(campaign)
     if find_member(game, str(user.pk)) is None:
-        return _card(campaign, game)
+        # Do not leak name, phase or seat counts to anyone who is not seated.
+        # Invitation previews go through preview_link with a secret token.
+        raise CampaignError("not_found")
     return present(campaign, game, user, now)
 
 
@@ -274,8 +279,6 @@ def _accept_locked(
 
 
 def _card(campaign: Campaign, game: Game) -> dict[str, object]:
-    from hexcampaign.domain.game import seated
-
     return {
         "id": str(campaign.id),
         "name": game.name,

@@ -212,20 +212,36 @@ def test_closing_the_account_leaves_the_seat_inactive(clients) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_campaign_post_can_carry_eight_kilobytes_but_not_more(clients) -> None:
+def test_a_campaign_post_can_carry_sixteen_kilobytes_but_not_more(clients) -> None:
     ana, _boa = clients
     _player("ana@example.com", "ana_one")
     _login(ana, "ana@example.com")
-    allowed = _write(ana, "/api/campaigns", {"name": "Norte", "rules": RULES, "pad": "x" * 5000})
+    allowed = _write(ana, "/api/campaigns", {"name": "Norte", "rules": RULES, "pad": "x" * 12000})
     assert allowed.status_code != 413
 
     rejected = ana.post(
         "/api/campaigns",
-        content=b'{"name":"' + b"x" * 9000 + b'"}',
+        content=b'{"name":"' + b"x" * 17000 + b'"}',
         headers={**_headers(ana, write=True), "content-type": "application/json"},
     )
     assert rejected.status_code == 413
     assert rejected.json()["errors"]["campaign"] == ["La solicitud es demasiado grande."]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_stranger_cannot_probe_a_campaign_by_id(clients) -> None:
+    ana, boa = clients
+    owner = _player("owner-private@example.com", "duena")
+    stranger = _player("stranger@example.com", "ajena")
+    _login(ana, owner.email)
+    _login(boa, stranger.email)
+    created = _write(ana, "/api/campaigns", {"name": "Privada", "rules": RULES})
+    assert created.status_code == 201, created.text
+    probed = _read(boa, f"/api/campaigns/{created.json()['id']}")
+    assert probed.status_code == 404
+    assert probed.json()["errors"]["campaign"] == [
+        "No hay ninguna campaña con ese identificador.",
+    ]
 
 
 @pytest.mark.django_db(transaction=True)

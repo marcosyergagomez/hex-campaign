@@ -66,8 +66,12 @@ export function HexBoard({
   onPaintRef.current = onPaint
   sizeRef.current = size
   const caption = useRef<HTMLParagraphElement>(null)
+  const playersById = useMemo(
+    () => new Map(players.map(player => [player.player_id, player])),
+    [players],
+  )
   function terrainName(cell: OwnedCell) {
-    const owner = players.find(player => player.player_id === cell.owner_id)
+    const owner = cell.owner_id ? playersById.get(cell.owner_id) : undefined
     return [
       t(GROUND_LABEL[cell.ground] ?? "groundPlain"),
       ...(cell.road ? [t("mapRoad")] : []),

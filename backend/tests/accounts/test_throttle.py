@@ -2,6 +2,7 @@
 
 import pytest
 from django.contrib.auth.models import Group
+from django.core.cache import cache
 
 from apps.accounts.models import User
 from apps.accounts.registration import RegistrationError
@@ -9,8 +10,15 @@ from apps.accounts.throttle import SlidingWindow, admin_logins
 from tests.accounts.test_registration_service import PASSWORD, _register
 
 
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    cache.clear()
+    yield
+    cache.clear()
+
+
 def test_a_full_window_rejects_a_new_key_and_keeps_the_old_count() -> None:
-    window = SlidingWindow(max_keys=2)
+    window = SlidingWindow("full_window", max_keys=2)
 
     assert window.allow("a", limit=2, window_seconds=60) is True
     assert window.allow("b", limit=2, window_seconds=60) is True
@@ -20,18 +28,27 @@ def test_a_full_window_rejects_a_new_key_and_keeps_the_old_count() -> None:
 
 
 def test_expired_keys_leave_room_for_a_new_client() -> None:
-    window = SlidingWindow(max_keys=1)
+    now = {"t": 1_000.0}
+    window = SlidingWindow("expired_keys", max_keys=1, clock=lambda: now["t"])
     assert window.allow("a", limit=1, window_seconds=60) is True
 
-    window._hits["a"][0] -= 120
+    now["t"] += 120
 
     assert window.allow("b", limit=1, window_seconds=60) is True
 
 
 def test_a_disabled_limit_always_allows() -> None:
-    window = SlidingWindow(max_keys=1)
+    window = SlidingWindow("disabled_limit", max_keys=1)
     assert window.allow("a", limit=1, window_seconds=60) is True
     assert window.allow("b", limit=0, window_seconds=60) is True
+
+
+def test_clear_drops_prior_hits_for_every_worker() -> None:
+    window = SlidingWindow("clear_shared", max_keys=8)
+    assert window.allow("a", limit=1, window_seconds=60) is True
+    assert window.allow("a", limit=1, window_seconds=60) is False
+    window.clear()
+    assert window.allow("a", limit=1, window_seconds=60) is True
 
 
 @pytest.mark.django_db

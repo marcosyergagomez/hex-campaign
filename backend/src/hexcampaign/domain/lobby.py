@@ -71,6 +71,8 @@ def invite_player(game: Game, actor: str, invitee_id: str, alias: str) -> Game:
         raise DomainError("expelled")
     if existing is not None:
         raise DomainError("already_joined")
+    if len(seated(game)) >= game.rules.seats:
+        raise DomainError("seat_full")
     notice(game, "invited", invitee_id, alias=alias)
     remember(game, "invited", player_id=invitee_id)
     return bump(game)
