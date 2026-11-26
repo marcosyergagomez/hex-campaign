@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 
 import {
   ApiError,
+  copyMapForEdit,
   deleteMap,
   generateMap,
   getMap,
@@ -24,6 +25,7 @@ const SIZE_WORDS = { small: "sizeSmall", medium: "sizeMedium", large: "sizeLarge
 
 export function MapsPage() {
   const { t } = useI18n()
+  const navigate = useNavigate()
   const [name, setName] = useState("")
   const [size, setSize] = useState<MapSize | null>(null)
   const [tables, setTables] = useState<MapScale[]>([])
@@ -121,9 +123,14 @@ export function MapsPage() {
           <p className="mark">{t("mapsNav")}</p>
           <h1>{t("mapsTitle")}</h1>
           <p>{t("mapsLead")}</p>
-          <Link className="text-link" to="/campanas/nueva">
-            {t("newCampaign")}
-          </Link>
+          <div className="stage-links">
+            <Link className="button-link" to="/mapas/editor">
+              {t("mapEditorNav")}
+            </Link>
+            <Link className="text-link" to="/campanas/nueva">
+              {t("newCampaign")}
+            </Link>
+          </div>
         </div>
       </header>
       <div className="map-studio-body">
@@ -207,6 +214,23 @@ export function MapsPage() {
                         {sizeWord(item.size)}
                         {item.seats ? ` · ${t("mapSeatsCount", { count: String(item.seats) })}` : ""}
                       </small>
+                    </button>
+                    <button
+                      type="button"
+                      className="map-saved-delete"
+                      onClick={() => {
+                        if (item.generated) {
+                          void copyMapForEdit(item.id).then(copy => {
+                            navigate(`/mapas/editor?id=${encodeURIComponent(copy.id)}`)
+                          }).catch((error: unknown) => {
+                            setErrors(presentError(error, "mapUnknown"))
+                          })
+                          return
+                        }
+                        navigate(`/mapas/editor?id=${encodeURIComponent(item.id)}`)
+                      }}
+                    >
+                      {item.generated ? t("mapCopyEdit") : t("mapEditAction")}
                     </button>
                     <button
                       type="button"

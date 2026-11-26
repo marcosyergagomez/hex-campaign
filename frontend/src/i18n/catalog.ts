@@ -59,6 +59,7 @@ const fromSpanish = [
   "campaignOpenLimit",
   "mapUnknown",
   "mapLimit",
+  "mapReadonly",
   "factionInvalid",
   "colorInvalid",
   "colorTaken",
