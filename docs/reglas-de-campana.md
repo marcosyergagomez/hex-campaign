@@ -12,7 +12,7 @@ El mapa de campaña representa cada territorio con una veladura tenue y un conto
 
 El estado de la partida vive en la campaña. La sesión del jugador no es la campaña: una cuenta puede jugar varias a la vez y la campaña sigue guardada cuando la sesión caduca.
 
-Las reglas se pueden cambiar mientras el propietario no ha pulsado empezar. Desde ese momento quedan fijas. Los pueblos, los puestos avanzados y la economía de puntos esperan. El catálogo de terrenos está en «Mapa y terrenos» y todavía no cambia las partidas de esta versión: siguen sin hexágonos infranqueables.
+Las reglas se pueden cambiar mientras el propietario no ha pulsado empezar. Desde ese momento quedan fijas. Los pueblos, los puestos avanzados y la economía de puntos esperan. Con un mapa de terrenos, el catálogo de «Mapa y terrenos» sí rige la partida: hay casillas infranqueables, costes al salir, niebla y caminos. Sin mapa de terrenos, la mesa antigua de 19, 37 o 61 casillas sigue sin terrenos.
 
 ## La mesa
 
@@ -39,6 +39,12 @@ Queda fijo en ese momento:
 - Qué considera inactivo, además de la regla de la aplicación que va más abajo.
 
 Cada jugador tiene una fortaleza. Al empezar, sus ejércitos iniciales ya están en el mapa y puede moverlos todos. No se compran ejércitos nuevos.
+
+## Preparación de caminos
+
+Si la campaña lleva mapa de terrenos, tras empezar —o tras cerrar la colocación, si colocan los jugadores— la partida entra en preparación antes del primer turno. Sin mapa de terrenos, el primer turno de órdenes se abre al instante.
+
+En preparación, todos los asientos activos colocan a la vez. Cada uno dispone de un presupuesto de piezas igual al doble de la distancia máxima, en hexágonos, desde su fortaleza hasta el borde de su territorio. Solo puede poner camino en casillas transitables de su territorio, nunca en la fortaleza. Cada pieza nueva tiene que tocar la fortaleza o una pieza ya puesta, de modo que la red quede conectada. Poner camino sobre un río completo añade puente. Puede quitar una pieza propia mientras el resto siga unido a la fortaleza. Quien ha terminado se marca listo; cuando todos los asientos activos lo están, se abre el turno 1 de órdenes. Los mapas generados salen sin caminos locales: las piezas las pone cada jugador en esta fase. Un mapa dibujado a mano puede traer caminos o puentes ya puestos.
 
 ## Ejército
 
@@ -107,13 +113,13 @@ Expulsar borra al momento sus ejércitos, su fortaleza y todo lo que en el futur
 
 Revertir el último turno se puede repetir sobre el turno que vuelve a quedar último. Las órdenes de ese turno vuelven a ser secretas y sus resultados de batalla dejan de aplicarse. Todos los jugadores ven que el turno fue revertido.
 
-Cada acción queda anotada: quién entra, las reglas si cambian, la colocación, las órdenes cerradas, el camino que recorrió cada ejército, las batallas y su resultado, las expulsiones, los abandonos, los ascensos y el final. Mientras la campaña sigue, esa crónica no se enseña. Cuando termina, quien estuvo en la mesa puede leerla entera, también lo que luego se deshizo.
+Cada acción queda anotada: quién entra, las reglas si cambian, la colocación, quién marca la preparación de caminos y cuándo se cierra, las órdenes cerradas, el camino que recorrió cada ejército, las batallas y su resultado, las expulsiones, los abandonos, los ascensos y el final. Mientras la campaña sigue, esa crónica no se enseña. Cuando termina, quien estuvo en la mesa puede leerla entera, también lo que luego se deshizo.
 
 Un administrador puede abandonar. Sus ejércitos mueren y sale de la campaña. Si quien se va es el propietario, o es el último administrador, un jugador aleatorio de los que siguen pasa a ser el propietario. Si el propietario queda inactivo, ocurre lo mismo y el nuevo propietario recibe el aviso para expulsarlo. El propietario activo no puede ser expulsado ni degradado por otro.
 
 ## Mapa y terrenos
 
-Esto no cambia las partidas de esta versión. Es el mapa que viene después.
+Con un mapa de terrenos, estas reglas rigen la partida. Sin él, la mesa antigua no usa este catálogo.
 
 Cada casilla tiene un terreno. El territorio de un jugador es una zona compacta alrededor de su fortaleza, definida más abajo. Lo demás es neutral. De quién es una casilla no cambia lo que cuesta salir de ella. El territorio propio se ve entero, siempre, con terreno y ejércitos.
 
@@ -173,15 +179,13 @@ El generado conecta las fortalezas por terreno transitable. Cada masa de terreno
 - El pantano, si sale, toca un río completo, una orilla o un lago.
 - El puente o el vado está sobre una orilla o un río completo y une dos casillas en las que se puede entrar.
 
-Los mapas generados tienen caminos locales solo dentro de los territorios iniciales, no en las masas neutrales. Conservan su regla: salir cuesta 1 y devuelve 1 punto. No cambian la mirada del terreno ni abren casillas infranqueables. La fortaleza conserva su salida normal. El puente iguala el río a la llanura y, sin camino, no devuelve puntos. Si un camino local cruza un río, lleva puente.
-
-Dentro de cada territorio se identifican masas contiguas de bosque y bosque profundo, montaña transitable y colinas, pantano y orilla, y tundra. Cada masa recibe un único corredor desde su entrada cercana a la fortaleza hasta el extremo más lejano por un trayecto corto dentro de esa masa. Se llega a esos corredores por el terreno transitable: no se asfaltan todas las llanuras intermedias para crear una red de movimiento gratuito. Una masa estrecha puede coincidir con su camino; una masa ancha conserva casillas fuera de la ruta. En conjunto, menos de la mitad del territorio lleva camino. Un bosque que continúa fuera del territorio solo recibe camino en su porción propia.
+Los mapas generados no pintan caminos ni puentes: salen limpios para la preparación. Conservan terreno transitable, frontera y miradores. La fortaleza conserva su salida normal. El puente, cuando lo pone un jugador o un mapa a mano, iguala el río a la llanura y, sin camino encima, no devuelve puntos. Un camino sobre río lleva puente. Salir por camino cuesta 1 y, al completar esa salida, suma 1 punto para salidas posteriores del mismo turno. No cambian la mirada del terreno ni abren casillas infranqueables.
 
 Cada jugador dispone de al menos tres casillas de acceso a su frontera y una posición elevada de observación accesible allí. Con movimiento 3 se exige llegar como máximo en dos turnos para los tamaños actuales; el límite crece con el alcance territorial si se configuran mesas mayores. Se aprovecha una colina o montaña existente cuando es posible; no se convierte toda la frontera en colinas. El bosque no oculta por sí mismo a un ejército ni corta la visión; la mirada depende del terreno del observador.
 
 Para aceptar el mapa, el viaje más rápido de cada jugador a su rival más cercano no puede diferir en más de un turno respecto a los demás, medido con movimiento 3. Se mantienen los cinco turnos mínimos, pero ahora también se limita el máximo: cualquier viaje entre fortalezas debe caber en `ceil(distancia_hexagonal / 3) + 2` turnos. También debe existir una casilla neutral cercana al centro con una diferencia de llegada máxima de dos turnos. No son objetivos nuevos de victoria: son comprobaciones de generación que evitan tanto ataques prematuros como rodeos interminables.
 
-Los caminos son parte del mapa, no una bonificación exclusiva del propietario: también los puede aprovechar un rival. Estas garantías se aplican a mapas nuevos generados por esta versión. No se añaden caminos ni se redistribuye terreno en mapas guardados o campañas existentes.
+Los caminos, una vez puestos, son parte del mapa: también los puede aprovechar un rival. Las garantías de paisaje se aplican a mapas nuevos generados por esta versión. No se redistribuye terreno en mapas guardados o campañas existentes. El propietario puede borrar un mapa guardado suyo que aún no use otra mesa.
 
 El dibujo se compone por capas: suelo, agua continua, vegetación y relieve, construcciones y cuadrícula. Los árboles y las cumbres pueden sobresalir visualmente de su casilla, pero no cambian el terreno de la vecina. La casilla conserva su tipo, coste y mirada; pasar el puntero por ella muestra su terreno. Los puentes dibujados corresponden a puentes del mapa, no son adornos que concedan pasos nuevos. El trazado evita pequeños triángulos entre caminos vecinos, conservando cruces y circuitos amplios; el movimiento sigue dependiendo de las casillas, no de las líneas dibujadas. Los mapas de más de 547 casillas conservan todos sus detalles, pero prescinden del filtro global de ruido sobre la vegetación para reducir el coste del zoom.
 
@@ -223,4 +227,4 @@ Desierto, mina y campo se salen y se ven como una llanura. Están en el catálog
 
 ## Fuera de esta versión
 
-Queda para más adelante: comprar ejércitos con puntos, movimiento según unidades y raza, bajas que no sean destrucción total, y pueblos o puestos avanzados. El catálogo de terrenos ya está escrito arriba; aplicarlo a la partida es el paso siguiente. Cuando existan pueblos o puestos, una expulsión también los borra si pertenecen al jugador expulsado.
+Queda para más adelante: comprar ejércitos con puntos, movimiento según unidades y raza, bajas que no sean destrucción total, y pueblos o puestos avanzados. El catálogo de terrenos ya rige las campañas con mapa; quedan por cerrar en pantalla el lobby completo, las órdenes y las batallas. Cuando existan pueblos o puestos, una expulsión también los borra si pertenecen al jugador expulsado.
