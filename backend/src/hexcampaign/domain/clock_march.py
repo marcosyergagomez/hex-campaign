@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.march import Contact
-from hexcampaign.domain.occupy import fighter_swaps, plan_step
+from hexcampaign.domain.occupy import crossing_fighters, plan_step
 from hexcampaign.domain.terrain import Plot, exit_cost, passable
 
 
@@ -77,6 +77,14 @@ def _step(ready, by_id, plots, stopped, contacts) -> None:
     kinds = {army_id: walker.kind for army_id, walker in by_id.items()}
     intended = {walker.army_id: walker.path[0] for walker in ready}
     plan = plan_step(intended, position, owners, stopped, kinds)
+    moving_intended = {army_id: intended[army_id] for army_id in plan.moving}
+    crossed: set[str] = set()
+    for left, right, cell in crossing_fighters(moving_intended, position, owners, kinds):
+        crossed.update((left, right))
+        for army_id in (left, right):
+            by_id[army_id].paid = 0
+            _halt(by_id[army_id], stopped)
+        contacts.append(Contact(tuple(sorted({left, right})), cell))
     for army_id in plan.blocked_leavers:
         _halt(by_id[army_id], stopped)
     for clash in plan.destinations:
@@ -85,6 +93,8 @@ def _step(ready, by_id, plots, stopped, contacts) -> None:
         if not clash.entering:
             continue
         for army_id in clash.entering:
+            if army_id in crossed:
+                continue
             _arrive(
                 by_id[army_id],
                 plots,
@@ -92,16 +102,11 @@ def _step(ready, by_id, plots, stopped, contacts) -> None:
                 stopped,
                 fight=clash.fight and kinds.get(army_id) == "army",
             )
-        if clash.fight:
+        if clash.fight and not any(army_id in crossed for army_id in clash.entering):
             contacts.append(Contact(tuple(sorted(clash.fighting)), clash.dest))
             for other in clash.holders:
                 if kinds.get(other) == "army":
                     _halt(by_id[other], stopped)
-    position = {army_id: walker.at for army_id, walker in by_id.items()}
-    for left, right, _cell in fighter_swaps(plan.origins, position, owners, kinds):
-        for army_id in (left, right):
-            _halt(by_id[army_id], stopped)
-        contacts.append(Contact(tuple(sorted({left, right})), by_id[left].at))
 
 
 def _arrive(walker: Walker, plots, dest: Hex, stopped: set[str], *, fight: bool) -> None:

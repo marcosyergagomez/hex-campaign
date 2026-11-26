@@ -102,9 +102,11 @@ class Notification(models.Model):
     """In-app notice for a player. Starts with campaign invites; more kinds follow."""
 
     KIND_CAMPAIGN_INVITE = "campaign_invite"
+    KIND_CAMPAIGN_ADMIN = "campaign_admin"
+    KIND_CAMPAIGN_BATTLE = "campaign_battle"
     KIND_TURN = "turn"
     KIND_BATTLE = "battle"
-    KINDS = (KIND_CAMPAIGN_INVITE, KIND_TURN, KIND_BATTLE)
+    KINDS = (KIND_CAMPAIGN_INVITE, KIND_CAMPAIGN_ADMIN, KIND_CAMPAIGN_BATTLE, KIND_TURN, KIND_BATTLE)
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

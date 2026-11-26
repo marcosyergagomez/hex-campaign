@@ -1,8 +1,8 @@
-import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react"
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type PointerEvent } from "react"
 
 import type { MapCell } from "../../api"
 import { useI18n } from "../../i18n/language"
-import { hexCenter, hexPoints } from "./geometry"
+import { axialFromPixel, hexCenter, hexPoints } from "./geometry"
 import { GROUND_LABEL, GROUND_TIP, GROUND_TIP_ON_ROAD } from "./grounds"
 import { lakeOutlines, riverShapes, roadPaths, terrainOutlines, territoryOutlines } from "./courses"
 import { ArtDefinitions, EARTH, Fields, noise, OrnamentArt, ornaments } from "./TerrainArt"
@@ -29,6 +29,9 @@ export type BoardToken = {
 const NO_PLAYERS: TerritoryPlayer[] = []
 const NO_SPOTS: Spot[] = []
 const NO_TOKENS: BoardToken[] = []
+const NO_PATHS: { spots: Spot[]; selected?: boolean }[] = []
+const NO_TRACES: { spots: Spot[]; color: string }[] = []
+const NO_CLASHES: { from: Spot; to: Spot }[] = []
 
 const SAMPLES = ["rio", "lago", "playa", "pantano", "bosque", "montana", "desierto"]
 const STEPS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]
@@ -50,30 +53,63 @@ export function HexBoard({
   size = SIZE,
   players = NO_PLAYERS,
   unknown = NO_SPOTS,
+  dimmed = NO_SPOTS,
+  traces = NO_TRACES,
+  clashes = NO_CLASHES,
   ghosts = NO_SPOTS,
   tokens = NO_TOKENS,
   onCellClick,
   onPaint,
+  orderPaths = NO_PATHS,
+  tokenSpots,
+  movableIds,
+  selectedTokenId,
+  sliding = false,
+  mapTools = true,
+  onOrderToken,
 }: {
   cells: OwnedCell[]
   anchors: Spot[]
   size?: number
   players?: TerritoryPlayer[]
   unknown?: Spot[]
+  dimmed?: Spot[]
+  traces?: { spots: Spot[]; color: string }[]
+  clashes?: { from: Spot; to: Spot }[]
   ghosts?: Spot[]
   tokens?: BoardToken[]
   onCellClick?: (cell: OwnedCell) => void
   onPaint?: (cells: Array<OwnedCell | Spot>) => void
+  orderPaths?: { spots: Spot[]; selected?: boolean }[]
+  tokenSpots?: Record<string, Spot> | null
+  movableIds?: ReadonlySet<string>
+  selectedTokenId?: string | null
+  sliding?: boolean
+  mapTools?: boolean
+  onOrderToken?: (id: string, spot: Spot, phase: "down" | "move") => void
 }) {
   const { t } = useI18n()
   const [zoom, setZoom] = useState(1)
-  const [grid, setGrid] = useState(true)
-  const [showTerritories, setShowTerritories] = useState(true)
+  const [grid, setGrid] = useState(mapTools)
+  const [showTerritories, setShowTerritories] = useState(mapTools)
   const svgRef = useRef<SVGSVGElement>(null)
+  const dragToken = useRef<string | null>(null)
+  const [dragging, setDragging] = useState(false)
   const viewportRef = useRef<HTMLDivElement>(null)
   const byKey = useRef(new Map<string, OwnedCell | Spot>())
   const sizeRef = useRef(size)
   sizeRef.current = size
+  function hexFromEvent(event: PointerEvent<SVGElement>): Spot | null {
+    const svg = svgRef.current
+    if (!svg) return null
+    const point = svg.createSVGPoint()
+    point.x = event.clientX
+    point.y = event.clientY
+    const matrix = svg.getScreenCTM()
+    if (!matrix) return null
+    const local = point.matrixTransform(matrix.inverse())
+    return axialFromPixel(local.x, local.y, size)
+  }
   const { beginPaint } = useHexPaint(onPaint, svgRef, byKey, sizeRef)
   const caption = useRef<HTMLParagraphElement>(null)
   const playersById = useMemo(
@@ -123,6 +159,7 @@ export function HexBoard({
     [cells, size],
   )
   const hidden = useMemo(() => unknown.map(cell => ({ ...cell, ...hexCenter(cell.q, cell.r, size) })), [unknown, size])
+  const shaded = useMemo(() => dimmed.map(cell => ({ ...cell, ...hexCenter(cell.q, cell.r, size) })), [dimmed, size])
   const ghosted = useMemo(
     () => ghosts.map(cell => ({ ...cell, ...hexCenter(cell.q, cell.r, size) })),
     [ghosts, size],
@@ -137,18 +174,21 @@ export function HexBoard({
     () => artCells.map(cell => ({ ...cell, ...hexCenter(cell.q, cell.r, size) })),
     [artCells, size],
   )
+  const centeredZoom = useRef<number | null>(null)
   useEffect(() => {
     const viewport = viewportRef.current
     const board = svgRef.current
-    if (!viewport || !board) return
+    if (!viewport || !board || centeredZoom.current === zoom) return
     const center = () => {
+      if (board.scrollWidth === 0) return
+      centeredZoom.current = zoom
       viewport.scrollLeft = Math.max(0, (board.scrollWidth - viewport.clientWidth) / 2)
       viewport.scrollTop = Math.max(0, (board.scrollHeight - viewport.clientHeight) / 2)
     }
     center()
     const frame = requestAnimationFrame(center)
     return () => cancelAnimationFrame(frame)
-  }, [zoom, extent])
+  }, [zoom, extent.length])
   const territories = useMemo(() => territoryOutlines(artPlaced, size).flatMap(region => {
     const player = players.find(item => item.player_id === region.owner_id)
     return player?.color ? [{ ...region, player }] : []
@@ -202,8 +242,10 @@ export function HexBoard({
           <button type="button" onClick={() => setZoom((value) => Math.max(0.5, value - .5))} disabled={zoom === 0.5} aria-label={t("mapZoomOut")}>−</button>
           <button type="button" onClick={() => setZoom(1)} aria-label={t("mapFit")}>{Math.round(zoom * 100)}%</button>
           <button type="button" onClick={() => setZoom((value) => Math.min(3, value + .5))} disabled={zoom === 3} aria-label={t("mapZoomIn")}>+</button>
-          <button type="button" onClick={() => setGrid((value) => !value)} aria-pressed={grid}>{t("mapGrid")}</button>
-          {territories.length > 0 ? (
+          {mapTools ? (
+            <button type="button" onClick={() => setGrid((value) => !value)} aria-pressed={grid}>{t("mapGrid")}</button>
+          ) : null}
+          {mapTools && territories.length > 0 ? (
             <button type="button" onClick={() => setShowTerritories(value => !value)} aria-pressed={showTerritories}>
               {t("territoryToggle")}
             </button>
@@ -220,7 +262,17 @@ export function HexBoard({
       <svg
         ref={svgRef}
         className="hex-board"
-        style={{ width: `${zoom * 100}%`, touchAction: onPaint ? "none" : undefined }}
+        style={{ width: `${zoom * 100}%`, touchAction: onPaint || dragging ? "none" : undefined }}
+        onPointerMove={onOrderToken ? (event) => {
+          const id = dragToken.current
+          if (!id) return
+          const spot = hexFromEvent(event)
+          if (spot) onOrderToken(id, spot, "move")
+        } : undefined}
+        onPointerUp={onOrderToken ? () => {
+          dragToken.current = null
+          setDragging(false)
+        } : undefined}
         viewBox={`${minX} ${minY} ${width} ${height}`}
         role="img"
         aria-label={t("mapsTitle")}
@@ -313,6 +365,13 @@ export function HexBoard({
             </g>
           ))}
         </g>
+        <g className="hex-dim" pointerEvents="none">
+          {shaded.map(cell => (
+            <polygon key={`dim-${cell.q},${cell.r}`} points={points} transform={`translate(${cell.x} ${cell.y})`}>
+              <title>{t("sightDim")}</title>
+            </polygon>
+          ))}
+        </g>
         <g className={grid ? undefined : "hex-grid-hidden"}>
           {ghosted.map((cell) => (
             <polygon
@@ -350,33 +409,135 @@ export function HexBoard({
             </polygon>
           ))}
         </g>
+        {traces.map((trace, index) => trace.spots.length > 0 ? (
+          <g key={`trace-${index}`} className="hex-trace" style={{ color: trace.color }}>
+            {trace.spots.length > 1 ? (
+              <polyline
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={size * 0.1}
+                points={trace.spots.map((spot) => {
+                  const center = hexCenter(spot.q, spot.r, size)
+                  return `${center.x},${center.y}`
+                }).join(" ")}
+              />
+            ) : null}
+            {(() => {
+              const last = trace.spots[trace.spots.length - 1]
+              const center = hexCenter(last.q, last.r, size)
+              return <circle cx={center.x} cy={center.y} r={size * 0.34} fill="none" stroke="currentColor" strokeWidth={size * 0.08} />
+            })()}
+          </g>
+        ) : null)}
+        {orderPaths.map((path, index) => path.spots.length > 1 ? (
+          <polyline
+            key={`order-${index}`}
+            className={path.selected ? "hex-order-path is-selected" : "hex-order-path"}
+            fill="none"
+            strokeWidth={size * (path.selected ? 0.18 : 0.12)}
+            points={path.spots.map((spot) => {
+              const center = hexCenter(spot.q, spot.r, size)
+              return `${center.x},${center.y}`
+            }).join(" ")}
+          />
+        ) : null)}
         {tokens.length > 0 ? (
           <g className="hex-tokens" pointerEvents="none">
             {tokens.map((token) => {
-              const spot = hexCenter(token.q, token.r, size)
+              const placed = tokenSpots?.[token.id] ?? token
+              const spot = hexCenter(placed.q, placed.r, size)
               const stack = tokenStacks.get(`${token.q},${token.r}`) ?? [token]
               const slot = stack.findIndex(item => item.id === token.id)
               const spread = stack.length > 1 ? (slot - (stack.length - 1) / 2) * size * 0.42 : 0
+              const movable = movableIds?.has(token.id) ?? false
               return (
-                <UnitToken
+                <g
                   key={token.id}
-                  boardId={boardId}
-                  faction={token.faction}
-                  kind={token.kind}
-                  color={token.color}
-                  x={spot.x + spread}
-                  y={spot.y}
-                  size={size}
-                  label={token.label}
-                />
+                  className={sliding ? "hex-token-slide" : undefined}
+                  transform={`translate(${spot.x + spread} ${spot.y})`}
+                >
+                  <UnitToken
+                    boardId={boardId}
+                    faction={token.faction}
+                    kind={token.kind}
+                    color={token.color}
+                    x={0}
+                    y={0}
+                    size={size}
+                    label={token.label}
+                  />
+                  {movable ? (
+                    <circle
+                      className={selectedTokenId === token.id ? "hex-token-hit is-selected" : "hex-token-hit"}
+                      r={size * 0.72}
+                      onPointerDown={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        dragToken.current = token.id
+                        setDragging(true)
+                        svgRef.current?.setPointerCapture(event.pointerId)
+                        const at = hexFromEvent(event)
+                        if (at) onOrderToken?.(token.id, at, "down")
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  ) : null}
+                </g>
               )
             })}
           </g>
         ) : null}
+        {clashes.map((clash, index) => {
+          const left = hexCenter(clash.from.q, clash.from.r, size)
+          const right = hexCenter(clash.to.q, clash.to.r, size)
+          return (
+            <CrossedSwords
+              key={`clash-${index}`}
+              x={(left.x + right.x) / 2}
+              y={(left.y + right.y) / 2}
+              size={size}
+              label={t("battleSwords")}
+            />
+          )
+        })}
       </svg>
       </div>
       <p ref={caption} className="hex-caption" />
     </div>
+  )
+}
+
+function CrossedSwords({
+  x, y, size, label,
+}: {
+  x: number
+  y: number
+  size: number
+  label: string
+}) {
+  const length = size * 0.72
+  return (
+    <g className="hex-clash" transform={`translate(${x} ${y})`} pointerEvents="none">
+      <title>{label}</title>
+      <g transform="rotate(-42)">
+        <Sword length={length} />
+      </g>
+      <g transform="rotate(42)">
+        <Sword length={length} />
+      </g>
+    </g>
+  )
+}
+
+function Sword({ length }: { length: number }) {
+  const blade = length * 0.58
+  return (
+    <g>
+      <path className="hex-clash-blade" d={`M0 ${-blade} L${length * 0.07} ${length * 0.08} L${-length * 0.07} ${length * 0.08} Z`} />
+      <rect className="hex-clash-guard" x={-length * 0.24} y={length * 0.06} width={length * 0.48} height={length * 0.07} rx={length * 0.02} />
+      <rect className="hex-clash-grip" x={-length * 0.045} y={length * 0.13} width={length * 0.09} height={length * 0.2} />
+      <circle className="hex-clash-pommel" cx={0} cy={length * 0.38} r={length * 0.07} />
+    </g>
   )
 }
 

@@ -14,6 +14,7 @@ from hexcampaign.domain.lobby import (
     accept_seat,
     begin,
     choose_identity,
+    claim_color,
     close_placement,
     create_game,
     invite_player,
@@ -75,6 +76,21 @@ def test_invalid_identity_cannot_mutate_a_campaign(actor, faction, color, error)
     with pytest.raises(DomainError, match=error):
         choose_identity(game, actor, faction, color)
     assert to_dict(game) == before
+
+
+def test_claiming_a_colour_blocks_it_before_the_race_is_chosen() -> None:
+    game = create_game("Estandartes", rules_from(_rules()), "1", "ana")
+    accept_seat(game, "2", "boa")
+    claim_color(game, "1", COLORS["ochre"])
+    assert [(member.faction, member.color) for member in game.members] == [
+        ("", COLORS["ochre"]), ("", ""),
+    ]
+    before = to_dict(game)
+    with pytest.raises(DomainError, match="color_taken"):
+        claim_color(game, "2", COLORS["ochre"])
+    assert to_dict(game) == before
+    claim_color(game, "2", COLORS["copper"])
+    assert game.members[1].color == COLORS["copper"]
 
 
 def test_a_legacy_running_campaign_can_choose_its_banners_once_without_losing_state() -> None:
@@ -265,6 +281,8 @@ def test_enemies_that_swap_hexes_fight_and_friends_pass() -> None:
     )
 
     assert [contact.army_ids for contact in enemies.contacts] == [("a", "b")]
+    assert enemies.positions["a"] == Hex(0, 0)
+    assert enemies.positions["b"] == Hex(1, 0)
     assert friends.contacts == ()
     assert friends.positions["a"] == Hex(1, 0)
     assert friends.positions["b"] == Hex(0, 0)
@@ -585,6 +603,56 @@ def test_players_place_forts_inside_pre_marked_home_land() -> None:
     army_spot = next(cell for cell in home_one if cell != fort)
     game = place_armies(game, "1", fort, {own.id: army_spot, scout.id: army_spot})
     assert next(item for item in game.fortresses if item.player_id == "1").at() == fort
+
+
+def test_an_enemy_who_walks_out_of_sight_leaves_a_trace_and_far_hexes_stay_dim() -> None:
+    game = _opened(map_size=61, visibility="home", movement=4)
+    board = set(game.hexes)
+    game.plots = {cell: Plot("llanura") for cell in board}
+    game.discovered["1"] = set(board)
+    game.discovered["2"] = set(board)
+    from hexcampaign.domain.territory import home_land
+
+    home = home_land(game, "1", board=board) | home_land(game, "2", board=board)
+    forts = {fort.at() for fort in game.fortresses}
+    line = next(
+        (
+            [Hex(cell.q + step, cell.r) for step in range(4)]
+            for cell in board
+            if all(Hex(cell.q + step, cell.r) in board and Hex(cell.q + step, cell.r) not in home for step in range(4))
+        ),
+        None,
+    )
+    assert line is not None
+    watcher = _army(game, "1")
+    watcher_scout = _explorer(game, "1")
+    mover = _army(game, "2")
+    mover_scout = _explorer(game, "2")
+    watcher.q, watcher.r = line[0].q, line[0].r
+    mover.q, mover.r = line[1].q, line[1].r
+    parked = [
+        cell for cell in board
+        if cell not in forts and min(distance(cell, step) for step in line) >= 4
+    ]
+    assert len(parked) >= 2
+    watcher_scout.q, watcher_scout.r = parked[0].q, parked[0].r
+    mover_scout.q, mover_scout.r = parked[1].q, parked[1].r
+
+    game = lock_orders(game, "1", _stay(game, "1"), NOW)
+    game = lock_orders(game, "2", _orders(game, "2", {mover.id: line[2:]}), NOW)
+    view = project(game, "1", NOW)
+
+    assert all(army["id"] != mover.id for army in view["armies"])
+    move = next(item for item in view["playback"]["moves"] if item["army_id"] == mover.id)
+    assert move["lost"] is True
+    seen = [Hex(move["from"]["q"], move["from"]["r"])]
+    seen.extend(Hex(step["q"], step["r"]) for step in move["steps"])
+    assert line[1] in seen
+    assert line[-1] not in seen
+    lit = next(cell for cell in view["hexes"] if cell["q"] == line[0].q and cell["r"] == line[0].r)
+    dark = next(cell for cell in view["hexes"] if cell["q"] == line[-1].q and cell["r"] == line[-1].r)
+    assert lit["known"] is True and lit["sight"] is True
+    assert dark["known"] is True and dark["sight"] is False
 
 
 def test_a_name_rejects_a_null_and_a_hidden_direction_mark() -> None:

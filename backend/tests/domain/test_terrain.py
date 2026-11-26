@@ -151,6 +151,37 @@ def test_three_points_do_leave_an_ordinary_forest() -> None:
     assert moved.paid["a"] == 0
 
 
+def test_a_walker_stops_before_an_impassable_hex() -> None:
+    start = Hex(0, 0)
+    cliff = Hex(1, 0)
+    plots = {start: Plot("llanura"), cliff: Plot("acantilado")}
+    walker = Walker("a", "p", start, [cliff], budget=3, paid=0)
+
+    moved = walk([walker], plots, set(plots))
+
+    assert moved.positions["a"] == start
+    assert moved.trails["a"] == ()
+
+
+def test_enemy_armies_stop_instead_of_passing_through_each_other() -> None:
+    start = Hex(0, 0)
+    middle = Hex(1, 0)
+    hill = Hex(2, 0)
+    plots = {
+        start: Plot("desierto"),
+        middle: Plot("desierto"),
+        hill: Plot("colina"),
+    }
+    plain = Walker("a", "1", start, [middle, hill], budget=4, paid=0)
+    slow = Walker("b", "2", hill, [middle], budget=4, paid=0)
+
+    moved = walk([plain, slow], plots, set(plots))
+
+    assert moved.positions["a"] == middle
+    assert moved.positions["b"] == hill
+    assert [contact.army_ids for contact in moved.contacts] == [("a", "b")]
+
+
 def test_the_army_that_leaves_a_plain_reaches_the_hex_before_the_one_on_a_hill() -> None:
     target = Hex(1, 0)
     plots = {

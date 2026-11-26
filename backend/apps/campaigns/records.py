@@ -35,7 +35,7 @@ from hexcampaign.domain.turn import (
 from hexcampaign.domain.view import project, project_roads_delta
 
 from .live import live_bus
-from .models import Campaign, Invitation, Seat
+from .models import Campaign, Invitation, Notification, Seat
 
 
 class CampaignError(Exception):
@@ -285,7 +285,7 @@ def search_players(user, query: object) -> list[dict[str, str]]:
     from apps.accounts.throttle import account_posts
 
     key = f"player-search:{user.pk}"
-    if not account_posts.allow(key, limit=30, window=60):
+    if not account_posts.allow(key, limit=30, window_seconds=60):
         return []
     rows = (
         User.objects.filter(
@@ -634,10 +634,34 @@ def _document(campaign: Campaign) -> Game:
 
 
 def _save(campaign: Campaign, game: Game) -> None:
+    previous = _member_roles(campaign.state)
+    known_battles = _battle_ids(campaign.state)
     campaign.name = game.name
     campaign.state = to_dict(game)
     campaign.save(update_fields=["name", "state", "updated_at"])
     _sync(campaign, game)
+    appointed = [
+        int(member.player_id)
+        for member in game.members
+        if member.role == "admin"
+        and previous.get(member.player_id) == "player"
+        and member.player_id.isdigit()
+    ]
+    for user_id in appointed:
+        Notification.objects.create(
+            user_id=user_id,
+            kind=Notification.KIND_CAMPAIGN_ADMIN,
+            payload={"campaign_id": str(campaign.id), "campaign_name": game.name},
+        )
+    if appointed:
+        _push_after_commit(appointed, {"type": "notification"})
+    opened = [
+        battle
+        for battle in game.battles
+        if battle.id not in known_battles and battle.result is None and not battle.reverted
+    ]
+    if opened:
+        _notify_battles(campaign, game, opened)
     watchers = [
         int(member.player_id)
         for member in game.members
@@ -650,6 +674,14 @@ def _save(campaign: Campaign, game: Game) -> None:
             "campaign_id": str(campaign.id),
             "revision": game.revision,
             "phase": game.phase,
+            "seats": [
+                {
+                    "player_id": member.player_id,
+                    "color": member.color,
+                    "ready": member.player_id in game.lobby_ready,
+                }
+                for member in game.members
+            ],
         },
     )
     _push_after_commit(watchers, {"type": "campaigns", "campaign_id": str(campaign.id)})
@@ -666,6 +698,70 @@ def _sync(campaign: Campaign, game: Game) -> None:
         )
         seen.append(user_id)
     Seat.objects.filter(campaign=campaign).exclude(user_id__in=seen).delete()
+
+
+def _battle_ids(state: object) -> set[str]:
+    if not isinstance(state, dict):
+        return set()
+    battles = state.get("battles")
+    if not isinstance(battles, list):
+        return set()
+    found: set[str] = set()
+    for battle in battles:
+        if isinstance(battle, dict) and isinstance(battle.get("id"), str):
+            found.add(battle["id"])
+    return found
+
+
+def _notify_battles(campaign: Campaign, game: Game, opened: list) -> None:
+    from hexcampaign.domain.view import project
+
+    now = timezone.now()
+    recipients: list[int] = []
+    for member in game.members:
+        if member.status not in {"active", "eliminated", "inactive"} or not member.player_id.isdigit():
+            continue
+        try:
+            shown = project(game, member.player_id, now)
+        except DomainError:
+            continue
+        visible = {
+            item.get("id")
+            for item in shown.get("battles", [])
+            if isinstance(item, dict)
+        }
+        for battle in opened:
+            if battle.id not in visible:
+                continue
+            Notification.objects.create(
+                user_id=int(member.player_id),
+                kind=Notification.KIND_CAMPAIGN_BATTLE,
+                payload={
+                    "campaign_id": str(campaign.id),
+                    "campaign_name": game.name,
+                    "battle_id": battle.id,
+                },
+            )
+            recipients.append(int(member.player_id))
+    if recipients:
+        _push_after_commit(recipients, {"type": "notification"})
+
+
+def _member_roles(state: object) -> dict[str, str]:
+    if not isinstance(state, dict):
+        return {}
+    members = state.get("members")
+    if not isinstance(members, list):
+        return {}
+    roles: dict[str, str] = {}
+    for member in members:
+        if not isinstance(member, dict):
+            continue
+        player_id = member.get("player_id")
+        role = member.get("role")
+        if isinstance(player_id, str) and isinstance(role, str):
+            roles[player_id] = role
+    return roles
 
 
 def _seat_user_ids(campaign: Campaign) -> list[int]:

@@ -1,51 +1,70 @@
 import { useEffect, useRef } from "react"
 
-import { subscribeLive } from "./liveEvents"
+import { subscribeLive, type LiveSeat } from "./liveEvents"
 
 /**
- * Reloads a campaign when the server pushes a newer revision for it.
+ * Paints a pushed seat colour at once, then reloads the campaign.
  */
 export function useCampaignLive(
   campaignId: string | null | undefined,
   revision: number | null | undefined,
   busy: boolean,
   onStale: () => Promise<void>,
+  onSeats?: (revision: number, seats: LiveSeat[]) => void,
 ) {
   const revisionRef = useRef(revision ?? 0)
   const busyRef = useRef(busy)
   const onStaleRef = useRef(onStale)
+  const onSeatsRef = useRef(onSeats)
+  const waitingRef = useRef(false)
   revisionRef.current = revision ?? 0
   busyRef.current = busy
   onStaleRef.current = onStale
+  onSeatsRef.current = onSeats
 
   useEffect(() => {
     if (!campaignId) return
 
     let inFlight = false
+    let closed = false
 
     async function pull() {
-      if (inFlight || busyRef.current) return
+      if (closed) return
+      if (busyRef.current || inFlight) {
+        waitingRef.current = true
+        return
+      }
       inFlight = true
+      waitingRef.current = false
       try {
         await onStaleRef.current()
       } finally {
         inFlight = false
+        if (!closed && waitingRef.current && !busyRef.current) {
+          waitingRef.current = false
+          void pull()
+        }
       }
     }
 
-    return subscribeLive((event) => {
-      if (busyRef.current) return
-      if (event.type === "reconnect") {
-        void pull()
-        return
-      }
-      if (
+    const stop = subscribeLive((event) => {
+      const newer =
         event.type === "campaign" &&
         event.campaign_id === campaignId &&
         event.revision > revisionRef.current
-      ) {
-        void pull()
-      }
+      if (newer) onSeatsRef.current?.(event.revision, event.seats)
+      if (event.type !== "reconnect" && !newer) return
+      void pull()
     })
+    return () => {
+      closed = true
+      stop()
+    }
   }, [campaignId])
+
+  useEffect(() => {
+    if (!campaignId || busy || !waitingRef.current) return
+    waitingRef.current = false
+    void onStaleRef.current()
+  }, [busy, campaignId])
 }

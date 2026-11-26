@@ -885,6 +885,79 @@ button:disabled {
   margin-top: 4px;
 }
 
+.appoint-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+  background: rgba(8, 6, 4, 0.78);
+}
+
+.appoint-panel {
+  width: min(100%, 360px);
+  overflow: hidden;
+  background: #100c09;
+  border: 1px solid var(--line);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.appoint-panel img {
+  display: block;
+  width: 100%;
+  height: min(300px, 46vh);
+  object-fit: cover;
+  object-position: center 42%;
+}
+
+.appoint-panel img.is-battle {
+  object-position: center 52%;
+}
+
+.appoint-copy {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px 18px;
+}
+
+.appoint-copy h2 {
+  margin: 0;
+  font-family: Cinzel, Palatino, serif;
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.appoint-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.appoint-copy button {
+  width: auto;
+  justify-self: start;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gold);
+  letter-spacing: 0.06em;
+  text-transform: none;
+  font-size: 0.88rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.appoint-copy button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
 .member-actions {
   display: inline-flex;
   gap: 8px;
@@ -1114,9 +1187,125 @@ button:disabled {
   font-size: 0.82rem;
 }
 
-.play-bar > button {
+.play-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.play-bar-actions button {
   width: auto;
   margin: 0;
+}
+
+.admin-panel {
+  display: grid;
+  gap: 16px;
+  margin: 2px 0 6px;
+  padding: 2px 0 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  background: transparent;
+  color: var(--ink);
+}
+
+.admin-panel h2,
+.admin-panel h3 {
+  margin: 0;
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.admin-panel h2 {
+  font-size: 0.72rem;
+  color: var(--gold);
+}
+
+.admin-panel h3 {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.admin-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 20px;
+}
+
+.admin-action p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.admin-action span,
+.admin-people span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.admin-panel button {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gold);
+  letter-spacing: 0.06em;
+  text-transform: none;
+  font-size: 0.82rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.admin-panel button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
+.admin-panel button.is-danger,
+.admin-panel button.is-armed {
+  color: var(--danger);
+}
+
+.admin-people {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-people li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.admin-person {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.admin-person strong {
+  font-weight: 500;
+}
+
+.admin-person span {
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .campaign-details-toggle {
@@ -1204,8 +1393,19 @@ button:disabled {
 }
 
 .identity-color.is-taken {
-  opacity: .38;
   cursor: not-allowed;
+}
+
+.identity-color.is-taken .identity-swatch {
+  color: #ff2a2a;
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 0 2px #140c08;
+}
+
+.identity-color.is-taken .identity-color-name {
+  opacity: .45;
 }
 
 .identity-preview {
@@ -1268,8 +1468,15 @@ button:disabled {
   margin: 0;
 }
 
-.roads-prep button {
+.roads-prep button,
+.orders-bar button {
   width: auto;
+}
+
+.orders-bar {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
 }
 
 .territory-legend {

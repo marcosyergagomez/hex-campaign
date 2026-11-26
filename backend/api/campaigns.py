@@ -39,6 +39,7 @@ from hexcampaign.domain.lobby import (
     begin,
     change_rules,
     choose_identity,
+    claim_color,
     close_placement,
     describe_army,
     mark_ready,
@@ -123,6 +124,10 @@ class RevisionBody(BaseModel):
 
 class IdentityBody(RevisionBody):
     faction: str
+    color: str
+
+
+class ColorBody(RevisionBody):
     color: str
 
 
@@ -267,6 +272,18 @@ def post_identity(campaign_id: str, payload: IdentityBody, request: Request) -> 
     def action(user):
         def command(game):
             return choose_identity(game, str(user.pk), payload.faction, payload.color)
+
+        return _view(user, *play(user, campaign_id, payload.revision, command))
+
+    return _run(request, action)
+
+
+@router.post("/api/campaigns/{campaign_id}/color")
+@django_sync
+def post_color(campaign_id: str, payload: ColorBody, request: Request) -> JSONResponse:
+    def action(user):
+        def command(game):
+            return claim_color(game, str(user.pk), payload.color)
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
 

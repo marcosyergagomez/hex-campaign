@@ -126,23 +126,24 @@ def plan_step(
     return StepPlan(frozenset(moving), blocked_leavers, origins, tuple(destinations))
 
 
-def fighter_swaps(
-    origins: dict[str, Hex],
+def crossing_fighters(
+    intended: dict[str, Hex],
     position: dict[str, Hex],
     owners: dict[str, str],
     kinds: dict[str, str] | None = None,
 ) -> list[tuple[str, str, Hex]]:
-    """Enemy fighters that traded hexes in the same step."""
-    seen: list[tuple[str, str, Hex]] = []
-    for left, start in origins.items():
-        for right, other_start in origins.items():
-            if left >= right or owners[left] == owners[right]:
+    """Enemy armies about to trade places. They stop where they already stand."""
+    pairs: list[tuple[str, str, Hex]] = []
+    ids = sorted(intended)
+    for index, left in enumerate(ids):
+        for right in ids[index + 1 :]:
+            if owners[left] == owners[right]:
                 continue
             if _soft(kinds, left) or _soft(kinds, right):
                 continue
-            if position[left] == other_start and position[right] == start:
-                seen.append((left, right, position[left]))
-    return seen
+            if intended[left] == position[right] and intended[right] == position[left]:
+                pairs.append((left, right, position[left]))
+    return pairs
 
 
 def _soft(kinds: dict[str, str] | None, army_id: str) -> bool:

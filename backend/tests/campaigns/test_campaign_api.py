@@ -165,6 +165,16 @@ def test_identity_choices_are_private_writes_validated_and_persisted(clients) ->
     duplicate = _write(boa, f"{path}/identity", {**identity, "revision": joined["revision"]})
     assert duplicate.status_code == 422
     assert duplicate.json()["errors"]["campaign"] == ["Ese color ya pertenece a otro jugador."]
+    held = _write(boa, f"{path}/color", {"revision": joined["revision"], "color": "#ef6c00"})
+    assert held.status_code == 200, held.text
+    visible = _read(ana, path)
+    assert visible.status_code == 200, visible.text
+    body = visible.json()
+    boa_color = next(member["color"] for member in body["members"] if member["alias"] == "boa_two")
+    assert boa_color == "#ef6c00"
+    blocked = _write(ana, f"{path}/color", {"revision": body["revision"], "color": "#ef6c00"})
+    assert blocked.status_code == 422
+    assert blocked.json()["errors"]["campaign"] == ["Ese color ya pertenece a otro jugador."]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -179,19 +189,41 @@ def test_a_rival_cannot_read_the_secret_order_and_a_stale_write_does_nothing(cli
     assert listed.status_code == 200
     assert listed.json()[0]["id"] == started["id"]
 
-    army = next(item for item in started["armies"] if item["player_id"] == str(owner.pk))
+    own = [
+        item for item in started["armies"]
+        if item.get("player_id") == str(owner.pk) and item.get("q") is not None
+    ]
+    army = next(item for item in own if item["kind"] == "army")
     board = {Hex(item["q"], item["r"]) for item in started["hexes"]}
-    dest = next(cell for cell in neighbors(Hex(army["q"], army["r"])) if cell in board)
+    forts = {(item["q"], item["r"]) for item in started["fortresses"]}
+    known = {
+        (item["q"], item["r"]): item for item in started["hexes"] if item.get("known")
+    }
+
+    def _passable(cell: Hex) -> bool:
+        item = known.get((cell.q, cell.r))
+        if item is None or (cell.q, cell.r) in forts:
+            return False
+        return item.get("ground") not in {"lago", "acantilado", "montana_rocosa"}
+
+    dest = next(
+        cell for cell in neighbors(Hex(army["q"], army["r"])) if cell in board and _passable(cell)
+    )
+    orders = {item["id"]: [] for item in own}
+    orders[army["id"]] = [{"q": dest.q, "r": dest.r}]
     locked = _write(
         ana,
         f"/api/campaigns/{started['id']}/orders",
-        {"revision": started["revision"], "orders": {army["id"]: [{"q": dest.q, "r": dest.r}]}},
+        {"revision": started["revision"], "orders": orders},
     )
     assert locked.status_code == 200, locked.text
 
     seen = _read(boa, f"/api/campaigns/{started['id']}")
     assert seen.status_code == 200, seen.text
     assert army["id"] not in seen.json()["orders"]
+    assert seen.json()["playback"]["moves"] == []
+    ana_seat = next(member for member in seen.json()["members"] if member["alias"] == "ana_one")
+    assert ana_seat["orders_locked"] is True
 
     stale = _write(
         boa,
@@ -203,6 +235,25 @@ def test_a_rival_cannot_read_the_secret_order_and_a_stale_write_does_nothing(cli
     again = _read(ana, f"/api/campaigns/{started['id']}")
     assert again.json()["revision"] == locked.json()["revision"]
     assert again.json()["orders"][army["id"]] == [{"q": dest.q, "r": dest.r}]
+
+    boa_now = _read(boa, f"/api/campaigns/{started['id']}")
+    stay = {
+        item["id"]: []
+        for item in boa_now.json()["armies"]
+        if item.get("player_id") == str(rival.pk)
+    }
+    resolved = _write(
+        boa,
+        f"/api/campaigns/{started['id']}/orders",
+        {"revision": boa_now.json()["revision"], "orders": stay},
+    )
+    assert resolved.status_code == 200, resolved.text
+    film = resolved.json()["playback"]
+    assert film["turn"] >= 1
+    assert all("order" not in move for move in film["moves"])
+    marched = [move for move in film["moves"] if move["army_id"] == army["id"]]
+    if marched:
+        assert marched[0]["from"] != marched[0]["steps"][-1]
 
 
 @pytest.mark.django_db(transaction=True)

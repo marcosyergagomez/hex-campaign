@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import Game
 from hexcampaign.domain.hexes import Hex, distance
-from hexcampaign.domain.occupy import fighter_swaps, plan_step
+from hexcampaign.domain.occupy import crossing_fighters, plan_step
 from hexcampaign.domain.sight import sees_army
 from hexcampaign.domain.units import is_explorer, move_budget
 
@@ -109,6 +109,14 @@ def march(
 def _step_all(intended, position, remaining, trails, owners, stopped, contacts, kinds) -> None:
     """One simultaneous step. Someone who leaves a hex does not block it."""
     plan = plan_step(intended, position, owners, stopped, kinds)
+    moving_intended = {army_id: intended[army_id] for army_id in plan.moving}
+    crossed: set[str] = set()
+    for left, right, cell in crossing_fighters(moving_intended, position, owners, kinds):
+        crossed.update((left, right))
+        for army_id in (left, right):
+            remaining[army_id] = []
+            stopped.add(army_id)
+        contacts.append(_contact((left, right), cell))
     for army_id in plan.blocked_leavers:
         stopped.add(army_id)
         remaining[army_id] = []
@@ -119,6 +127,8 @@ def _step_all(intended, position, remaining, trails, owners, stopped, contacts, 
         if not clash.entering:
             continue
         for army_id in clash.entering:
+            if army_id in crossed:
+                continue
             _arrive(
                 position,
                 trails,
@@ -128,17 +138,12 @@ def _step_all(intended, position, remaining, trails, owners, stopped, contacts, 
                 clash.dest,
                 fight=clash.fight and kinds.get(army_id) == "army",
             )
-        if clash.fight:
+        if clash.fight and not any(army_id in crossed for army_id in clash.entering):
             contacts.append(_contact(clash.fighting, clash.dest))
             for other in clash.holders:
                 if kinds.get(other) == "army":
                     remaining[other] = []
                     stopped.add(other)
-    for left, right, cell in fighter_swaps(plan.origins, position, owners, kinds):
-        for army_id in (left, right):
-            remaining[army_id] = []
-            stopped.add(army_id)
-        contacts.append(_contact((left, right), cell))
 
 
 def _arrive(position, trails, remaining, stopped, army_id, dest, *, fight: bool) -> None:

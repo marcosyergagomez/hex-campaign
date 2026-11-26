@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
 
-import type { CampaignDetail, IdentityOptions } from "../api"
+import { ApiError, type CampaignDetail, type IdentityOptions } from "../api"
 import { Banner, SelectField } from "../form"
-import { HexBoard } from "../game/hex/HexBoard"
+import { HexBoard, type BoardToken } from "../game/hex/HexBoard"
 import { clientNotice } from "../i18n/catalog"
 import { useI18n } from "../i18n/language"
 import { presentError } from "../presentError"
@@ -14,16 +14,20 @@ const PREVIEW = [
   { q: 0, r: 1, ground: "llanura" },
 ].map((cell, index) => ({ ...cell, road: false, bridge: false, owner_id: index < 5 ? "preview" : null }))
 
+const UNPAINTED = "#efe2b8"
+
 export function PlayerIdentity({
   campaign,
   options,
   onSave,
+  onClaim,
   onReady,
   busy = false,
 }: {
   campaign: CampaignDetail
   options: IdentityOptions
   onSave: (faction: string, color: string) => Promise<void>
+  onClaim: (color: string) => Promise<void>
   onReady?: () => Promise<void>
   busy?: boolean
 }) {
@@ -42,12 +46,20 @@ export function PlayerIdentity({
     setFaction(campaign.you?.faction ?? "")
     setColor(campaign.you?.color ?? "")
   }, [campaign.you?.faction, campaign.you?.color])
-  const recruiting = campaign.phase === "recruiting"
-  const editable = campaign.you?.status === "active" && campaign.phase !== "finished" &&
-    (recruiting || (!campaign.you.faction && !campaign.you.color))
   const takenBy = (value: string) => campaign.members.find(
     member => member.player_id !== campaign.you?.player_id && member.color === value,
   )
+  const takenOwner = color ? takenBy(color) : undefined
+  useEffect(() => {
+    if (!takenOwner) return
+    const saved = campaign.you?.color ?? ""
+    setColor(saved && saved !== color ? saved : "")
+    setSaved(false)
+    setErrors(current => ({ ...current, color: [clientNotice("colorTaken")] }))
+  }, [takenOwner, color, campaign.you?.color])
+  const recruiting = campaign.phase === "recruiting"
+  const editable = campaign.you?.status === "active" && campaign.phase !== "finished" &&
+    (recruiting || (!campaign.you.faction && !campaign.you.color))
   const canReady = Boolean(
     onReady &&
       recruiting &&
@@ -74,7 +86,35 @@ export function PlayerIdentity({
       await onSave(faction, color)
       if (mounted.current) setSaved(true)
     } catch (error: unknown) {
-      if (mounted.current) setErrors(presentError(error, "identitySaveFailed"))
+      // A stale revision already reloaded the campaign. The palette shows the
+      // other player's colour with the cross; the "read it again" banner does not.
+      if (mounted.current && !(error instanceof ApiError && error.status === 409)) {
+        setErrors(presentError(error, "identitySaveFailed"))
+      }
+    } finally {
+      if (mounted.current) setPending(false)
+    }
+  }
+
+  async function claim(next: string) {
+    const previous = color
+    setColor(next)
+    setSaved(false)
+    setErrors(current => {
+      if (!current.color) return current
+      const rest = { ...current }
+      delete rest.color
+      return rest
+    })
+    setPending(true)
+    try {
+      if (faction) await onSave(faction, next)
+      else await onClaim(next)
+    } catch (error: unknown) {
+      if (!mounted.current) return
+      if (error instanceof ApiError && error.status === 409) return
+      setColor(previous)
+      setErrors(presentError(error, "identitySaveFailed"))
     } finally {
       if (mounted.current) setPending(false)
     }
@@ -88,11 +128,38 @@ export function PlayerIdentity({
       await onReady()
       if (mounted.current) setSaved(false)
     } catch (error: unknown) {
-      if (mounted.current) setErrors(presentError(error, "lobbyReadyFailed"))
+      if (mounted.current && !(error instanceof ApiError && error.status === 409)) {
+        setErrors(presentError(error, "lobbyReadyFailed"))
+      }
     } finally {
       if (mounted.current) setPending(false)
     }
   }
+
+  const alias = campaign.you?.alias ?? ""
+  const tokenColor = color || UNPAINTED
+  const previewTokens: BoardToken[] = faction
+    ? [
+        {
+          id: "preview-army",
+          q: 0,
+          r: 0,
+          kind: "army",
+          faction,
+          color: tokenColor,
+          label: `${alias} · ${t("unitArmy")}`,
+        },
+        {
+          id: "preview-explorer",
+          q: -1,
+          r: 0,
+          kind: "explorer",
+          faction,
+          color: tokenColor,
+          label: `${alias} · ${t("unitExplorer")}`,
+        },
+      ]
+    : []
 
   return (
     <section className="detail-panel player-identity" aria-labelledby="identity-title">
@@ -122,11 +189,11 @@ export function PlayerIdentity({
                     title={owner ? t("identityTaken", { player: owner.alias }) : t(item.label)}>
                     <input type="radio" name="territory-color" value={item.value}
                       checked={color === item.value} disabled={Boolean(owner)}
-                      onChange={() => { setColor(item.value); setSaved(false) }} />
+                      onChange={() => { void claim(item.value) }} />
                     <span className="identity-swatch" style={{ backgroundColor: item.value }} aria-hidden="true">
-                      {color === item.value ? "✓" : ""}
+                      {owner ? "×" : color === item.value ? "✓" : ""}
                     </span>
-                    <span>{t(item.label)}</span>
+                    <span className="identity-color-name">{t(item.label)}</span>
                     {owner ? <span className="sr-only">{t("identityTaken", { player: owner.alias })}</span> : null}
                   </label>
                 )
@@ -151,8 +218,12 @@ export function PlayerIdentity({
         </form>
       </div>
       <figure className="identity-preview">
-        <HexBoard cells={PREVIEW} anchors={[{ q: 0, r: 0 }]}
-          players={[{ player_id: "preview", label: campaign.you?.alias ?? "", color }]} />
+        <HexBoard
+          cells={PREVIEW}
+          anchors={[{ q: 0, r: 0 }]}
+          players={[{ player_id: "preview", label: alias, color }]}
+          tokens={previewTokens}
+        />
         <figcaption>{t("identityPreview")}</figcaption>
       </figure>
     </section>

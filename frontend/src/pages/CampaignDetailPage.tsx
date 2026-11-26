@@ -3,9 +3,15 @@ import { Link, useParams } from "react-router-dom"
 
 import {
   ApiError,
+  claimCampaignColor,
+  closeCampaignOrders,
   expelCampaignMember,
+  judgeCampaignBattle,
+  promoteCampaignMember,
+  revertCampaignTurn,
   getCampaign,
   identityOptions,
+  lockCampaignOrders,
   inviteCampaignPlayer,
   markCampaignReady,
   restoreCampaignMember,
@@ -23,10 +29,13 @@ import { RoadPreparation, isKnownHex, toggleOwnRoad } from "./RoadPreparation"
 import { Banner } from "../form"
 import { toBoardTokens } from "../game/hex/boardTokens"
 import { HexBoard } from "../game/hex/HexBoard"
+import { gazeReach, hexDistance, moveBudget, routeTo, spotKey, type Spot } from "../game/hex/orders"
+import { setBattleFilm, useMarchFilm } from "../game/hex/useMarchFilm"
 import { clientNotice, type MessageKey } from "../i18n/catalog"
 import { useI18n } from "../i18n/language"
 import { presentError } from "../presentError"
 import { useCampaignLive } from "../useCampaignLive"
+import type { LiveSeat } from "../liveEvents"
 
 const PHASE_KEYS: Record<CampaignDetail["phase"], MessageKey> = {
   recruiting: "phaseRecruiting",
@@ -35,6 +44,26 @@ const PHASE_KEYS: Record<CampaignDetail["phase"], MessageKey> = {
   orders: "phaseOrders",
   battles: "phaseBattles",
   finished: "phaseFinished",
+}
+
+function paintSeats(
+  current: CampaignDetail | null,
+  revision: number,
+  seats: LiveSeat[],
+): CampaignDetail | null {
+  if (!current || revision < current.revision) return current
+  const byId = new Map(seats.map((seat) => [seat.player_id, seat]))
+  const apply = (member: CampaignDetail["members"][number]) => {
+    const seat = byId.get(member.player_id)
+    if (!seat || (member.color === seat.color && member.ready === seat.ready)) return member
+    return { ...member, color: seat.color, ready: seat.ready }
+  }
+  return {
+    ...current,
+    revision: Math.max(current.revision, revision),
+    members: current.members.map(apply),
+    you: current.you ? apply(current.you) : current.you,
+  }
 }
 
 function statusKey(phase: CampaignDetail["phase"]): MessageKey {
@@ -54,6 +83,12 @@ export function CampaignDetailPage() {
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const [busy, setBusy] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(false)
+  const [orderPaths, setOrderPaths] = useState<Record<string, Spot[]>>({})
+  const orderPathsRef = useRef(orderPaths)
+  orderPathsRef.current = orderPaths
+  const [selectedToken, setSelectedToken] = useState<string | null>(null)
+  const [locking, setLocking] = useState(false)
 
   useEffect(() => {
     mounted.current = true
@@ -97,7 +132,15 @@ export function CampaignDetailPage() {
     }
   }, [busy, id])
 
-  useCampaignLive(campaign?.id ?? null, campaign?.revision ?? null, busy, pullLive)
+  useCampaignLive(
+    campaign?.id ?? null,
+    campaign?.revision ?? null,
+    busy,
+    pullLive,
+    (revision, seats) => {
+      setCampaign((current) => paintSeats(current, revision, seats))
+    },
+  )
 
   async function mutateCampaign(action: () => Promise<CampaignDetail>) {
     if (!campaign) throw new Error("Campaign not loaded")
@@ -134,6 +177,11 @@ export function CampaignDetailPage() {
     await mutateCampaign(() => saveIdentity(campaign.id, campaign.revision, faction, color))
   }
 
+  async function claimColor(color: string) {
+    if (!campaign) throw new Error("Campaign not loaded")
+    await mutateCampaign(() => claimCampaignColor(campaign.id, campaign.revision, color))
+  }
+
   async function markReady() {
     if (!campaign) throw new Error("Campaign not loaded")
     await mutateCampaign(() => markCampaignReady(campaign.id, campaign.revision))
@@ -141,6 +189,8 @@ export function CampaignDetailPage() {
 
   const preparing = campaign?.phase === "preparing" && campaign.roads !== null
   const playing = Boolean(campaign && campaign.phase !== "recruiting")
+  const staff = campaign?.you?.status === "active" &&
+    (campaign.you.role === "owner" || campaign.you.role === "admin")
   const activeMembers = campaign?.members.filter((member) => member.status === "active") ?? []
   const seatsFull = Boolean(campaign && activeMembers.length === campaign.rules.seats)
   const allReady = activeMembers.length > 0 && activeMembers.every((member) => member.ready)
@@ -175,6 +225,176 @@ export function CampaignDetailPage() {
     () => (campaign ? toBoardTokens(campaign, t) : []),
     [campaign, t],
   )
+  const film = useMarchFilm(campaign)
+  useEffect(() => {
+    if (!campaign) return
+    setBattleFilm(campaign.id, film.playing)
+    return () => setBattleFilm(campaign.id, false)
+  }, [campaign, film.playing])
+  const ordering = Boolean(
+    campaign &&
+      campaign.phase === "orders" &&
+      campaign.you?.status === "active" &&
+      !campaign.you.orders_locked &&
+      !film.playing,
+  )
+  useEffect(() => {
+    setOrderPaths({})
+    setSelectedToken(null)
+  }, [campaign?.id, campaign?.turn])
+
+  function plan(armyId: string, target: Spot) {
+    if (!campaign?.you) return
+    const army = campaign.armies.find((item) => item.id === armyId && item.player_id === campaign.you?.player_id)
+    if (!army || army.q === null || army.r === null || army.destroyed) return
+    const plots = new Map(campaign.hexes.map((cell) => [spotKey(cell), cell.known
+      ? { known: true, ground: cell.ground, road: cell.road, bridge: cell.bridge }
+      : { known: false }]))
+    const board = new Set(campaign.hexes.map(spotKey))
+    const forts = new Set(campaign.fortresses.map(spotKey))
+    const blocked = new Set(
+      campaign.armies.flatMap((item) => {
+        if (item.kind !== "army" || item.player_id === army.player_id || item.destroyed) return []
+        if (item.q === null || item.r === null) return []
+        return [spotKey({ q: item.q, r: item.r })]
+      }),
+    )
+    const next = routeTo({
+      origin: { q: army.q, r: army.r },
+      path: orderPathsRef.current[armyId] ?? [],
+      target,
+      budget: moveBudget(campaign.rules.movement, army.kind),
+      paid: army.paid,
+      kind: army.kind,
+      plots,
+      board,
+      forts,
+      blocked,
+    })
+    if (!next) return
+    const taken = new Set(
+      campaign.armies.flatMap((item) => {
+        if (item.id === armyId || item.kind !== "army" || item.player_id !== army.player_id) return []
+        const path = orderPathsRef.current[item.id]
+        if (item.q === null || item.r === null) return []
+        const end = path && path.length > 0 ? path[path.length - 1] : { q: item.q, r: item.r }
+        return [spotKey(end)]
+      }),
+    )
+    if (next.length > 0 && army.kind === "army" && taken.has(spotKey(next[next.length - 1]))) return
+    setOrderPaths((current) => ({ ...current, [armyId]: next }))
+  }
+
+  const drawnPaths = useMemo(() => {
+    if (!campaign?.you) return []
+    const own = campaign.armies.filter((army) => army.player_id === campaign.you?.player_id && army.q !== null && army.r !== null)
+    const line = (army: (typeof own)[number], path: Spot[]) => {
+      if (army.q === null || army.r === null || path.length === 0) return []
+      return [{ spots: [{ q: army.q, r: army.r }, ...path], selected: army.id === selectedToken }]
+    }
+    if (ordering) {
+      return own.flatMap((army) => line(army, orderPaths[army.id] ?? []))
+    }
+    if (campaign.you.orders_locked) {
+      return own.flatMap((army) => line(army, campaign.orders[army.id] ?? []))
+    }
+    return []
+  }, [campaign, ordering, orderPaths, selectedToken])
+  const movableIds = useMemo(() => new Set(
+    ordering && campaign?.you
+      ? campaign.armies.flatMap((army) =>
+        army.player_id === campaign.you?.player_id && !army.destroyed && army.q !== null ? [army.id] : [],
+      )
+      : [],
+  ), [campaign, ordering])
+  const watch = useMemo(() => {
+    if (!campaign?.you) return null
+    const you = campaign.you.player_id
+    if (!film.playing && !ordering) return null
+    const spots = new Map<string, Spot>()
+    for (const army of campaign.armies) {
+      if (army.player_id !== you || army.destroyed || army.q === null || army.r === null) continue
+      if (film.playing && film.spots?.[army.id]) {
+        spots.set(army.id, film.spots[army.id])
+        continue
+      }
+      const path = orderPaths[army.id]
+      spots.set(army.id, path && path.length > 0 ? path[path.length - 1] : { q: army.q, r: army.r })
+    }
+    return spots
+  }, [campaign, film.playing, film.spots, ordering, orderPaths])
+  const dimmed = useMemo(
+    () => (campaign ? watchedDim(campaign, watch) : []),
+    [campaign, watch],
+  )
+  const shownTokens = useMemo(() => {
+    if (!film.playing || !campaign) return tokens
+    const ids = new Set(tokens.map((token) => token.id))
+    const glimpsed = campaign.playback.moves.flatMap((move) => {
+      if (!move.lost || ids.has(move.army_id)) return []
+      return [{
+        id: move.army_id,
+        q: move.from.q,
+        r: move.from.r,
+        kind: move.kind ?? "army" as const,
+        faction: move.faction ?? "",
+        color: move.color || "#c0a062",
+        label: move.name || t("unitArmy"),
+      }]
+    })
+    return [...tokens, ...glimpsed]
+  }, [campaign, film.playing, t, tokens])
+  const traces = useMemo(() => {
+    if (!campaign || film.playing) return []
+    return campaign.playback.moves.flatMap((move) => {
+      if (!move.lost) return []
+      const spots = [move.from, ...move.steps]
+      const unique = spots.filter((spot, index) => index === 0 || spot.q !== spots[index - 1].q || spot.r !== spots[index - 1].r)
+      return unique.length > 0 ? [{ spots: unique, color: move.color || "#c0a062" }] : []
+    })
+  }, [campaign, film.playing])
+  const lostNames = traces.length === 0 || !campaign
+    ? ""
+    : campaign.playback.moves
+      .filter((move) => move.lost)
+      .map((move) => move.name || t("unitArmy"))
+      .join(", ")
+  const clashes = useMemo(() => {
+    if (!campaign) return []
+    const pairs: { from: Spot; to: Spot }[] = []
+    for (const battle of campaign.battles) {
+      if (battle.result !== null || battle.reverted || battle.army_ids.length < 2) continue
+      const placed = battle.army_ids.flatMap((id) => {
+        const army = campaign.armies.find((item) => item.id === id && !item.destroyed && item.q !== null && item.r !== null)
+        if (!army || army.q === null || army.r === null) return []
+        const rest = { q: army.q, r: army.r }
+        return [{ spot: film.spots?.[id] ?? rest, rest }]
+      })
+      if (placed.length < 2) continue
+      const met = placed.every((item) => item.spot.q === item.rest.q && item.spot.r === item.rest.r)
+      if (film.playing && !met) continue
+      pairs.push({ from: placed[0].spot, to: placed[1].spot })
+    }
+    return pairs
+  }, [campaign, film.playing, film.spots])
+
+  async function lockTurn() {
+    if (!campaign?.you || locking) return
+    const orders: Record<string, Spot[]> = {}
+    for (const army of campaign.armies) {
+      if (army.player_id !== campaign.you.player_id || army.destroyed || army.q === null) continue
+      orders[army.id] = orderPaths[army.id] ?? []
+    }
+    setLocking(true)
+    try {
+      await mutateCampaign(() => lockCampaignOrders(campaign.id, campaign.revision, orders))
+      if (mounted.current) setErrors({})
+    } catch (error: unknown) {
+      if (mounted.current) setErrors(presentError(error, "ordersFailed"))
+    } finally {
+      if (mounted.current) setLocking(false)
+    }
+  }
 
   if (!campaign && Object.keys(errors).length === 0) {
     return <p className="quiet">{t("loadingCampaign")}</p>
@@ -198,14 +418,26 @@ export function CampaignDetailPage() {
               ) : null}
             </div>
           </div>
-          <button
-            type="button"
-            className="button-quiet"
-            aria-expanded={detailsOpen}
-            onClick={() => setDetailsOpen((value) => !value)}
-          >
-            {t("campaignDetailsButton")}
-          </button>
+          <div className="play-bar-actions">
+            {staff && campaign ? (
+              <button
+                type="button"
+                className="button-quiet"
+                aria-expanded={adminOpen}
+                onClick={() => setAdminOpen((value) => !value)}
+              >
+                {t("campaignAdminButton")}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="button-quiet"
+              aria-expanded={detailsOpen}
+              onClick={() => setDetailsOpen((value) => !value)}
+            >
+              {t("campaignDetailsButton")}
+            </button>
+          </div>
         </header>
       ) : (
         <header className="stage">
@@ -232,6 +464,23 @@ export function CampaignDetailPage() {
 
       {!playing && campaign?.description ? (
         <p className="campaign-blurb">{campaign.description}</p>
+      ) : null}
+
+      {playing && adminOpen && staff && campaign ? (
+        <AdminPanel
+          campaign={campaign}
+          busy={busy}
+          onRevert={() => applyCampaign(() => revertCampaignTurn(campaign.id, campaign.revision))}
+          onCloseOrders={() => applyCampaign(() => closeCampaignOrders(campaign.id, campaign.revision))}
+          onPromote={(playerId) => applyCampaign(() =>
+            promoteCampaignMember(campaign.id, campaign.revision, playerId))}
+          onExpel={(playerId) => applyCampaign(() =>
+            expelCampaignMember(campaign.id, campaign.revision, playerId))}
+          onRestore={(playerId) => applyCampaign(() =>
+            restoreCampaignMember(campaign.id, campaign.revision, playerId))}
+          onJudge={(battleId, result) => applyCampaign(() =>
+            judgeCampaignBattle(campaign.id, battleId, campaign.revision, result))}
+        />
       ) : null}
 
       {playing && detailsOpen && campaign ? (
@@ -266,6 +515,7 @@ export function CampaignDetailPage() {
           campaign={campaign}
           options={options}
           onSave={saveBanner}
+          onClaim={claimColor}
           onReady={markReady}
           busy={busy}
         />
@@ -275,6 +525,29 @@ export function CampaignDetailPage() {
           <div className="play-map-meta">
             {preparing ? (
               <p className="hint">{t("roadsHint")}</p>
+            ) : null}
+            {lostNames ? <p className="hint">{t("sightLost", { name: lostNames })}</p> : null}
+            {campaign.phase === "orders" ? (
+              <div className="orders-bar">
+                <p className="hint">{film.playing ? t("ordersFilm") : t("ordersHint")}</p>
+                {campaign.you?.orders_locked ? (
+                  <p className="quiet" role="status">{t("ordersFixed")}</p>
+                ) : (
+                  <button type="button" disabled={!ordering || locking || busy} onClick={() => { void lockTurn() }}>
+                    {locking ? t("ordersFixing") : t("ordersFix")}
+                  </button>
+                )}
+                {campaign.members.some((member) => member.orders_locked && member.player_id !== campaign.you?.player_id) ? (
+                  <p className="quiet">
+                    {t("ordersFixedNames", {
+                      names: campaign.members
+                        .filter((member) => member.orders_locked && member.player_id !== campaign.you?.player_id)
+                        .map((member) => member.alias)
+                        .join(", "),
+                    })}
+                  </p>
+                ) : null}
+              </div>
             ) : null}
             {preparing ? (
               <RoadPreparation
@@ -298,13 +571,40 @@ export function CampaignDetailPage() {
           <HexBoard
             cells={known}
             unknown={unknown}
+            dimmed={dimmed}
+            traces={traces}
+            clashes={clashes}
+            mapTools={false}
             anchors={campaign.fortresses}
             players={players}
-            tokens={tokens}
+            tokens={shownTokens}
+            orderPaths={drawnPaths}
+            tokenSpots={film.spots}
+            movableIds={movableIds}
+            selectedTokenId={selectedToken}
+            sliding={film.playing}
+            onOrderToken={ordering ? (id, spot, phase) => {
+              setSelectedToken(id)
+              if (phase === "move") plan(id, spot)
+            } : undefined}
             onCellClick={
-              preparing && campaign.roads && !campaign.roads.ready && !busy
-                ? cell => toggleOwnRoad(campaign, cell, action => { void applyCampaign(action) })
-                : undefined
+              ordering
+                ? (cell) => {
+                    const token = campaign.armies.find((army) =>
+                      army.player_id === campaign.you?.player_id &&
+                      !army.destroyed &&
+                      army.q === cell.q &&
+                      army.r === cell.r,
+                    )
+                    if (token) {
+                      setSelectedToken(token.id)
+                      return
+                    }
+                    if (selectedToken) plan(selectedToken, cell)
+                  }
+                : preparing && campaign.roads && !campaign.roads.ready && !busy
+                  ? cell => toggleOwnRoad(campaign, cell, action => { void applyCampaign(action) })
+                  : undefined
             }
           />
         </section>
@@ -395,6 +695,151 @@ function RulesPanel({ campaign }: { campaign: CampaignDetail }) {
         </li>
       </ul>
     </article>
+  )
+}
+
+function AdminPanel({
+  campaign,
+  busy,
+  onRevert,
+  onCloseOrders,
+  onPromote,
+  onExpel,
+  onRestore,
+  onJudge,
+}: {
+  campaign: CampaignDetail
+  busy: boolean
+  onRevert: () => void
+  onCloseOrders: () => void
+  onPromote: (playerId: string) => void
+  onExpel: (playerId: string) => void
+  onRestore: (playerId: string) => void
+  onJudge: (battleId: string, result: string) => void
+}) {
+  const { t } = useI18n()
+  const [armed, setArmed] = useState<string | null>(null)
+  const you = campaign.you?.player_id
+  const alias = (playerId: string) =>
+    campaign.members.find((member) => member.player_id === playerId)?.alias ?? playerId
+  const roleLabel = (role: string) => {
+    if (role === "owner") return t("adminRoleOwner")
+    if (role === "admin") return t("adminRoleAdmin")
+    return t("adminRolePlayer")
+  }
+  const statusLabel = (status: string) => {
+    if (status === "inactive") return t("adminStatusInactive")
+    if (status === "expelled") return t("adminStatusExpelled")
+    if (status === "eliminated") return t("adminStatusEliminated")
+    return t("adminStatusActive")
+  }
+  const openBattles = campaign.battles.filter((battle) => battle.result === null && !battle.reverted && (battle.conflict || battle.due))
+  function confirm(key: string, run: () => void) {
+    if (armed === key) {
+      setArmed(null)
+      run()
+      return
+    }
+    setArmed(key)
+  }
+  return (
+    <section className="admin-panel" aria-label={t("adminTitle")}>
+      <h2>{t("adminTitle")}</h2>
+      {campaign.phase === "orders" || campaign.phase === "battles" || campaign.phase === "finished" ? (
+        <div className="admin-action">
+          <p>{t("adminRevertHint")}</p>
+          <span>
+            <button type="button" className={armed === "revert" ? "is-armed" : "is-danger"} disabled={busy} onClick={() => confirm("revert", onRevert)}>
+              {armed === "revert" ? t("adminConfirm") : t("adminRevert")}
+            </button>
+            {armed === "revert" ? (
+              <button type="button" disabled={busy} onClick={() => setArmed(null)}>
+                {t("adminCancel")}
+              </button>
+            ) : null}
+          </span>
+        </div>
+      ) : null}
+      {campaign.phase === "orders" ? (
+        <div className="admin-action">
+          <p>{t("adminCloseOrdersHint")}</p>
+          <span>
+            <button type="button" className={armed === "close" ? "is-armed" : undefined} disabled={busy} onClick={() => confirm("close", onCloseOrders)}>
+              {armed === "close" ? t("adminConfirm") : t("adminCloseOrders")}
+            </button>
+            {armed === "close" ? (
+              <button type="button" disabled={busy} onClick={() => setArmed(null)}>
+                {t("adminCancel")}
+              </button>
+            ) : null}
+          </span>
+        </div>
+      ) : null}
+      <h3>{t("adminPlayers")}</h3>
+      <ul className="admin-people">
+        {campaign.members.filter((member) => member.player_id !== you).map((member) => {
+          const canPromote = member.role === "player" && member.status !== "expelled" && campaign.phase !== "recruiting"
+          const canRestore = member.status === "inactive" && campaign.phase !== "finished"
+          const canExpel = member.status !== "expelled" && !(member.role === "owner" && member.status === "active")
+          return (
+            <li key={member.player_id}>
+              <span className="admin-person">
+                <strong>{member.alias}</strong>
+                <span>{roleLabel(member.role)} · {statusLabel(member.status)}</span>
+              </span>
+              <span>
+                {canPromote ? (
+                  <button type="button" disabled={busy} onClick={() => onPromote(member.player_id)}>
+                    {t("adminPromote")}
+                  </button>
+                ) : null}
+                {canRestore ? (
+                  <button type="button" disabled={busy} onClick={() => onRestore(member.player_id)}>
+                    {t("restoreMember")}
+                  </button>
+                ) : null}
+                {canExpel ? (
+                  <>
+                    <button type="button" className={armed === `expel:${member.player_id}` ? "is-armed" : "is-danger"} disabled={busy} onClick={() => confirm(`expel:${member.player_id}`, () => onExpel(member.player_id))}>
+                      {armed === `expel:${member.player_id}` ? t("adminConfirm") : t("expelMember")}
+                    </button>
+                    {armed === `expel:${member.player_id}` ? (
+                      <button type="button" disabled={busy} onClick={() => setArmed(null)}>
+                        {t("adminCancel")}
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+      {openBattles.length > 0 ? <h3>{t("adminBattles")}</h3> : null}
+      {openBattles.map((battle) => (
+        <div className="admin-action" key={battle.id}>
+          <p>{t("adminBattleAt", { q: String(battle.q), r: String(battle.r) })}</p>
+          <span>
+            {battle.players.map((playerId) => {
+              const key = `judge:${battle.id}:${playerId}`
+              return (
+                <button key={playerId} type="button" className={armed === key ? "is-armed" : undefined} disabled={busy} onClick={() => confirm(key, () => onJudge(battle.id, playerId))}>
+                  {armed === key ? t("adminConfirm") : t("adminJudgeFor", { name: alias(playerId) })}
+                </button>
+              )
+            })}
+            <button type="button" className={armed === `judge:${battle.id}:draw` ? "is-armed" : undefined} disabled={busy} onClick={() => confirm(`judge:${battle.id}:draw`, () => onJudge(battle.id, "draw"))}>
+              {armed === `judge:${battle.id}:draw` ? t("adminConfirm") : t("adminJudgeDraw")}
+            </button>
+            {armed?.startsWith(`judge:${battle.id}:`) ? (
+              <button type="button" disabled={busy} onClick={() => setArmed(null)}>
+                {t("adminCancel")}
+              </button>
+            ) : null}
+          </span>
+        </div>
+      ))}
+    </section>
   )
 }
 
@@ -498,6 +943,26 @@ function visibilityKey(value: Visibility) {
     return "visibilityAdjacent" as const
   }
   return "visibilityAnonymous" as const
+}
+
+function watchedDim(campaign: CampaignDetail, watch: Map<string, Spot> | null): Spot[] {
+  if (campaign.rules.visibility === "full" || campaign.rules.visibility === "total") return []
+  const you = campaign.you?.player_id
+  if (!you || watch === null) {
+    return campaign.hexes.flatMap((cell) => cell.known && !cell.sight ? [{ q: cell.q, r: cell.r }] : [])
+  }
+  const known = campaign.hexes.filter(isKnownHex)
+  const groundAt = new Map(known.map((cell) => [spotKey(cell), cell.ground]))
+  const eyes = campaign.armies.flatMap((army) => {
+    if (army.player_id !== you || army.destroyed || army.q === null || army.r === null) return []
+    const at = watch.get(army.id) ?? { q: army.q, r: army.r }
+    return [{ at, reach: gazeReach(groundAt.get(spotKey(at)), army.kind === "explorer") }]
+  })
+  return known.flatMap((cell) => {
+    if (cell.owner_id === you) return []
+    if (eyes.some((eye) => hexDistance(cell, eye.at) <= eye.reach)) return []
+    return [{ q: cell.q, r: cell.r }]
+  })
 }
 
 function victoryKey(value: Victory) {

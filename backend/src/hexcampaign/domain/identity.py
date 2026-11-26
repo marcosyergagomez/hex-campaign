@@ -43,13 +43,21 @@ _LEGACY_COLORS = frozenset(
 )
 
 
-def checked_identity(faction: object, color: object, *, optional: bool = False) -> tuple[str, str]:
-    if optional and faction == "" and color == "":
-        return "", ""
-    if not isinstance(faction, str) or faction not in FACTIONS:
-        raise DomainError("faction_invalid")
+def checked_color(color: object) -> str:
     if not isinstance(color, str) or (
         color not in COLORS.values() and color not in _LEGACY_COLORS
     ):
         raise DomainError("color_invalid")
-    return faction, color
+    return color
+
+
+def checked_identity(faction: object, color: object, *, optional: bool = False) -> tuple[str, str]:
+    if not isinstance(faction, str) or (faction != "" and faction not in FACTIONS):
+        raise DomainError("faction_invalid")
+    if faction == "":
+        if optional and color == "":
+            return "", ""
+        if optional:
+            return "", checked_color(color)
+        raise DomainError("faction_invalid")
+    return faction, checked_color(color)

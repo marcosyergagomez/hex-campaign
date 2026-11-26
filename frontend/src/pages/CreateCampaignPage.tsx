@@ -491,9 +491,9 @@ function sizeLabel(
 }
 
 function recommendedMovement(key: MapScale["key"] | "small"): number {
-  if (key === "medium") return 4
-  if (key === "large") return 5
-  return 3
+  if (key === "medium") return 3
+  if (key === "large") return 4
+  return 2
 }
 
 function visibilityKey(value: Visibility) {

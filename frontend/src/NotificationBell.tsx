@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { useNavigate } from "react-router-dom"
 
 import {
@@ -10,6 +11,7 @@ import {
 import { useI18n } from "./i18n/language"
 import { subscribeLive } from "./liveEvents"
 import { presentError } from "./presentError"
+import { battleFilmHeld, subscribeBattleFilm } from "./game/hex/useMarchFilm"
 
 function campaignInvite(note: AppNotification): { id: string; name: string; revision: number } | null {
   if (note.kind !== "campaign_invite") return null
@@ -21,12 +23,33 @@ function campaignInvite(note: AppNotification): { id: string; name: string; revi
   return { id, name, revision }
 }
 
+function campaignAdmin(note: AppNotification): { id: string; name: string } | null {
+  if (note.kind !== "campaign_admin") return null
+  const id = note.payload.campaign_id
+  const name = note.payload.campaign_name
+  if (typeof id !== "string" || typeof name !== "string" || name.length === 0) return null
+  return { id, name }
+}
+
+function campaignBattle(note: AppNotification): { id: string; name: string } | null {
+  if (note.kind !== "campaign_battle") return null
+  const id = note.payload.campaign_id
+  const name = note.payload.campaign_name
+  const battleId = note.payload.battle_id
+  if (typeof id !== "string" || typeof name !== "string" || name.length === 0) return null
+  if (typeof battleId !== "string" || battleId.length === 0) return null
+  return { id, name }
+}
+
 export function NotificationBell() {
   const { t, text } = useI18n()
   const navigate = useNavigate()
   const mounted = useRef(true)
   const root = useRef<HTMLDivElement>(null)
+  const closeAppointed = useRef<HTMLButtonElement>(null)
+  const appointedOpen = useRef(false)
   const [open, setOpen] = useState(false)
+  const [filmTick, setFilmTick] = useState(0)
   const [rows, setRows] = useState<AppNotification[]>([])
   const [pending, setPending] = useState(false)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
@@ -55,6 +78,8 @@ export function NotificationBell() {
     })
   }, [refresh])
 
+  useEffect(() => subscribeBattleFilm(() => setFilmTick((value) => value + 1)), [])
+
   useEffect(() => {
     return () => {
       mounted.current = false
@@ -67,7 +92,7 @@ export function NotificationBell() {
       if (!root.current?.contains(event.target as Node)) setOpen(false)
     }
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false)
+      if (event.key === "Escape" && !appointedOpen.current) setOpen(false)
     }
     document.addEventListener("mousedown", onPointer)
     document.addEventListener("keydown", onKey)
@@ -78,6 +103,32 @@ export function NotificationBell() {
   }, [open])
 
   const unread = rows.filter((row) => !row.read).length
+  const ceremony = (() => {
+    void filmTick
+    for (const note of rows) {
+      if (note.read) continue
+      const admin = campaignAdmin(note)
+      if (admin) return { kind: "admin" as const, note, name: admin.name, campaignId: admin.id }
+      const battle = campaignBattle(note)
+      if (battle && !battleFilmHeld(battle.id)) {
+        return { kind: "battle" as const, note, name: battle.name, campaignId: battle.id }
+      }
+    }
+    return null
+  })()
+  const appointment = ceremony?.note ?? null
+  appointedOpen.current = appointment !== null
+
+  useEffect(() => {
+    if (!appointment) return
+    const note = appointment
+    closeAppointed.current?.focus()
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") void acknowledge(note)
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [appointment])
 
   async function acceptInvite(note: AppNotification) {
     const invite = campaignInvite(note)
@@ -94,6 +145,21 @@ export function NotificationBell() {
       }
     } catch (error: unknown) {
       if (mounted.current) setErrors(presentError(error, "inviteAcceptFailed"))
+    } finally {
+      if (mounted.current) setPending(false)
+    }
+  }
+
+  async function acknowledge(note: AppNotification) {
+    if (pending) return
+    setPending(true)
+    try {
+      await markNotificationRead(note.id)
+      await refresh()
+      const battle = campaignBattle(note)
+      if (battle && mounted.current) navigate(`/campanas/${battle.id}`)
+    } catch (error: unknown) {
+      if (mounted.current) setErrors(presentError(error, "notificationsLoadFailed"))
     } finally {
       if (mounted.current) setPending(false)
     }
@@ -145,13 +211,19 @@ export function NotificationBell() {
           <ul className="notification-list">
             {rows.map((note) => {
               const invite = campaignInvite(note)
+              const admin = campaignAdmin(note)
+              const battle = campaignBattle(note)
               return (
                 <li key={note.id} className={note.read ? undefined : "is-unread"}>
                   <div>
                     <p className="notification-item-title">
                       {invite
                         ? t("notificationCampaignInvite", { name: invite.name })
-                        : t("notificationGeneric")}
+                        : admin
+                          ? t("notificationCampaignAdmin", { name: admin.name })
+                          : battle
+                            ? t("notificationCampaignBattle", { name: battle.name })
+                            : t("notificationGeneric")}
                     </p>
                     {!note.read ? <span className="notification-new">{t("notificationUnread")}</span> : null}
                   </div>
@@ -190,6 +262,38 @@ export function NotificationBell() {
           </ul>
         </div>
       ) : null}
+      {ceremony
+        ? createPortal(
+            <div className="appoint-modal">
+              <div className="appoint-panel" role="dialog" aria-modal="true" aria-labelledby="appoint-title">
+                <img
+                  className={ceremony.kind === "battle" ? "is-battle" : undefined}
+                  src={ceremony.kind === "battle" ? "/battle-opened.jpg" : "/commander-appointed.jpg"}
+                  alt=""
+                />
+                <div className="appoint-copy">
+                  <h2 id="appoint-title">
+                    {ceremony.kind === "battle" ? t("battleOpenedTitle") : t("adminAppointedTitle")}
+                  </h2>
+                  <p>
+                    {ceremony.kind === "battle"
+                      ? t("battleOpenedBody", { name: ceremony.name })
+                      : t("adminAppointedBody", { name: ceremony.name })}
+                  </p>
+                  <button
+                    ref={closeAppointed}
+                    type="button"
+                    disabled={pending}
+                    onClick={() => { void acknowledge(ceremony.note) }}
+                  >
+                    {ceremony.kind === "battle" ? t("battleOpenedClose") : t("adminAppointedClose")}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

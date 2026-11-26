@@ -298,9 +298,10 @@ export type CampaignMember = {
   faction: string
   color: string
   ready: boolean
+  orders_locked: boolean
 }
 
-export type CampaignHex = ({ known: true; owner_id: string | null } & MapCell)
+export type CampaignHex = ({ known: true; owner_id: string | null; sight: boolean } & MapCell)
   | { q: number; r: number; known: false }
 
 export type IdentityOptions = {
@@ -344,6 +345,19 @@ export type CampaignArmy = {
   race: string
   anonymous: boolean
   destroyed: boolean
+  paid: number
+}
+
+export type CampaignBattle = {
+  id: string
+  q: number
+  r: number
+  army_ids: string[]
+  players: string[]
+  result: string | null
+  reverted: boolean
+  due: boolean
+  conflict: boolean
 }
 
 export type CampaignDetail = {
@@ -360,6 +374,21 @@ export type CampaignDetail = {
   hexes: CampaignHex[]
   fortresses: { q: number; r: number; player_id: string }[]
   armies: CampaignArmy[]
+  battles: CampaignBattle[]
+  orders: Record<string, { q: number; r: number }[]>
+  playback: {
+    turn: number
+    moves: {
+      army_id: string
+      from: { q: number; r: number }
+      steps: { q: number; r: number }[]
+      lost?: boolean
+      kind?: "army" | "explorer"
+      faction?: string
+      color?: string
+      name?: string
+    }[]
+  }
   chronicle: ChronicleEntry[]
   road_ready: string[]
   lobby_ready: string[]
@@ -369,7 +398,7 @@ export type CampaignDetail = {
 export const DEFAULT_CAMPAIGN_RULES: CampaignRules = {
   seats: 2,
   armies: 1,
-  movement: 3,
+  movement: 2,
   // Small table disk (radius 9). Tiny disks like 19 cannot host fortresses.
   map_size: 271,
   visibility: "home",
@@ -505,6 +534,7 @@ function readMember(value: unknown): CampaignMember | null {
   const record = value as Record<string, unknown>
   const { player_id, alias, role, status, faction, color } = record
   const ready = record.ready === true
+  const orders_locked = record.orders_locked === true
   if (
     typeof player_id !== "string" ||
     player_id.length === 0 ||
@@ -524,7 +554,7 @@ function readMember(value: unknown): CampaignMember | null {
   ) {
     return null
   }
-  return { player_id, alias, role, status, faction, color, ready }
+  return { player_id, alias, role, status, faction, color, ready, orders_locked }
 }
 
 function readCampaignHex(value: unknown): CampaignHex | null {
@@ -538,9 +568,11 @@ function readCampaignHex(value: unknown): CampaignHex | null {
     !Object.hasOwn(GROUND_LABEL, value.ground) || !("road" in value) || typeof value.road !== "boolean" ||
     !("bridge" in value) || typeof value.bridge !== "boolean" || !("owner_id" in value) ||
     (value.owner_id !== null && readLabel(value.owner_id, 64) === undefined)) return null
+  const sight = (value as { sight?: unknown }).sight !== false
   return {
     ...spot, known: true, ground: value.ground, road: value.road, bridge: value.bridge,
     owner_id: value.owner_id === null ? null : String(value.owner_id),
+    sight,
   }
 }
 
@@ -636,11 +668,70 @@ function readDetailCampaign(value: unknown): CampaignDetail | null {
     hexes,
     fortresses,
     armies,
+    battles: readBattles(record.battles, members),
+    orders: readOrders(record.orders),
+    playback: readPlayback(record.playback),
     chronicle: record.phase === "finished" ? readChronicle(record.chronicle) : [],
     road_ready: road_ready ?? [],
     lobby_ready: lobby_ready ?? [],
     roads: record.phase === "preparing" ? roads : null,
   }
+}
+
+function readOrders(value: unknown): CampaignDetail["orders"] {
+  if (!value || typeof value !== "object") return {}
+  const orders: CampaignDetail["orders"] = {}
+  for (const [id, path] of Object.entries(value as Record<string, unknown>)) {
+    if (!readLabel(id, 64) || !Array.isArray(path) || path.length > 64) continue
+    const steps: { q: number; r: number }[] = []
+    let valid = true
+    for (const step of path) {
+      const spot = readSpot(step)
+      if (!spot) {
+        valid = false
+        break
+      }
+      steps.push(spot)
+    }
+    if (valid) orders[id] = steps
+  }
+  return orders
+}
+
+function readPlayback(value: unknown): CampaignDetail["playback"] {
+  if (!value || typeof value !== "object") return { turn: 0, moves: [] }
+  const record = value as Record<string, unknown>
+  const turn = readInt(record.turn, 0, 1_000_000) ?? 0
+  if (!Array.isArray(record.moves)) return { turn, moves: [] }
+  const moves: CampaignDetail["playback"]["moves"] = []
+  for (const item of record.moves) {
+    if (!item || typeof item !== "object") continue
+    const row = item as Record<string, unknown>
+    const army_id = readLabel(row.army_id, 64)
+    const from = readSpot(row.from)
+    if (!army_id || !from || !Array.isArray(row.steps) || row.steps.length > 64) continue
+    const steps: { q: number; r: number }[] = []
+    let valid = true
+    for (const step of row.steps) {
+      const spot = readSpot(step)
+      if (!spot) {
+        valid = false
+        break
+      }
+      steps.push(spot)
+    }
+    if (!valid || steps.length === 0) continue
+    const move: CampaignDetail["playback"]["moves"][number] = { army_id, from, steps }
+    if (row.lost === true) {
+      move.lost = true
+      move.kind = row.kind === "explorer" ? "explorer" : "army"
+      move.faction = readLabel(row.faction, 40) ?? ""
+      move.color = typeof row.color === "string" && /^#[0-9a-f]{6}$/.test(row.color) ? row.color : ""
+      move.name = typeof row.name === "string" && row.name.length <= 40 ? row.name : ""
+    }
+    moves.push(move)
+  }
+  return { turn, moves }
 }
 
 function readCampaignArmy(value: unknown, members: CampaignMember[]): CampaignArmy | null {
@@ -664,6 +755,7 @@ function readCampaignArmy(value: unknown, members: CampaignMember[]): CampaignAr
       race: "",
       anonymous: true,
       destroyed: false,
+      paid: 0,
     }
   }
   const player_id = readLabel(record.player_id, 64)
@@ -681,6 +773,7 @@ function readCampaignArmy(value: unknown, members: CampaignMember[]): CampaignAr
     race,
     anonymous: false,
     destroyed: record.destroyed,
+    paid: readInt(record.paid, 0, 99) ?? 0,
   }
 }
 
@@ -1030,6 +1123,73 @@ export async function restoreCampaignMember(
   return campaign
 }
 
+function readBattles(value: unknown, members: CampaignMember[]): CampaignBattle[] {
+  if (!Array.isArray(value)) return []
+  const battles: CampaignBattle[] = []
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue
+    const row = item as Record<string, unknown>
+    const id = readLabel(row.id, 64)
+    const spot = readSpot(row)
+    if (!id || !spot || !Array.isArray(row.players) || row.players.length > 8) continue
+    const players = row.players.flatMap((player) =>
+      typeof player === "string" && members.some((member) => member.player_id === player) ? [player] : [],
+    )
+    if (players.length === 0) continue
+    const result = row.result === null
+      ? null
+      : typeof row.result === "string" && (row.result === "draw" || players.includes(row.result))
+        ? row.result
+        : null
+    battles.push({
+      id,
+      q: spot.q,
+      r: spot.r,
+      army_ids: Array.isArray(row.army_ids)
+        ? row.army_ids.flatMap((armyId) =>
+          typeof armyId === "string" && armyId.length > 0 && armyId.length <= 64 ? [armyId] : [],
+        )
+        : [],
+      players,
+      result,
+      reverted: row.reverted === true,
+      due: row.due === true,
+      conflict: row.conflict === true,
+    })
+  }
+  return battles
+}
+
+async function postCampaignAction(id: string, path: string, body: object): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(await request(`/api/campaigns/${encodeURIComponent(id)}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...csrfHeaders() },
+    body: JSON.stringify(body),
+  }))
+  if (!campaign) throw new ApiError(200, {})
+  return campaign
+}
+
+export async function promoteCampaignMember(
+  id: string, revision: number, playerId: string,
+): Promise<CampaignDetail> {
+  return postCampaignAction(id, "/admins", { revision, player_id: playerId })
+}
+
+export async function revertCampaignTurn(id: string, revision: number): Promise<CampaignDetail> {
+  return postCampaignAction(id, "/revert", { revision })
+}
+
+export async function closeCampaignOrders(id: string, revision: number): Promise<CampaignDetail> {
+  return postCampaignAction(id, "/orders/close", { revision })
+}
+
+export async function judgeCampaignBattle(
+  id: string, battleId: string, revision: number, result: string,
+): Promise<CampaignDetail> {
+  return postCampaignAction(id, `/battles/${encodeURIComponent(battleId)}/judge`, { revision, result })
+}
+
 export async function expelCampaignMember(
   id: string,
   revision: number,
@@ -1075,6 +1235,32 @@ export async function identityOptions(): Promise<IdentityOptions> {
   if (new Set(factions.map(item => item.id)).size !== factions.length ||
     new Set(colors.map(item => item.value)).size !== colors.length) throw new ApiError(200, {})
   return { factions, colors }
+}
+
+export async function lockCampaignOrders(
+  id: string,
+  revision: number,
+  orders: Record<string, { q: number; r: number }[]>,
+): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(await request(`/api/campaigns/${encodeURIComponent(id)}/orders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...csrfHeaders() },
+    body: JSON.stringify({ revision, orders }),
+  }))
+  if (!campaign) throw new ApiError(200, {})
+  return campaign
+}
+
+export async function claimCampaignColor(
+  id: string, revision: number, color: string,
+): Promise<CampaignDetail> {
+  const campaign = readDetailCampaign(await request(`/api/campaigns/${encodeURIComponent(id)}/color`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...csrfHeaders() },
+    body: JSON.stringify({ revision, color }),
+  }))
+  if (!campaign) throw new ApiError(200, {})
+  return campaign
 }
 
 export async function saveIdentity(

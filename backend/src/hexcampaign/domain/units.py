@@ -6,8 +6,8 @@ from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.terrain import Plot, gaze_from
 
 KINDS = frozenset({"army", "explorer"})
-EXPLORER_MOVE_BONUS = 4
-EXPLORER_GAZE_BONUS = 5
+EXPLORER_MOVE_BONUS = 2
+EXPLORER_GAZE_BONUS = 1
 
 
 class _Kinded(Protocol):

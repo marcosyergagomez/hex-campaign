@@ -20,7 +20,7 @@ from hexcampaign.domain.game import (
     seated,
 )
 from hexcampaign.domain.hexes import DISK_RADIUS, Hex, angle, disk, distance, neighbors
-from hexcampaign.domain.identity import checked_identity
+from hexcampaign.domain.identity import checked_color, checked_identity
 from hexcampaign.domain.land import home_radius, owned
 from hexcampaign.domain.phases import open_first_turn, open_preparation
 from hexcampaign.domain.rules import Rules, campaign_description, campaign_name, label, roster_text
@@ -132,6 +132,24 @@ def choose_identity(game: Game, actor: str, faction: str, color: str) -> Game:
         raise DomainError("color_taken")
     member.faction, member.color = faction, color
     # Changing the banner after marking ready puts the seat back in drafting.
+    game.lobby_ready.discard(actor)
+    return bump(game)
+
+
+def claim_color(game: Game, actor: str, color: str) -> Game:
+    """Reserve a territory colour before the race is chosen. The other seats see it at once."""
+    member = require_player(game, actor)
+    require_phase(game, "recruiting", "placing", "preparing", "orders", "battles")
+    if member.status != "active":
+        raise DomainError("forbidden")
+    if game.phase != "recruiting" and member.color:
+        raise DomainError("phase_invalid")
+    color = checked_color(color)
+    if any(other.player_id != actor and other.color == color for other in game.members):
+        raise DomainError("color_taken")
+    if member.color == color:
+        return game
+    member.color = color
     game.lobby_ready.discard(actor)
     return bump(game)
 

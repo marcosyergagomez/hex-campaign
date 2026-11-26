@@ -1,5 +1,11 @@
 import { useEffect, useRef, type ReactNode } from "react"
 
+export type LiveSeat = {
+  player_id: string
+  color: string
+  ready: boolean
+}
+
 export type LiveEvent =
   | { type: "ready" }
   | { type: "reconnect" }
@@ -10,11 +16,25 @@ export type LiveEvent =
       campaign_id: string
       revision: number
       phase: string
+      seats: LiveSeat[]
     }
 
 type LiveHandler = (event: LiveEvent) => void
 
-const handlers = new Set<LiveHandler>()
+type LiveScope = {
+  handlers: Set<LiveHandler>
+  source: EventSource | null
+}
+
+const SCOPE_KEY = "__hexcampaignLive"
+
+function scope(): LiveScope {
+  const host = globalThis as typeof globalThis & { [SCOPE_KEY]?: LiveScope }
+  if (!host[SCOPE_KEY]) host[SCOPE_KEY] = { handlers: new Set(), source: null }
+  return host[SCOPE_KEY]
+}
+
+const handlers = scope().handlers
 
 export function subscribeLive(handler: LiveHandler): () => void {
   handlers.add(handler)
@@ -27,6 +47,22 @@ function emit(event: LiveEvent) {
   for (const handler of handlers) {
     handler(event)
   }
+}
+
+function readSeats(value: unknown): LiveSeat[] {
+  if (!Array.isArray(value)) return []
+  const seats: LiveSeat[] = []
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue
+    const row = item as Record<string, unknown>
+    const color = row.color
+    if (typeof row.player_id !== "string" || typeof color !== "string" || typeof row.ready !== "boolean") {
+      continue
+    }
+    if (color !== "" && !/^#[0-9a-fA-F]{6}$/.test(color)) continue
+    seats.push({ player_id: row.player_id, color, ready: row.ready })
+  }
+  return seats
 }
 
 function readEvent(raw: string): LiveEvent | null {
@@ -56,6 +92,7 @@ function readEvent(raw: string): LiveEvent | null {
         campaign_id: data.campaign_id,
         revision: data.revision,
         phase: data.phase,
+        seats: readSeats(data.seats),
       }
     }
   } catch {
@@ -85,6 +122,7 @@ export function LiveConnection({ active }: { active: boolean }): ReactNode {
       source.current?.close()
       const stream = new EventSource("/api/events")
       source.current = stream
+      scope().source = stream
 
       stream.onmessage = (message) => {
         const event = readEvent(message.data)
@@ -103,6 +141,7 @@ export function LiveConnection({ active }: { active: boolean }): ReactNode {
       stream.onerror = () => {
         stream.close()
         if (source.current === stream) source.current = null
+        if (scope().source === stream) scope().source = null
         if (closed) return
         window.clearTimeout(retryTimer)
         const delay = Math.min(15000, 1500 * 2 ** Math.min(attempt, 3))
@@ -115,10 +154,19 @@ export function LiveConnection({ active }: { active: boolean }): ReactNode {
     return () => {
       closed = true
       window.clearTimeout(retryTimer)
+      if (scope().source === source.current) scope().source = null
       source.current?.close()
       source.current = null
     }
   }, [active])
 
   return null
+}
+
+const openStream = scope().source
+if (openStream) {
+  openStream.onmessage = (message) => {
+    const event = readEvent(message.data)
+    if (event) emit(event)
+  }
 }
