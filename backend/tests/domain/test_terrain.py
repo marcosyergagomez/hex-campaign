@@ -409,6 +409,47 @@ def test_the_old_disk_is_not_a_generated_terrain_map() -> None:
         generate(400, 4, random.Random(1))
 
 
+def test_a_drawn_map_may_keep_only_a_subset_of_the_disk() -> None:
+    from hexcampaign.domain.map_document import drawn
+
+    board = list(disk(271))[:40]
+    cells = [
+        {"q": cell.q, "r": cell.r, "ground": "llanura", "road": False, "bridge": False}
+        for cell in board
+    ]
+    fort = board[0]
+    other = board[10]
+    template = drawn(
+        271,
+        cells,
+        [{"q": fort.q, "r": fort.r}, {"q": other.q, "r": other.r}],
+    )
+    assert len(template.cells) == 40
+    assert template.seats == 2
+    assert not template.generated
+    game = create_game("Isla", _table(map_size=271, seats=2), "ana", "Ana")
+    lay(game, template, surveyor=None)
+    assert set(game.hexes) == set(board)
+    assert len(game.plots) == 40
+
+
+def test_a_drawn_map_rejects_a_lone_fortress_or_cells_outside_the_disk() -> None:
+    from hexcampaign.domain.map_document import drawn
+
+    cells = [
+        {"q": cell.q, "r": cell.r, "ground": "llanura", "road": False, "bridge": False}
+        for cell in list(disk(271))[:12]
+    ]
+    with pytest.raises(DomainError):
+        drawn(271, cells, [{"q": cells[0]["q"], "r": cells[0]["r"]}])
+    with pytest.raises(DomainError):
+        drawn(
+            271,
+            cells + [{"q": 60, "r": 0, "ground": "llanura", "road": False, "bridge": False}],
+            [],
+        )
+
+
 @pytest.mark.parametrize(("size", "count"), [(271, 19), (397, 28), (547, 38)])
 def test_the_copy_starts_each_player_on_their_own_disk(size: int, count: int) -> None:
     game = create_game("Norte", _table(map_size=size), "ana", "Ana")
