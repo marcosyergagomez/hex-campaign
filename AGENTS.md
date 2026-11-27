@@ -26,6 +26,9 @@ Si el código y el documento de `docs/` dicen cosas distintas, actualiza los dos
 
 ## Límites
 
+Antes de modificar más de 3 archivos o alterar un contrato entre backend y frontend,
+presenta el plan de archivos y espera confirmación.
+
 `hexcampaign.domain` permanece libre de Django, FastAPI y Django REST framework. Lo vigila `backend/tests/domain/test_boundaries.py`. Un caso de juego nuevo entra primero en el dominio. La API y la pantalla solo lo adaptan.
 
 Un proceso sirve los dos frameworks. El navegador habla solo con FastAPI.
