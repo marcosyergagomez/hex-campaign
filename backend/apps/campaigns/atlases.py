@@ -11,8 +11,9 @@ from hexcampaign.domain.map_document import drawn, dump_template, load_template
 from hexcampaign.domain.maps import generate
 from hexcampaign.domain.rules import campaign_name
 
+from .access import _actor
+from .errors import CampaignError
 from .models import CampaignMap
-from .records import CampaignError, _actor
 
 # Keeps atlas storage bounded per account; campaigns already copy the ground.
 _MAP_LIMIT = 40
@@ -124,7 +125,7 @@ def copy_for_edit(user, map_id: str, name: str | None = None) -> CampaignMap:
 
 
 def list_maps(user) -> list[dict[str, object]]:
-    rows = CampaignMap.objects.filter(owner=user).defer("document")
+    rows = CampaignMap.objects.filter(owner=user).only("id", "name", "size", "seats", "generated")
     return [
         {
             "id": str(row.id),

@@ -4,7 +4,7 @@ The JSON API stays in Spanish. These texts follow the language cookie the
 browser sends, and fall back to Spanish when it is missing or unknown.
 """
 
-from typing import Literal
+from typing import Literal, cast
 
 Language = Literal["en", "es", "fr", "it", "de"]
 LANGUAGES: tuple[Language, ...] = ("en", "es", "fr", "it", "de")
@@ -35,6 +35,15 @@ _CATALOG: dict[Language, _Copy] = {
         "confirmed": "Email confirmed.",
         "password_mismatch": "The password does not match.",
         "language": "Language",
+        "reset_subject": "Reset your password",
+        "reset_intro": "Reset your Hex Campaign password.",
+        "reset_expires": "The link expires in 2 hours and can be used only once.",
+        "reset_ignore": "If you did not ask to reset your password, ignore this message.",
+        "reset_title": "New password",
+        "reset_lead": "Choose a new password of 12 to 128 characters.",
+        "reset_button": "Save password",
+        "reset_done": "Password updated. You can sign in.",
+        "password_invalid": "The password is not valid.",
     },
     "es": {
         "email_subject": "Confirma tu correo",
@@ -53,6 +62,15 @@ _CATALOG: dict[Language, _Copy] = {
         "confirmed": "Correo confirmado.",
         "password_mismatch": "La contraseña no coincide.",
         "language": "Idioma",
+        "reset_subject": "Restablece tu contraseña",
+        "reset_intro": "Restablece tu contraseña de Hex Campaign.",
+        "reset_expires": "El enlace caduca a las 2 horas y solo puede usarse una vez.",
+        "reset_ignore": "Si no has pedido restablecer la contraseña, ignora este mensaje.",
+        "reset_title": "Nueva contraseña",
+        "reset_lead": "Elige una contraseña nueva de 12 a 128 caracteres.",
+        "reset_button": "Guardar contraseña",
+        "reset_done": "Contraseña actualizada. Ya puedes entrar.",
+        "password_invalid": "La contraseña no es válida.",
     },
     "fr": {
         "email_subject": "Confirme ton e-mail",
@@ -69,6 +87,15 @@ _CATALOG: dict[Language, _Copy] = {
         "confirmed": "E-mail confirmé.",
         "password_mismatch": "Le mot de passe ne correspond pas.",
         "language": "Langue",
+        "reset_subject": "Réinitialise ton mot de passe",
+        "reset_intro": "Réinitialise ton mot de passe Hex Campaign.",
+        "reset_expires": "Le lien expire au bout de 2 heures et ne peut servir qu'une fois.",
+        "reset_ignore": "Si tu n'as pas demandé cette réinitialisation, ignore ce message.",
+        "reset_title": "Nouveau mot de passe",
+        "reset_lead": "Choisis un mot de passe de 12 à 128 caractères.",
+        "reset_button": "Enregistrer le mot de passe",
+        "reset_done": "Mot de passe mis à jour. Tu peux entrer.",
+        "password_invalid": "Le mot de passe n'est pas valide.",
     },
     "it": {
         "email_subject": "Conferma l'e-mail",
@@ -85,6 +112,15 @@ _CATALOG: dict[Language, _Copy] = {
         "confirmed": "E-mail confermata.",
         "password_mismatch": "La password non coincide.",
         "language": "Lingua",
+        "reset_subject": "Reimposta la password",
+        "reset_intro": "Reimposta la password di Hex Campaign.",
+        "reset_expires": "Il link scade dopo 2 ore e si può usare una sola volta.",
+        "reset_ignore": "Se non hai chiesto di reimpostare la password, ignora questo messaggio.",
+        "reset_title": "Nuova password",
+        "reset_lead": "Scegli una password di 12-128 caratteri.",
+        "reset_button": "Salva la password",
+        "reset_done": "Password aggiornata. Ora puoi entrare.",
+        "password_invalid": "La password non è valida.",
     },
     "de": {
         "email_subject": "Bestätige deine E-Mail",
@@ -103,6 +139,17 @@ _CATALOG: dict[Language, _Copy] = {
         "confirmed": "E-Mail bestätigt.",
         "password_mismatch": "Das Passwort stimmt nicht.",
         "language": "Sprache",
+        "reset_subject": "Passwort zurücksetzen",
+        "reset_intro": "Setze dein Hex-Campaign-Passwort zurück.",
+        "reset_expires": "Der Link läuft nach 2 Stunden ab und gilt nur einmal.",
+        "reset_ignore": (
+            "Wenn du das Zurücksetzen nicht angefordert hast, ignoriere diese Nachricht."
+        ),
+        "reset_title": "Neues Passwort",
+        "reset_lead": "Wähle ein Passwort mit 12 bis 128 Zeichen.",
+        "reset_button": "Passwort speichern",
+        "reset_done": "Passwort aktualisiert. Du kannst dich anmelden.",
+        "password_invalid": "Das Passwort ist ungültig.",
     },
 }
 
@@ -110,12 +157,14 @@ _FROM_SPANISH = {
     "El enlace no es válido o ha caducado.": "invalid_link",
     "Correo confirmado.": "confirmed",
     "La contraseña no coincide.": "password_mismatch",
+    "La contraseña no es válida.": "password_invalid",
+    "Contraseña actualizada. Ya puedes entrar.": "reset_done",
 }
 
 
 def normalize(value: str | None) -> Language:
-    if value == "en" or value == "es" or value == "fr" or value == "it" or value == "de":
-        return value
+    if value in {"en", "es", "fr", "it", "de"}:
+        return cast(Language, value)
     return "es"
 
 
@@ -128,6 +177,22 @@ def present(language: str | None, message: str) -> str:
     if key is None:
         return message
     return phrase(language, key)
+
+
+def reset_mail(language: str | None, link: str) -> tuple[str, str]:
+    subject = phrase(language, "reset_subject")
+    body = "\n".join(
+        (
+            phrase(language, "reset_intro"),
+            "",
+            link,
+            "",
+            phrase(language, "reset_expires"),
+            phrase(language, "reset_ignore"),
+            "",
+        )
+    )
+    return subject, body
 
 
 def confirmation_mail(language: str | None, link: str) -> tuple[str, str]:

@@ -1,12 +1,15 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
-import type { CampaignDetail } from "../../api"
-import type { Spot } from "./orders"
+import type { CampaignDetail, CampaignHex } from "../../api"
+import { exitCostOf, spotKey, type Spot } from "./orders"
 
-export const STEP_MS = 680
+/** Milliseconds spent paying one movement point. A harder exit takes longer. */
+export const HOP_MS = 440
 
 const filmHolds = new Set<string>()
 const filmListeners = new Set<() => void>()
+
+export type MarchPath = { id: string; spots: Spot[]; costs: number[] }
 
 export function battleFilmHeld(campaignId: string): boolean {
   return filmHolds.has(campaignId)
@@ -28,52 +31,84 @@ export function setBattleFilm(campaignId: string, playing: boolean): void {
   }
 }
 
+export function marchMs(costs: number[]): number {
+  const points = costs.reduce((sum, cost) => sum + Math.max(1, cost), 0)
+  return points * HOP_MS
+}
+
+function leaveCosts(spots: Spot[], hexes: CampaignHex[]): number[] {
+  const plots = new Map(hexes.map((cell) => [
+    spotKey(cell),
+    cell.known
+      ? { known: true as const, ground: cell.ground, road: cell.road, bridge: cell.bridge }
+      : { known: false as const },
+  ]))
+  return spots.slice(0, -1).map((spot) => exitCostOf(plots.get(spotKey(spot))))
+}
+
+function trail(from: Spot, steps: Spot[]): Spot[] {
+  const spots: Spot[] = []
+  for (const spot of [from, ...steps]) {
+    const prev = spots[spots.length - 1]
+    if (prev && prev.q === spot.q && prev.r === spot.r) continue
+    spots.push(spot)
+  }
+  return spots
+}
+
 /** Replay the resolved march once per turn, from the hex each token left. */
 export function useMarchFilm(campaign: CampaignDetail | null): {
   playing: boolean
-  spots: Record<string, Spot> | null
+  paths: MarchPath[] | null
+  canReplay: boolean
+  replay: () => void
 } {
-  const moves = campaign?.playback.moves ?? []
-  const max = moves.reduce((longest, move) => Math.max(longest, move.steps.length), 0)
-  const signature = campaign
-    ? `${campaign.id}:${campaign.playback.turn}:${moves.length}:${max}`
+  const turn = campaign?.playback.turn ?? 0
+  const moves = campaign?.playback.moves
+  const hexes = campaign?.hexes
+  const paths = useMemo(() => {
+    if (!moves || !hexes) return []
+    return moves.flatMap((move) => {
+      const spots = trail(move.from, move.steps)
+      if (spots.length < 2) return []
+      const costs = move.costs && move.costs.length === spots.length - 1
+        ? move.costs
+        : leaveCosts(spots, hexes)
+      return [{ id: move.army_id, spots, costs }]
+    })
+  }, [moves, hexes])
+  const signature = campaign && paths.length > 0
+    ? `${campaign.id}:${turn}:${paths.map((path) => `${path.id}:${path.spots.length}`).join(",")}`
     : ""
-  const storageKey = campaign && campaign.playback.turn > 0
-    ? `hex-march:${campaign.id}:${campaign.playback.turn}`
-    : ""
+  const storageKey = signature ? `hex-march:${signature}` : ""
   const seen = storageKey !== "" && sessionStorage.getItem(storageKey) === "1"
-  // Abonos sin cambio de hex no deben bloquear la mesa con una película vacía.
-  const wanted = Boolean(
-    campaign && campaign.playback.turn > 0 && moves.length > 0 && max > 0 && !seen,
-  )
-  const [play, setPlay] = useState({ key: "", frame: 0, done: "" })
+  const wanted = signature !== "" && !seen
+  const [play, setPlay] = useState({ key: "", done: "" })
   if (wanted && play.key !== signature) {
-    setPlay({ key: signature, frame: 0, done: "" })
+    setPlay({ key: signature, done: "" })
   }
   const playing = wanted && play.done !== signature
-  const frame = play.key === signature ? play.frame : 0
+  const duration = paths.reduce((longest, path) => Math.max(longest, marchMs(path.costs)), 0)
 
   useEffect(() => {
-    if (!playing || max === 0 || frame >= max) return
+    if (!playing || !storageKey) return
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
     const timer = window.setTimeout(() => {
-      setPlay((current) =>
-        current.key === signature ? { ...current, frame: current.frame + 1 } : current,
-      )
-    }, STEP_MS)
+      sessionStorage.setItem(storageKey, "1")
+      setPlay((current) => (current.key === signature ? { ...current, done: signature } : current))
+    }, reduced ? 32 : duration + 32)
     return () => window.clearTimeout(timer)
-  }, [playing, frame, max, signature])
+  }, [playing, duration, storageKey, signature])
 
-  useEffect(() => {
-    if (!playing || !storageKey || frame < max) return
-    sessionStorage.setItem(storageKey, "1")
-    setPlay((current) => (current.key === signature ? { ...current, done: signature } : current))
-  }, [playing, frame, max, storageKey, signature])
+  const replay = useCallback(() => {
+    if (!signature) return
+    setPlay((current) => {
+      if (current.key === signature && current.done !== signature) return current
+      if (storageKey) sessionStorage.removeItem(storageKey)
+      return { key: signature, done: "" }
+    })
+  }, [signature, storageKey])
 
-  if (!playing) return { playing: false, spots: null }
-  const spots: Record<string, Spot> = {}
-  for (const move of moves) {
-    const index = Math.min(frame, move.steps.length) - 1
-    spots[move.army_id] = index < 0 ? move.from : move.steps[index]
-  }
-  return { playing: true, spots }
+  if (!playing) return { playing: false, paths: null, canReplay: signature !== "", replay }
+  return { playing: true, paths, canReplay: false, replay }
 }

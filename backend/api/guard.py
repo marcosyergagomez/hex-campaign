@@ -7,11 +7,13 @@ password hasher.
 """
 
 import json
+import logging
 from collections.abc import Awaitable, Callable
 
 from django.conf import settings
 from starlette.datastructures import MutableHeaders
 
+from api.client_address import client_address
 from api.pages import result_page
 from apps.accounts.throttle import account_posts
 
@@ -26,14 +28,24 @@ _BODY_LIMITED = {
     "/api/session",
     "/api/session/logout",
     "/api/profile",
+    "/api/password-reset",
+    "/api/password-reset/confirm",
 }
 # Auth signup/confirm stay tightly capped. Gameplay posts (roads, orders) are
 # frequent, so they use a separate higher ceiling instead of the account budget.
-_ACCOUNT_LIMITED = {"/api/users", "/api/users/verify-email", "/api/profile"}
+_ACCOUNT_LIMITED = {
+    "/api/users",
+    "/api/users/verify-email",
+    "/api/profile",
+    "/api/password-reset",
+    "/api/password-reset/confirm",
+}
 _PLAY_PREFIXES = ("/api/campaigns", "/api/maps", "/api/invitations")
 _MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _TOO_MANY = "Demasiados intentos. Prueba de nuevo en unos minutos."
 _TOO_LARGE = "La solicitud es demasiado grande."
+log = logging.getLogger("hexcampaign.http")
+
 _SECURITY_HEADERS = {
     "cache-control": "no-store",
     "referrer-policy": "no-referrer",
@@ -66,13 +78,8 @@ def _normalized_path(path: str) -> str:
     return path
 
 
-def _client_host(scope: Scope) -> str:
-    client = scope.get("client")
-    return client[0] if client else "-"
-
-
 def _client_key(scope: Scope) -> str:
-    return f"{_client_host(scope)} {_normalized_path(scope.get('path', ''))}"
+    return f"{client_address(scope)} {_normalized_path(scope.get('path', ''))}"
 
 
 def _allow_post(key: str, *, limit: int, window: int) -> bool:
@@ -117,7 +124,7 @@ def _error_field(path: str) -> str:
         return "credentials"
     if normalized.startswith("/api/profile"):
         return "alias"
-    if normalized.startswith("/api/campaigns") or normalized.startswith("/api/invitations"):
+    if normalized.startswith(("/api/campaigns", "/api/invitations")):
         return "campaign"
     if normalized.startswith("/api/maps"):
         return "map"
@@ -143,7 +150,7 @@ async def _reject(send: Send, scope: Scope, status: int, message: str) -> None:
 def _body_limit(path: str) -> int | None:
     if path in _BODY_LIMITED:
         return _ACCOUNT_BODY
-    if path.startswith("/api/campaigns") or path.startswith("/api/invitations"):
+    if path.startswith(("/api/campaigns", "/api/invitations")):
         return _CAMPAIGN_BODY
     if path.startswith("/api/maps"):
         return _MAP_BODY
@@ -160,7 +167,17 @@ class AccountGuard:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        try:
+            await self._http(scope, receive, send)
+        except Exception:
+            log.exception(
+                "api request failed method=%s path=%s",
+                scope.get("method", ""),
+                _normalized_path(str(scope.get("path", ""))),
+            )
+            raise
 
+    async def _http(self, scope: Scope, receive: Receive, send: Send) -> None:
         path = _normalized_path(scope.get("path", ""))
         if path == "/api/docs" or path.startswith("/api/docs/"):
             await self.app(scope, receive, send)
@@ -183,16 +200,18 @@ class AccountGuard:
             if budget is not None and not _allow_post(
                 _client_key(scope), limit=budget[0], window=budget[1]
             ):
+                log.warning("request rejected status=429 path=%s", path)
                 await _reject(send, scope, 429, _TOO_MANY)
                 return
 
         limit = _body_limit(path)
-        if method != "POST" or limit is None:
+        if method not in {"POST", "PUT", "PATCH"} or limit is None:
             await self.app(scope, receive, send_hardened)
             return
 
         length = _header(scope, b"content-length")
         if len(length) > 8 or (length.isdigit() and int(length) > limit):
+            log.warning("request rejected status=413 path=%s", path)
             await _reject(send, scope, 413, _TOO_LARGE)
             return
 
@@ -201,6 +220,7 @@ class AccountGuard:
         except _ClientGone:
             return
         if body is None:
+            log.warning("request rejected status=413 path=%s", path)
             await _reject(send, scope, 413, _TOO_LARGE)
             return
         pending: dict | None = {"type": "http.request", "body": body, "more_body": False}

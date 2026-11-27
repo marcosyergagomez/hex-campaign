@@ -7,8 +7,8 @@ from .models import Campaign, CampaignMap, Invitation, Seat
 
 @admin.register(Campaign)
 class CampaignAdmin(admin.ModelAdmin):
-    list_display = ("name", "phase", "created_by", "updated_at")
-    readonly_fields = ("id", "created_at", "updated_at")
+    list_display = ("name", "phase", "turn", "occupied", "seat_limit", "created_by", "updated_at")
+    readonly_fields = ("id", "created_at", "updated_at", "turn", "seat_limit", "occupied")
     search_fields = ("name",)
 
 

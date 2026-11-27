@@ -8,6 +8,7 @@ import { CreateCampaignPage } from "./pages/CreateCampaignPage"
 import { MapEditorPage } from "./pages/MapEditorPage"
 import { MapsPage } from "./pages/MapsPage"
 import { LoginPage } from "./pages/LoginPage"
+import { ResetPasswordPage } from "./pages/ResetPasswordPage"
 import { ProfilePage } from "./pages/ProfilePage"
 import { RegisterPage } from "./pages/RegisterPage"
 
@@ -17,6 +18,7 @@ export function App() {
       <Route element={<Gate />}>
         <Route index element={<Navigate to="/entrar" replace />} />
         <Route path="/entrar" element={<LoginPage />} />
+        <Route path="/recuperar" element={<ResetPasswordPage />} />
         <Route path="/alta" element={<RegisterPage />} />
       </Route>
       <Route element={<AppShell />}>

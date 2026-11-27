@@ -108,7 +108,7 @@ def test_string_form_falls_back_to_the_email() -> None:
 
 @pytest.mark.django_db
 def test_manager_rejects_a_blank_email_and_a_demoted_superuser() -> None:
-    with pytest.raises(ValueError, match="An email is required."):
+    with pytest.raises(ValueError, match=r"An email is required\."):
         User.objects.create_user(
             "  ",
             "una-clave-larga",

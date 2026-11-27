@@ -17,14 +17,13 @@ def _clear_cache():
     cache.clear()
 
 
-def test_a_full_window_rejects_a_new_key_and_keeps_the_old_count() -> None:
-    window = SlidingWindow("full_window", max_keys=2)
+def test_one_key_fills_without_blocking_another() -> None:
+    window = SlidingWindow("per_key", max_keys=2)
 
     assert window.allow("a", limit=2, window_seconds=60) is True
-    assert window.allow("b", limit=2, window_seconds=60) is True
-    assert window.allow("c", limit=2, window_seconds=60) is False
     assert window.allow("a", limit=2, window_seconds=60) is True
     assert window.allow("a", limit=2, window_seconds=60) is False
+    assert window.allow("b", limit=2, window_seconds=60) is True
 
 
 def test_expired_keys_leave_room_for_a_new_client() -> None:

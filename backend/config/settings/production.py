@@ -5,7 +5,7 @@ import os
 from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F403
-from .base import CACHE_URL, DATABASES, SECRET_KEY, SESSION_PEPPER, cache_from_url
+from .base import CACHE_URL, DATABASES, SECRET_KEY, SESSION_PEPPER, TRUST_PROXY, cache_from_url
 from .guards import require_https_origin, require_secret, require_session_pepper
 
 DEBUG = False
@@ -22,6 +22,9 @@ require_secret(SECRET_KEY)
 require_session_pepper(SESSION_PEPPER)
 if not DATABASES:
     raise ImproperlyConfigured("DATABASE_URL is required.")
+DATABASES["default"]["CONN_MAX_AGE"] = 60
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+DATABASES["default"].setdefault("OPTIONS", {})["connect_timeout"] = 5
 if not CACHE_URL:
     raise ImproperlyConfigured("CACHE_URL is required (redis://… for shared rate limits).")
 CACHES = {"default": cache_from_url(CACHE_URL)}
@@ -36,3 +39,5 @@ if not os.environ.get("EMAIL_HOST"):
 if not os.environ.get("DEFAULT_FROM_EMAIL"):
     raise ImproperlyConfigured("DEFAULT_FROM_EMAIL is required.")
 API_ORIGIN = require_https_origin(os.environ.get("API_ORIGIN"))
+if TRUST_PROXY:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

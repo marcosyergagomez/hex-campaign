@@ -49,7 +49,7 @@ async def get_events(request: Request):
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=25)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": ping\n\n"
                     continue
                 yield _frame(event)

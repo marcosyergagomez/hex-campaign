@@ -10,10 +10,10 @@ from hexcampaign.domain.terrain import (
     exit_cost,
     gaze_from,
     passable,
+    road_refund,
     terrain_groups,
 )
 
-_OPEN = frozenset({"llanura", "playa", "rio"})
 _ORIGIN = Hex(0, 0)
 
 
@@ -36,7 +36,7 @@ def arrival_times(plots: dict[Hex, Plot], start: Hex, budget: int = 3) -> dict[H
         else:
             left -= need
         # Open tracks leave the village for the eye; only rough roads repay a point.
-        left += int(plots[cell].road and plots[cell].ground not in _OPEN)
+        left += road_refund(plots[cell])
         candidate = (turn, -left)
         for other in neighbors(cell):
             if other not in plots or not passable(plots[other]):

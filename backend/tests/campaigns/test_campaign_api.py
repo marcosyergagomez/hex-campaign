@@ -573,6 +573,45 @@ def test_admin_invite_creates_notification_and_guest_can_join(clients, settings)
 
 
 @pytest.mark.django_db(transaction=True)
+def test_revoked_and_declined_invites_cannot_join(clients) -> None:
+    ana, boa = clients
+    owner = _player("veto_owner@example.com", "veto_owner")
+    guest = _player("veto_guest@example.com", "veto_guest")
+    _login(ana, owner.email)
+    _login(boa, guest.email)
+    created = _write(ana, "/api/campaigns", {"name": "Veto", "rules": RULES})
+    assert created.status_code == 201, created.text
+    campaign_id = created.json()["id"]
+    invited = _write(
+        ana,
+        f"/api/campaigns/{campaign_id}/invitations",
+        {"revision": created.json()["revision"], "alias": guest.alias},
+    )
+    assert invited.status_code == 200, invited.text
+    listed = _read(ana, f"/api/campaigns/{campaign_id}/invitations")
+    assert listed.status_code == 200, listed.text
+    invitation_id = listed.json()[0]["id"]
+    revoked = _write(ana, f"/api/campaigns/{campaign_id}/invitations/{invitation_id}/revoke", {})
+    assert revoked.status_code == 204, revoked.text
+    blocked = _write(
+        boa,
+        f"/api/campaigns/{campaign_id}/join",
+        {"revision": invited.json()["revision"]},
+    )
+    assert blocked.status_code == 404
+
+    resent = _write(ana, f"/api/campaigns/{campaign_id}/invitations/{invitation_id}/resend", {})
+    assert resent.status_code == 204, resent.text
+    fresh = _read(boa, "/api/invitations")
+    assert fresh.status_code == 200, fresh.text
+    revision = fresh.json()[0]["revision"]
+    declined = _write(boa, f"/api/campaigns/{campaign_id}/invitations/decline", {})
+    assert declined.status_code == 204, declined.text
+    again = _write(boa, f"/api/campaigns/{campaign_id}/join", {"revision": revision})
+    assert again.status_code == 404
+
+
+@pytest.mark.django_db(transaction=True)
 def test_cannot_invite_player_already_in_three_running() -> None:
     from apps.campaigns.models import Campaign
     from apps.campaigns.records import invite_alias

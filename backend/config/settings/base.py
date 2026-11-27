@@ -159,6 +159,9 @@ PLAY_POST_LIMIT = int(os.environ.get("PLAY_POST_LIMIT", "180"))
 PLAY_POST_WINDOW_SECONDS = int(os.environ.get("PLAY_POST_WINDOW_SECONDS", "60"))
 ADMIN_LOGIN_LIMIT = int(os.environ.get("ADMIN_LOGIN_LIMIT", "20"))
 ADMIN_LOGIN_WINDOW_SECONDS = int(os.environ.get("ADMIN_LOGIN_WINDOW_SECONDS", "900"))
+# Turn on only behind a proxy that appends the real client to X-Forwarded-For
+# and overwrites X-Forwarded-Proto. A browser-supplied value is then not last.
+TRUST_PROXY = _env_flag("TRUST_PROXY")
 
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 30
 SESSION_COOKIE_HTTPONLY = True
@@ -167,3 +170,22 @@ SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = False
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "request_id": {"()": "api.request_id.RequestIdFilter"},
+    },
+    "formatters": {
+        "plain": {"()": "api.request_id.RequestIdFormatter"},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "plain",
+            "filters": ["request_id"],
+        },
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+}

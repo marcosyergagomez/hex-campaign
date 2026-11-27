@@ -1,5 +1,16 @@
 /** Plan a march the same way the server spends movement: you pay to leave a hex. */
 
+import {
+  EXPLORER_GAZE_BONUS,
+  EXPLORER_MOVE_BONUS,
+  exitCostOfGround,
+  gazeOf,
+  isImpassable,
+  roadRefundOf,
+} from "./terrainContract"
+
+export { EXPLORER_GAZE_BONUS, EXPLORER_MOVE_BONUS }
+
 export type Spot = { q: number; r: number }
 
 export type OrderPlot = {
@@ -18,25 +29,6 @@ const STEPS: Spot[] = [
   { q: 0, r: 1 },
 ]
 
-const IMPASSABLE = new Set(["montana_rocosa", "lago", "acantilado"])
-const EXIT: Record<string, number> = {
-  llanura: 1,
-  colina: 2,
-  bosque: 2,
-  bosque_profundo: 3,
-  montana: 3,
-  desierto: 1,
-  tundra: 2,
-  rio: 3,
-  pantano: 3,
-  playa: 1,
-  mina: 1,
-  campo: 1,
-}
-
-export const EXPLORER_MOVE_BONUS = 4
-export const EXPLORER_GAZE_BONUS = 5
-
 export function spotKey(spot: Spot): string {
   return `${spot.q},${spot.r}`
 }
@@ -47,8 +39,7 @@ export function moveBudget(movement: number, kind: "army" | "explorer"): number 
 
 /** How far a token sees from the ground it stands on. Mirrors the server. */
 export function gazeReach(ground: string | undefined, explorer: boolean): number {
-  const base = ground === "colina" ? 3 : ground === "montana" ? 4 : ground === "bosque_profundo" ? 0 : 2
-  return base + (explorer ? EXPLORER_GAZE_BONUS : 0)
+  return gazeOf(ground) + (explorer ? EXPLORER_GAZE_BONUS : 0)
 }
 
 /** Points to leave this hex. Unknown ground is treated as plain. */
@@ -89,13 +80,12 @@ function adjacent(left: Spot, right: Spot): boolean {
 
 function exitCost(plot: OrderPlot | undefined): number {
   if (!plot?.known) return 1
-  if (plot.road || plot.bridge) return 1
-  return EXIT[plot.ground ?? ""] ?? 1
+  return exitCostOfGround(plot.ground, plot.road === true, plot.bridge === true)
 }
 
-function refund(plot: OrderPlot | undefined): number {
-  if (!plot?.known || !plot.road || !plot.ground) return 0
-  return plot.ground === "llanura" || plot.ground === "playa" || plot.ground === "rio" ? 0 : 1
+export function roadRefund(plot: OrderPlot | undefined): number {
+  if (!plot?.known) return 0
+  return roadRefundOf(plot.ground, plot.road === true)
 }
 
 function blockedStep(spot: Spot, target: Spot, blocked: Set<string>): boolean {
@@ -115,7 +105,7 @@ function legal(
   if (!board.has(key) || blockedStep(spot, target, blocked)) return false
   if (kind === "explorer" && forts.has(key)) return false
   const plot = plots.get(key)
-  return !(plot?.known && plot.ground && IMPASSABLE.has(plot.ground))
+  return !(plot?.known && isImpassable(plot.ground))
 }
 
 function walk(
@@ -140,11 +130,25 @@ function walk(
       budget -= 1
       paid += 1
     }
-    budget += refund(stood)
+    budget += roadRefund(stood)
     paid = 0
     at = step
   }
   return { at, budget, paid, stuck: false }
+}
+
+/** How many ordered hexes this turn actually enters. The last one may stay unpaid. */
+export function stepsEntered(
+  origin: Spot,
+  path: Spot[],
+  budget: number,
+  paid: number,
+  plots: Map<string, OrderPlot>,
+): number {
+  if (path.length === 0) return 0
+  const walked = walk(origin, path, budget, paid, plots)
+  if (!walked) return 0
+  return walked.stuck ? path.length - 1 : path.length
 }
 
 function search(
@@ -191,7 +195,7 @@ function search(
       }
       if (next.q === target.q && next.r === target.r) return path
       if (input.blocked.has(spotKey(next))) continue
-      const after = left + refund(stood)
+      const after = left + roadRefund(stood)
       const mark = `${spotKey(next)}:${after}:0`
       if (seen.has(mark)) continue
       seen.add(mark)

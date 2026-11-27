@@ -10,7 +10,7 @@ from hexcampaign.domain.units import is_explorer, move_budget
 
 
 def check_terrain_order(game: Game, player_id: str, paths: dict[str, tuple[Hex, ...]]) -> None:
-    own = [army for army in living(game, player_id)]
+    own = list(living(game, player_id))
     if {army.id for army in own} != set(paths):
         raise DomainError("order_illegal")
     board = set(game.hexes)
@@ -32,7 +32,8 @@ def _reject_illegal_steps(game, player_id, own, paths, board, plots) -> None:
         if len(path) > len(board):
             raise DomainError("order_illegal")
         previous = army.at()
-        assert previous is not None
+        if previous is None:
+            raise DomainError("order_illegal")
         for index, step in enumerate(path):
             plot = plots.get(step)
             known = step in game.discovered.get(player_id, set())
@@ -65,7 +66,8 @@ def _reject_allies_in_the_way(game, own, paths, board, plots) -> None:
 
 def _walker(game: Game, army: Army, path: tuple[Hex, ...]) -> Walker:
     spot = army.at()
-    assert spot is not None
+    if spot is None:
+        raise DomainError("order_illegal")
     return Walker(
         army.id,
         army.player_id,

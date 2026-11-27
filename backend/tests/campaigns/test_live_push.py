@@ -1,7 +1,9 @@
 """Push bus delivers campaign and notification events after commits."""
 
 import asyncio
+import logging
 from datetime import date
+from unittest.mock import patch
 
 import pytest
 from django.utils import timezone
@@ -14,7 +16,6 @@ from apps.campaigns.models import Notification
 from apps.campaigns.records import accept_alias, create_campaign, invite_alias, play
 from config.asgi import application
 from hexcampaign.domain.lobby import choose_identity
-
 
 PASSWORD = "una-clave-larga"
 ORIGIN = "http://testserver"
@@ -91,7 +92,7 @@ def test_invite_pushes_notification_event(monkeypatch) -> None:
     def capture(user_ids, event):
         seen.append({"users": list(user_ids), "event": event})
 
-    monkeypatch.setattr("apps.campaigns.records.live_bus.publish_users", capture)
+    monkeypatch.setattr("apps.campaigns.access.live_bus.publish_users", capture)
 
     owner = _player("push_owner@example.com", "push_owner")
     guest = _player("push_guest@example.com", "push_guest")
@@ -109,7 +110,8 @@ def test_invite_pushes_notification_event(monkeypatch) -> None:
         for row in seen
     )
     assert any(
-        row["event"].get("type") == "campaign" and row["event"].get("campaign_id") == str(campaign.id)
+        row["event"].get("type") == "campaign"
+        and row["event"].get("campaign_id") == str(campaign.id)
         for row in seen
     )
 
@@ -121,7 +123,7 @@ def test_taking_a_color_pushes_the_campaign_to_the_other_seat(monkeypatch) -> No
     def capture(user_ids, event):
         seen.append({"users": list(user_ids), "event": event})
 
-    monkeypatch.setattr("apps.campaigns.records.live_bus.publish_users", capture)
+    monkeypatch.setattr("apps.campaigns.access.live_bus.publish_users", capture)
     owner = _player("color_owner@example.com", "color_owner")
     guest = _player("color_guest@example.com", "color_guest")
     campaign, game = create_campaign(owner, "Colores", RULES)
@@ -163,7 +165,7 @@ def test_promoting_a_player_notifies_only_that_player(monkeypatch) -> None:
     def capture(user_ids, event):
         seen.append({"users": list(user_ids), "event": event})
 
-    monkeypatch.setattr("apps.campaigns.records.live_bus.publish_users", capture)
+    monkeypatch.setattr("apps.campaigns.access.live_bus.publish_users", capture)
     owner = _player("promote_owner@example.com", "promote_owner")
     guest = _player("promote_guest@example.com", "promote_guest")
     campaign, game = create_campaign(owner, "Mando", RULES)
@@ -193,7 +195,8 @@ def test_promoting_a_player_notifies_only_that_player(monkeypatch) -> None:
         row["users"] == [guest.pk] and row["event"] == {"type": "notification"}
         for row in seen
     )
-    assert next(member.role for member in game.members if member.player_id == str(guest.pk)) == "admin"
+    guest_role = next(member.role for member in game.members if member.player_id == str(guest.pk))
+    assert guest_role == "admin"
 
     seen.clear()
     play(
@@ -217,7 +220,7 @@ def test_an_opened_battle_notifies_the_players_who_can_see_it(monkeypatch) -> No
     def capture(user_ids, event):
         seen.append({"users": list(user_ids), "event": event})
 
-    monkeypatch.setattr("apps.campaigns.records.live_bus.publish_users", capture)
+    monkeypatch.setattr("apps.campaigns.access.live_bus.publish_users", capture)
     owner = _player("battle_owner@example.com", "battle_owner")
     guest = _player("battle_guest@example.com", "battle_guest")
     campaign, game = create_campaign(owner, "Choque", RULES)
@@ -279,3 +282,34 @@ def test_events_stream_requires_session(client, settings) -> None:
         line = next(response.iter_lines())
         assert line.startswith("data: ")
         assert '"ready"' in line
+
+
+def test_redis_failure_is_logged_and_local_delivery_continues(caplog) -> None:
+    async def run() -> None:
+        bus = LiveBus()
+        queue = bus.subscribe(3)
+        with (
+            patch.object(bus, "start"),
+            patch("apps.campaigns.live._redis_location", return_value="redis://cache/0"),
+            patch.object(bus, "_publish_redis", side_effect=ConnectionError("down")),
+            caplog.at_level(logging.WARNING, logger="hexcampaign.live"),
+        ):
+            bus.publish_users([3], {"type": "notification"})
+        event = await asyncio.wait_for(queue.get(), timeout=1)
+        assert event == {"type": "notification"}
+        bus.unsubscribe(3, queue)
+
+    asyncio.run(run())
+    assert any("redis publish failed" in record.message for record in caplog.records)
+
+
+def test_listen_failure_is_logged_on_the_first_drop_and_then_every_thirty(caplog) -> None:
+    bus = LiveBus()
+    with caplog.at_level(logging.WARNING, logger="hexcampaign.live"):
+        bus._note_listen_failure(1)
+        bus._note_listen_failure(2)
+        bus._note_listen_failure(30)
+    assert [record.message for record in caplog.records] == [
+        "redis subscription dropped; retrying failure=1",
+        "redis subscription dropped; retrying failure=30",
+    ]

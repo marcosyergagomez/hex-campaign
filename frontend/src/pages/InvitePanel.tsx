@@ -39,10 +39,14 @@ export function InvitePanel({ busy = false, onInvite }: Props) {
     const timer = window.setTimeout(() => {
       searchPlayers(needle)
         .then((found) => {
-          if (current) setSuggestions(found)
+          if (!current) return
+          setSuggestions(found)
+          setErrors({})
         })
-        .catch(() => {
-          if (current) setSuggestions([])
+        .catch((error: unknown) => {
+          if (!current) return
+          setSuggestions([])
+          setErrors(presentError(error, "invitePlayerNone"))
         })
     }, 180)
     return () => {
@@ -117,7 +121,7 @@ export function InvitePanel({ busy = false, onInvite }: Props) {
                 </li>
               ))}
             </ul>
-          ) : query.trim().length > 0 ? (
+          ) : query.trim().length > 0 && Object.keys(errors).length === 0 ? (
             <p className="quiet">{t("invitePlayerNone")}</p>
           ) : null}
           {Object.keys(errors).length > 0 ? (

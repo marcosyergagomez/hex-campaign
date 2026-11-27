@@ -1,0 +1,43 @@
+{
+  "grounds": [
+    "llanura",
+    "colina",
+    "bosque",
+    "bosque_profundo",
+    "montana",
+    "montana_rocosa",
+    "desierto",
+    "tundra",
+    "rio",
+    "pantano",
+    "lago",
+    "playa",
+    "acantilado",
+    "mina",
+    "campo"
+  ],
+  "impassable": ["montana_rocosa", "lago", "acantilado"],
+  "exit": {
+    "llanura": 1,
+    "colina": 2,
+    "bosque": 2,
+    "bosque_profundo": 3,
+    "montana": 3,
+    "desierto": 1,
+    "tundra": 2,
+    "rio": 3,
+    "pantano": 3,
+    "playa": 1,
+    "mina": 1,
+    "campo": 1
+  },
+  "gaze": {
+    "colina": 3,
+    "montana": 4,
+    "bosque_profundo": 0
+  },
+  "base_gaze": 2,
+  "explorer_move_bonus": 4,
+  "explorer_gaze_bonus": 5,
+  "open_grounds": ["llanura", "playa", "rio"]
+}

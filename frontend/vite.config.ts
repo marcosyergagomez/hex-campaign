@@ -1,5 +1,9 @@
-import { defineConfig, type Plugin } from "vite"
+import { fileURLToPath } from "node:url"
+
 import react from "@vitejs/plugin-react"
+import { defineConfig, type Plugin } from "vitest/config"
+
+const repoRoot = fileURLToPath(new URL("..", import.meta.url))
 
 // The browser stays on this origin. /api is forwarded to uvicorn, so the
 // session cookie is first-party. API_ORIGIN must be http://localhost:5173.
@@ -66,9 +70,17 @@ function harden(policy: string) {
 
 export default defineConfig({
   plugins: [react(), securityHeaders()],
+  test: {
+    environment: "happy-dom",
+    setupFiles: ["./tests/setup.ts"],
+    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+  },
   server: {
     port: 5173,
     strictPort: true,
+    fs: {
+      allow: [repoRoot],
+    },
     proxy: {
       "/api": {
         target: "http://127.0.0.1:8001",

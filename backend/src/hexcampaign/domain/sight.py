@@ -48,7 +48,12 @@ def _sees_without_terrain(game: Game, viewer: str, cell: Hex) -> bool:
         return False
     if game.rules.visibility == "anonymous":
         return True
-    return any(distance(cell, Hex(own.q, own.r)) <= 1 for own in living(game, viewer))
+    return any(
+        own.q is not None
+        and own.r is not None
+        and distance(cell, Hex(own.q, own.r)) <= 1
+        for own in living(game, viewer)
+    )
 
 
 def _sees_with_terrain(

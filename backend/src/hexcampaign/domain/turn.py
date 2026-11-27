@@ -6,7 +6,7 @@ from datetime import datetime
 from hexcampaign.domain.board import capture, restore
 from hexcampaign.domain.chronicle import cell, path, remember
 from hexcampaign.domain.clock import overdue, stamp
-from hexcampaign.domain.clock_march import Walker, walk
+from hexcampaign.domain.clock_march import ClockMarch, Walker, walk
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import (
     Battle,
@@ -23,8 +23,9 @@ from hexcampaign.domain.game import (
 )
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.lobby import drop_seat_count, settle_preparation
-from hexcampaign.domain.march import check_order, march
+from hexcampaign.domain.march import March, check_order, march
 from hexcampaign.domain.sight import gazed_cells, remember_fort
+from hexcampaign.domain.terrain import exit_cost
 from hexcampaign.domain.units import is_fighter, move_budget, unit_gaze
 
 
@@ -210,8 +211,10 @@ def _resolve(game: Game, now: datetime, defaulted: set[str], rng: random.Random)
     owners: dict[str, str] = {}
     kinds: dict[str, str] = {}
     by_id = {army.id: army for army in living(game)}
+    moved: March | ClockMarch
     for army in by_id.values():
-        assert army.q is not None and army.r is not None
+        if army.q is None or army.r is None:
+            raise DomainError("order_illegal")
         starts[army.id] = Hex(army.q, army.r)
         owners[army.id] = army.player_id
         kinds[army.id] = army.kind
@@ -240,7 +243,7 @@ def _resolve(game: Game, now: datetime, defaulted: set[str], rng: random.Random)
         cell = moved.positions[army.id]
         army.q = cell.q
         army.r = cell.r
-        if game.plots is not None:
+        if game.plots is not None and isinstance(moved, ClockMarch):
             army.paid = moved.paid[army.id]
             _reveal_gaze(game, army, moved.trails.get(army.id, ()))
         else:
@@ -440,8 +443,10 @@ def _ready(game: Game) -> bool:
 
 def _note_marches(game: Game, starts, paths, owners, moved) -> None:
     names = {army.id: army.name for army in game.armies}
+    carried = {army.id: army.paid for army in game.armies}
     for army_id, origin in starts.items():
         destination = moved.positions[army_id]
+        trail = moved.trails.get(army_id, ())
         remember(
             game,
             "marched",
@@ -450,9 +455,26 @@ def _note_marches(game: Game, starts, paths, owners, moved) -> None:
             name=names.get(army_id, ""),
             origin=cell(origin),
             order=path(paths.get(army_id, ())),
-            trail=path(moved.trails.get(army_id, ())),
+            trail=path(trail),
             destination=cell(destination),
+            costs=_spent(game, origin, trail, carried.get(army_id, 0)),
         )
+
+
+def _spent(game: Game, origin: Hex, trail: tuple[Hex, ...], paid: int) -> list[int]:
+    """Points this turn actually spent to enter each hex of the trail."""
+    if game.plots is None:
+        return [1 for _ in trail]
+    cell = origin
+    spent: list[int] = []
+    carried = paid
+    for step in trail:
+        plot = game.plots.get(cell)
+        cost = 1 if plot is None else exit_cost(plot)
+        spent.append(max(1, cost - carried))
+        carried = 0
+        cell = step
+    return spent
 
 
 def _reveal(game: Game, player_id: str, cells: tuple[Hex, ...]) -> None:

@@ -88,7 +88,12 @@ def _fort_locked(game: Game, actor: str) -> bool:
 def _editing(game: Game, actor: str) -> tuple[set[Hex], Hex, dict[Hex, Plot]]:
     require_phase(game, "preparing")
     require_player(game, actor)
-    if not _fort_locked(game, actor) or game.naming or actor in game.road_ready or actor in game.prep_done:
+    if (
+        not _fort_locked(game, actor)
+        or game.naming
+        or actor in game.road_ready
+        or actor in game.prep_done
+    ):
         raise DomainError("phase_invalid")
     if game.plots is None:
         raise DomainError("order_illegal")

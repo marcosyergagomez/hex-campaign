@@ -1,9 +1,15 @@
-"""The match lives in the campaign document. Seat rows are only an index."""
+"""The match lives in the campaign document.
+
+Seat rows and the columns beside `state` answer lists. The document is loaded
+to play or to open one board, not to decide which campaigns a player has.
+"""
 
 import uuid
 
 from django.conf import settings
 from django.db import models
+
+from .projection import index_from_state
 
 
 def initial_campaign_state() -> dict[str, object]:
@@ -15,6 +21,10 @@ class Campaign(models.Model):
     name = models.CharField(max_length=120)
     # Copied from the document so a player's list does not load every order.
     phase = models.CharField(max_length=16, default="setup")
+    revision = models.PositiveIntegerField(default=1)
+    turn = models.PositiveIntegerField(default=0)
+    seat_limit = models.PositiveSmallIntegerField(default=0)
+    occupied = models.PositiveSmallIntegerField(default=0)
     state = models.JSONField(default=initial_campaign_state)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -28,17 +38,18 @@ class Campaign(models.Model):
 
     class Meta:
         ordering = ("-updated_at",)
-        indexes = [
+        indexes = (
             models.Index(fields=["created_by", "phase"], name="campaign_creator_phase"),
-        ]
+        )
 
     def save(self, *args, **kwargs):
-        phase = self.state.get("phase") if isinstance(self.state, dict) else None
-        if isinstance(phase, str) and phase:
-            self.phase = phase[:16]
-            fields = kwargs.get("update_fields")
-            if fields is not None and "phase" not in fields:
-                kwargs["update_fields"] = {*fields, "phase"}
+        extra: set[str] = set()
+        for name, value in index_from_state(self.state).items():
+            setattr(self, name, value)
+            extra.add(name)
+        fields = kwargs.get("update_fields")
+        if fields is not None and extra:
+            kwargs["update_fields"] = {*fields, *extra}
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
@@ -59,7 +70,7 @@ class Seat(models.Model):
     status = models.CharField(max_length=16)
 
     class Meta:
-        constraints = [
+        constraints = (
             models.UniqueConstraint(fields=["campaign", "user"], name="uniq_campaign_seat"),
             models.CheckConstraint(
                 condition=models.Q(role__in=["owner", "admin", "player"]),
@@ -69,7 +80,10 @@ class Seat(models.Model):
                 condition=models.Q(status__in=["active", "inactive", "eliminated", "expelled"]),
                 name="campaign_seat_status",
             ),
-        ]
+        )
+        indexes = (
+            models.Index(fields=["user", "status"], name="seat_user_status"),
+        )
 
     def __str__(self) -> str:
         return f"{self.alias} {self.role}"
@@ -108,7 +122,13 @@ class Notification(models.Model):
     KIND_CAMPAIGN_BATTLE = "campaign_battle"
     KIND_TURN = "turn"
     KIND_BATTLE = "battle"
-    KINDS = (KIND_CAMPAIGN_INVITE, KIND_CAMPAIGN_ADMIN, KIND_CAMPAIGN_BATTLE, KIND_TURN, KIND_BATTLE)
+    KINDS = (
+        KIND_CAMPAIGN_INVITE,
+        KIND_CAMPAIGN_ADMIN,
+        KIND_CAMPAIGN_BATTLE,
+        KIND_TURN,
+        KIND_BATTLE,
+    )
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -122,9 +142,9 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
-        indexes = [
+        indexes = (
             models.Index(fields=["user", "read_at", "-created_at"], name="notif_user_unread"),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.kind} {self.user_id}"
@@ -148,9 +168,9 @@ class CampaignMap(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
-        indexes = [
+        indexes = (
             models.Index(fields=["owner", "created_at"], name="campaign_map_owner"),
-        ]
+        )
 
     def __str__(self) -> str:
         return self.name

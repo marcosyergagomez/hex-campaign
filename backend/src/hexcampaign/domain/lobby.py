@@ -19,14 +19,22 @@ from hexcampaign.domain.game import (
     require_staff,
     seated,
 )
-from hexcampaign.domain.hexes import DISK_RADIUS, Hex, angle, deploy_reach, disk, distance, neighbors
+from hexcampaign.domain.hexes import (
+    DISK_RADIUS,
+    Hex,
+    angle,
+    deploy_reach,
+    disk,
+    distance,
+    neighbors,
+)
 from hexcampaign.domain.identity import checked_color, checked_identity
 from hexcampaign.domain.land import home_radius, owned
 from hexcampaign.domain.phases import open_first_turn, open_preparation
 from hexcampaign.domain.rules import Rules, campaign_description, campaign_name, label, roster_text
-from hexcampaign.domain.units import is_fighter
 from hexcampaign.domain.terrain import passable
 from hexcampaign.domain.territory import assigned_homes, home_land
+from hexcampaign.domain.units import is_fighter
 
 
 def create_game(
@@ -379,7 +387,13 @@ def describe_army(
     return bump(game)
 
 
-def stand_token(game: Game, actor: str, army_id: str, cell: Hex, now: datetime | None = None) -> Game:
+def stand_token(
+    game: Game,
+    actor: str,
+    army_id: str,
+    cell: Hex,
+    now: datetime | None = None,
+) -> Game:
     """During this seat's army step, a piece stands inside the ring around its keep."""
     require_phase(game, "preparing")
     if not _army_step(game, actor):
@@ -400,7 +414,12 @@ def stand_token(game: Game, actor: str, army_id: str, cell: Hex, now: datetime |
         raise DomainError("order_illegal")
     if is_fighter(army):
         for other in game.armies:
-            if other.id == army.id or other.player_id != actor or other.destroyed or not is_fighter(other):
+            if (
+                other.id == army.id
+                or other.player_id != actor
+                or other.destroyed
+                or not is_fighter(other)
+            ):
                 continue
             if other.at() == cell:
                 raise DomainError("order_illegal")

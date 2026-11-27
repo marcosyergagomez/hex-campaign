@@ -18,7 +18,7 @@ from apps.campaigns.atlases import (
     store_generated,
     update_drawn,
 )
-from apps.campaigns.records import CampaignError
+from apps.campaigns.errors import CampaignError
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.maps import table_presets
 
@@ -162,7 +162,7 @@ def post_map(payload: MapBody, request: Request) -> JSONResponse:
             return _failure(CampaignError(exc.code))
         return JSONResponse(_summary(row), status_code=201)
 
-    return _run(request, action)
+    return _run(request, action)  # type: ignore[return-value]
 
 
 @router.put("/api/maps/{map_id}")
@@ -179,7 +179,7 @@ def put_map(map_id: str, payload: MapBody, request: Request) -> JSONResponse:
             raise CampaignError(exc.code) from exc
         return JSONResponse(_summary(row))
 
-    return _run(request, action)
+    return _run(request, action)  # type: ignore[return-value]
 
 
 @router.post("/api/maps/{map_id}/copy", status_code=201)
@@ -189,4 +189,4 @@ def post_map_copy(map_id: str, payload: CopyBody, request: Request) -> JSONRespo
         row = copy_for_edit(user, map_id, payload.name)
         return JSONResponse(_summary(row), status_code=201)
 
-    return _run(request, action)
+    return _run(request, action)  # type: ignore[return-value]

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
-import { Navigate, useNavigate } from "react-router-dom"
+import { Link, Navigate, useNavigate } from "react-router-dom"
 
 import { currentPlayer, login } from "../api"
 import { Banner, Field } from "../form"
@@ -96,6 +96,9 @@ export function LoginPage() {
       <button type="submit" disabled={pending}>
         {pending ? t("signingIn") : t("signIn")}
       </button>
+      <p className="quiet">
+        <Link to="/recuperar">{t("forgotPassword")}</Link>
+      </p>
     </form>
   )
 }

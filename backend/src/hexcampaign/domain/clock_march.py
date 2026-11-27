@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.march import Contact
 from hexcampaign.domain.occupy import crossing_fighters, plan_step
-from hexcampaign.domain.terrain import Plot, exit_cost, passable
+from hexcampaign.domain.terrain import Plot, exit_cost, passable, road_refund
 
 
 @dataclass
@@ -115,8 +115,7 @@ def _arrive(walker: Walker, plots, dest: Hex, stopped: set[str], *, fight: bool)
     walker.trail.append(dest)
     walker.path = walker.path[1:]
     walker.paid = 0
-    if left.road and left.ground not in {"llanura", "playa", "rio"}:
-        walker.budget += 1
+    walker.budget += road_refund(left)
     if fight or not walker.path:
         walker.path = []
         stopped.add(walker.army_id)

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
+from api.client_address import client_address
 from api.django_db import django_sync
 from apps.accounts.sessions import (
     LoginRejected,
@@ -69,15 +70,7 @@ def _same_authority(parsed: SplitResult, expected: SplitResult) -> bool:
 
 
 def _client_host(request: Request) -> str:
-    client = request.client
-    if client is None:
-        return "-"
-    host = getattr(client, "host", None)
-    if isinstance(host, str) and host:
-        return host
-    if isinstance(client, tuple) and client and isinstance(client[0], str):
-        return client[0]
-    return "-"
+    return client_address(request.scope)
 
 
 def _errors(status: int, field: str, message: str) -> JSONResponse:

@@ -147,4 +147,4 @@ def crossing_fighters(
 
 
 def _soft(kinds: dict[str, str] | None, army_id: str) -> bool:
-    return bool(kinds) and kinds.get(army_id) == "explorer"
+    return kinds is not None and kinds.get(army_id) == "explorer"

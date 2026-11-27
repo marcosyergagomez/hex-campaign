@@ -15,6 +15,7 @@ import { Banner, Field } from "../form"
 import { HexBoard } from "../game/hex/HexBoard"
 import { axialKey, brushCells, diskCells, type Axial } from "../game/hex/disk"
 import { GROUND_ART, GROUND_LABEL, GROUND_TIP } from "../game/hex/grounds"
+import { isImpassable } from "../game/hex/terrainContract"
 import { useI18n } from "../i18n/language"
 import type { MessageKey } from "../i18n/catalog"
 import { presentError } from "../presentError"
@@ -177,9 +178,9 @@ export function MapEditorPage() {
     const { tool: active, ground: soil, areaBrush: area, size: board } = paintOpts.current
     if (board === null || targets.length === 0 || !diskKeys) return
     beginStroke()
-    let nextCells = cellsRef.current.map(cell => ({ ...cell }))
-    let nextAnchors = anchorsRef.current.map(spot => ({ ...spot }))
-    const index = new Map(nextCells.map((cell, i) => [axialKey(cell), i]))
+    const nextCells: (MapCell | null)[] = cellsRef.current.slice()
+    let nextAnchors = anchorsRef.current
+    const index = new Map(nextCells.map((cell, i) => cell ? [axialKey(cell), i] as const : null).filter((item): item is readonly [string, number] => item !== null))
     const widen = area && active !== "fort" && active !== "add" && active !== "remove"
 
     for (const target of targets) {
@@ -194,13 +195,14 @@ export function MapEditorPage() {
         const at = index.get(key)
         if (at === undefined) continue
         if (active === "remove") {
-          nextCells[at] = null as unknown as MapCell
+          nextCells[at] = null
           nextAnchors = nextAnchors.filter(item => axialKey(item) !== key)
           continue
         }
+        const stored = nextCells[at]
+        if (!stored) continue
         if (active === "fort") {
-          const cell = nextCells[at]
-          if (cell.ground === "lago" || cell.ground === "montana_rocosa" || cell.ground === "acantilado") {
+          if (isImpassable(stored.ground)) {
             continue
           }
           const exists = nextAnchors.some(item => axialKey(item) === key)
@@ -211,14 +213,14 @@ export function MapEditorPage() {
               : [...nextAnchors, { q: spot.q, r: spot.r }]
           continue
         }
-        const cell = { ...nextCells[at] }
+        const cell = { ...stored }
         if (active === "erase") {
           cell.ground = "llanura"
           cell.road = false
           cell.bridge = false
         } else if (active === "terrain") {
           cell.ground = soil
-          if (soil === "lago" || soil === "montana_rocosa" || soil === "acantilado") {
+          if (isImpassable(soil)) {
             cell.road = false
             cell.bridge = false
             nextAnchors = nextAnchors.filter(item => axialKey(item) !== key)
@@ -235,10 +237,10 @@ export function MapEditorPage() {
       }
     }
 
-    nextCells = nextCells.filter(Boolean)
-    cellsRef.current = nextCells
+    const kept = nextCells.filter((cell): cell is MapCell => cell !== null)
+    cellsRef.current = kept
     anchorsRef.current = nextAnchors
-    setCells(nextCells)
+    setCells(kept)
     setAnchors(nextAnchors)
     setSavedNote(false)
   }

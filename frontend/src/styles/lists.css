@@ -1,0 +1,575 @@
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.page-header h1 {
+  margin: 8px 0 6px;
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 600;
+  font-size: clamp(1.7rem, 3vw, 2.4rem);
+}
+
+.text-link {
+  color: var(--gold);
+  text-decoration: none;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+}
+
+.text-link:hover {
+  color: var(--ink);
+}
+
+.button-link,
+.button-secondary,
+.button-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  margin-top: 0;
+  padding: 11px 16px;
+  text-decoration: none;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  border: 1px solid var(--gold-dim);
+  cursor: pointer;
+}
+
+.button-link {
+  background: var(--blood);
+  color: var(--ink);
+}
+
+.button-link:hover {
+  background: var(--blood-hot);
+}
+
+.button-secondary,
+.button-quiet {
+  background: transparent;
+  color: var(--gold);
+}
+
+.button-secondary:hover:not(:disabled),
+.button-quiet:hover:not(:disabled) {
+  background: rgba(198, 161, 90, 0.12);
+}
+
+.wizard-panel,
+.detail-panel,
+.summary-panel {
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+.campaign-list {
+  display: grid;
+  gap: 22px;
+}
+
+.campaigns-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding-bottom: 4px;
+}
+
+.campaigns-head h1 {
+  margin: 6px 0 8px;
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 600;
+  font-size: clamp(1.8rem, 3vw, 2.5rem);
+}
+
+.campaigns-head .quiet {
+  margin: 0;
+  max-width: 42ch;
+}
+
+.stage {
+  position: relative;
+  min-height: 240px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+.stage-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 42%;
+  filter: brightness(1.22) contrast(1.06) saturate(1.08);
+}
+
+.stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    rgba(8, 6, 4, 0.06) 0%,
+    rgba(8, 6, 4, 0.16) 42%,
+    rgba(8, 6, 4, 0.52) 100%
+  );
+}
+
+.stage-hero {
+  min-height: clamp(420px, 62vh, 620px);
+}
+
+.stage-hero::after {
+  background: linear-gradient(
+    180deg,
+    rgba(8, 6, 4, 0.05) 0%,
+    rgba(8, 6, 4, 0.12) 45%,
+    rgba(8, 6, 4, 0.58) 78%,
+    rgba(8, 6, 4, 0.78) 100%
+  );
+}
+
+.stage-hero .stage-photo {
+  object-position: center 38%;
+  filter: brightness(1.18) contrast(1.04) saturate(1.05);
+}
+
+.stage-copy {
+  position: relative;
+  z-index: 1;
+  min-height: 240px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 28px;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.75);
+}
+
+.stage-hero .stage-copy {
+  min-height: clamp(420px, 62vh, 620px);
+  align-content: end;
+  padding: 36px 32px 40px;
+}
+
+.stage-copy > div {
+  display: grid;
+  gap: 6px;
+}
+
+.stage-hero .stage-copy > div {
+  gap: 10px;
+  max-width: 28rem;
+}
+
+.stage-copy h1 {
+  margin: 0;
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 600;
+  font-size: clamp(1.8rem, 3vw, 2.6rem);
+}
+
+.stage-hero .stage-copy h1 {
+  font-size: clamp(2.1rem, 4.2vw, 3.2rem);
+  line-height: 1.05;
+}
+
+.stage-copy p:not(.mark) {
+  max-width: 42ch;
+  margin: 0;
+  color: var(--ink);
+}
+
+.stage-hero .stage-copy p:not(.mark) {
+  font-size: 1.05rem;
+  line-height: 1.45;
+  color: rgba(244, 236, 220, 0.9);
+}
+
+.stage-short {
+  min-height: 190px;
+}
+
+.stage-short .stage-copy {
+  min-height: 190px;
+}
+
+.campaign-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 2px;
+}
+
+.campaign-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 14px;
+  width: auto;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.campaign-tabs button.is-active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+.campaign-tab-count {
+  min-width: 1.4rem;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  color: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0;
+}
+
+.campaign-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.campaign-card-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+}
+
+.campaign-delete {
+  align-self: center;
+  white-space: nowrap;
+}
+
+.scrap-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--ink) 55%, transparent);
+}
+
+.scrap-modal-panel {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 14px;
+  padding: 22px 22px 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--ink) 28%, transparent);
+}
+
+.scrap-modal-panel h2 {
+  margin: 0;
+  font-family: Cinzel, Palatino, serif;
+  font-size: 1.2rem;
+}
+
+.scrap-modal-panel p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.scrap-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.appoint-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+  background: rgba(8, 6, 4, 0.78);
+}
+
+.appoint-panel {
+  width: min(100%, 360px);
+  overflow: hidden;
+  background: #100c09;
+  border: 1px solid var(--line);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.appoint-panel img {
+  display: block;
+  width: 100%;
+  height: min(300px, 46vh);
+  object-fit: cover;
+  object-position: center 42%;
+}
+
+.appoint-panel img.is-battle {
+  object-position: center 52%;
+}
+
+.appoint-copy {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px 18px;
+}
+
+.appoint-copy h2 {
+  margin: 0;
+  font-family: Cinzel, Palatino, serif;
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.appoint-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.appoint-copy button {
+  width: auto;
+  justify-self: start;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gold);
+  letter-spacing: 0.06em;
+  text-transform: none;
+  font-size: 0.88rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.appoint-copy button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
+.member-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.campaign-card {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  min-height: 108px;
+  text-decoration: none;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.campaign-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.crop-0 img {
+  object-position: left center;
+}
+
+.crop-1 img {
+  object-position: center;
+}
+
+.crop-2 img {
+  object-position: right center;
+}
+
+.campaign-card-body {
+  display: grid;
+  gap: 6px;
+  align-content: center;
+  padding: 16px 18px;
+}
+
+.campaign-card:hover {
+  border-color: var(--gold);
+}
+
+.campaign-card-name {
+  font-family: Cinzel, Palatino, serif;
+  font-size: 1.15rem;
+}
+
+.campaign-card-meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.wizard {
+  display: grid;
+  gap: 18px;
+}
+
+.wizard-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.wizard-steps li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(198, 161, 90, 0.22);
+  color: var(--muted);
+  background: rgba(16, 12, 9, 0.55);
+}
+
+.wizard-steps li.is-current {
+  border-color: var(--gold);
+  color: var(--ink);
+}
+
+.wizard-steps li.is-done {
+  border-color: rgba(198, 161, 90, 0.55);
+  color: var(--gold);
+}
+
+.wizard-step-index {
+  display: inline-grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid currentColor;
+  font-family: Cinzel, Palatino, serif;
+  font-size: 0.85rem;
+}
+
+.wizard-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.wizard-fields {
+  display: grid;
+  gap: 14px;
+}
+
+.wizard-fields h2,
+.detail-panel h2,
+.summary-panel h3 {
+  margin: 0;
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 500;
+  font-size: 1.2rem;
+}
+
+.choice-set {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.choice-grid-wide {
+  grid-template-columns: 1fr;
+}
+
+.choice {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 14px 12px;
+  background: var(--field);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  text-align: left;
+}
+
+.choice strong {
+  font-family: Cinzel, Palatino, serif;
+  font-size: 1.2rem;
+}
+
+.choice span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.choice.is-selected,
+.choice:hover {
+  border-color: var(--gold);
+}
+
+.wizard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.wizard-actions button {
+  width: auto;
+  min-width: 10rem;
+}
+
+.summary-panel ul,
+.detail-list {
+  margin: 8px 0 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
+
+.campaign-detail.is-playing {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}

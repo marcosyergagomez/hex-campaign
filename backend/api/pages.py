@@ -52,6 +52,26 @@ def confirm_page(token: str, error: str = "", language: str = "es") -> str:
     return _document(language, phrase(language, "confirm_title"), body)
 
 
+def reset_page(token: str, error: str = "", language: str = "es") -> str:
+    language = normalize(language)
+    hidden = escape(token, quote=True)
+    lang = escape(language, quote=True)
+    notice = f"<p>{escape(present(language, error))}</p>" if error else ""
+    body = (
+        f"{notice}"
+        f"<p>{escape(phrase(language, 'reset_lead'))}</p>"
+        '<form method="post" action="/api/password-reset/confirm">'
+        f'<input type="hidden" name="token" value="{hidden}">'
+        f'<input type="hidden" name="lang" value="{lang}">'
+        f"<label>{escape(phrase(language, 'password'))} "
+        '<input type="password" name="password" '
+        'autocomplete="new-password" minlength="12" maxlength="128" required></label>'
+        f"<button type=\"submit\">{escape(phrase(language, 'reset_button'))}</button>"
+        "</form>"
+    )
+    return _document(language, phrase(language, "reset_title"), body)
+
+
 def result_page(message: str, language: str = "es") -> str:
     language = normalize(language)
     shown = present(language, message)

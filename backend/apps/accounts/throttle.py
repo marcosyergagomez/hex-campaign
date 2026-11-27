@@ -1,7 +1,8 @@
 """Rate limits shared across workers through Django's cache.
 
-LocMem is fine for a single process. Production sets CACHE_URL to Redis so
-every uvicorn worker sees the same counters.
+Each key is a fixed window counter. ``cache.incr`` is atomic, so two workers
+cannot both sneak past the limit. A new key does not push anyone else out:
+the old global index filled up and then rejected every new player.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ Clock = Callable[[], float]
 
 
 class SlidingWindow:
-    """Counts hits per key. A full index rejects new keys instead of dropping old ones."""
+    """Counts hits per key inside a fixed window of ``window_seconds``."""
 
     def __init__(
         self,
@@ -26,6 +27,8 @@ class SlidingWindow:
         clock: Clock | None = None,
     ) -> None:
         self.name = name
+        # Kept so existing callers still construct the limiter. Keys expire
+        # with the window, so a full table no longer fails closed for everyone.
         self.max_keys = max_keys
         self._clock = clock or time.time
 
@@ -45,47 +48,26 @@ class SlidingWindow:
             return True
         if not isinstance(key, str) or not key or len(key) > 256:
             key = "-"
-        now = self._clock()
-        gen = self._generation()
-        hits_key = self._hits_key(gen, key)
-        index_key = f"th:{self.name}:{gen}:i"
+        if window_seconds <= 0:
+            return True
+        slot = int(self._clock() // window_seconds)
+        hits_key = self._hits_key(slot, key)
         timeout = max(int(window_seconds) + 1, 2)
-        cutoff = now - window_seconds
-
-        hits = [stamp for stamp in (cache.get(hits_key) or ()) if stamp >= cutoff]
-        if len(hits) >= limit:
-            cache.set(hits_key, hits, timeout=timeout)
-            return False
-
-        index = list(cache.get(index_key) or ())
-        if key not in index:
-            alive: list[str] = []
-            for name in index:
-                other_key = self._hits_key(gen, name)
-                other = [stamp for stamp in (cache.get(other_key) or ()) if stamp >= cutoff]
-                if other:
-                    alive.append(name)
-                    cache.set(other_key, other, timeout=timeout)
-                else:
-                    cache.delete(other_key)
-            index = alive
-            if len(index) >= self.max_keys:
-                cache.set(index_key, index, timeout=timeout)
-                return False
-            index.append(key)
-            cache.set(index_key, index, timeout=timeout)
-
-        hits.append(now)
-        cache.set(hits_key, hits, timeout=timeout)
-        return True
+        if cache.add(hits_key, 1, timeout=timeout):
+            return True
+        try:
+            count = cache.incr(hits_key)
+        except ValueError:
+            cache.set(hits_key, 1, timeout=timeout)
+            return True
+        return int(count) <= limit
 
     def _gen_key(self) -> str:
         return f"th:{self.name}:gen"
 
-    def _hits_key(self, gen: int, key: str) -> str:
-        # Paths and spaces are hashed so Redis and memcached accept the key.
+    def _hits_key(self, slot: int, key: str) -> str:
         digest = hashlib.sha256(key.encode()).hexdigest()
-        return f"th:{self.name}:{gen}:h:{digest}"
+        return f"th:{self.name}:{self._generation()}:{slot}:h:{digest}"
 
     def _generation(self) -> int:
         gen_key = self._gen_key()

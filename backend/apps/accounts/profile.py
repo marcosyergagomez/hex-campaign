@@ -94,24 +94,29 @@ def update_profile(
                 errors["alias"] = ["Ese alias ya está en uso."]
 
         if changing_password and "current_password" not in errors:
-            assert isinstance(current_password, str)
-            if not check_user_password(locked, current_password):
+            if not isinstance(current_password, str) or not check_user_password(
+                locked, current_password
+            ):
                 errors["current_password"] = ["La contraseña actual no es correcta."]
 
         if errors:
             raise ProfileRejected(errors)
 
-        assert isinstance(sex, str)
+        if not isinstance(sex, str):
+            raise ProfileRejected({"sex": [SEX_MESSAGE]})
+        previous_alias = locked.alias
         locked.alias = next_alias
         locked.sex = sex
         if changing_password:
-            assert isinstance(password, str)
+            if not isinstance(password, str):
+                raise ProfileRejected({"password": [PASSWORD_TOO_LONG]})
             set_user_password(locked, password)
             # Full save so password-change hooks revoke every prior cookie.
             locked.save()
         else:
             locked.save(update_fields=["alias", "sex"])
-        _mirror_alias(locked)
+        if locked.alias != previous_alias:
+            _mirror_alias(locked)
         return ProfileUpdate(locked, password_changed=changing_password)
 
 
@@ -119,12 +124,14 @@ def _mirror_alias(user: User) -> None:
     """Keep seat rows and living campaign documents in sync with the account alias.
 
     Campaigns are locked in id order after the user row, matching deactivate_account.
+    The revision moves so the other seats refetch instead of keeping the old name.
     """
     from apps.campaigns.models import Campaign, Seat
+    from apps.campaigns.store import _save
     from hexcampaign.domain.errors import DomainError
-    from hexcampaign.domain.game import from_dict, to_dict
+    from hexcampaign.domain.game import bump, from_dict
 
-    Seat.objects.filter(user=user).update(alias=user.alias)
+    Seat.objects.filter(user=user).exclude(alias=user.alias).update(alias=user.alias)
     campaign_ids = sorted(
         Seat.objects.filter(user=user).values_list("campaign_id", flat=True),
         key=str,
@@ -142,5 +149,4 @@ def _mirror_alias(user: User) -> None:
                 member.alias = user.alias
                 changed = True
         if changed:
-            campaign.state = to_dict(game)
-            campaign.save(update_fields=["state", "updated_at"])
+            _save(campaign, bump(game))

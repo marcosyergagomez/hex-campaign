@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 
-import { subscribeLive, type LiveSeat } from "./liveEvents"
+import { getCampaignPulse } from "./api"
+import { liveIsOpen, subscribeLive, type LiveSeat } from "./liveEvents"
 
 /**
  * Paints a pushed seat colour at once, then reloads the campaign.
@@ -67,4 +68,22 @@ export function useCampaignLive(
     waitingRef.current = false
     void onStaleRef.current()
   }, [busy, campaignId])
+
+  useEffect(() => {
+    if (!campaignId) return
+    let stopped = false
+    const timer = window.setInterval(() => {
+      if (stopped || document.hidden || busyRef.current || liveIsOpen()) return
+      void getCampaignPulse(campaignId)
+        .then((pulse) => {
+          if (stopped || pulse.revision <= revisionRef.current) return
+          return onStaleRef.current()
+        })
+        .catch(() => undefined)
+    }, 15000)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [campaignId])
 }

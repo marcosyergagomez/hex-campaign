@@ -18,11 +18,23 @@ from api.django_db import django_sync
 from api.events import router as events_router
 from api.guard import AccountGuard
 from api.maps import router as map_router
-from api.pages import confirm_page, result_page
+from api.pages import confirm_page, reset_page, result_page
 from api.player_session import ORIGIN_MESSAGE, same_origin
 from api.player_session import router as player_session_router
 from api.profile import router as profile_router
+from api.request_id import RequestIdMiddleware
 from apps.accounts.languages import normalize
+from apps.accounts.passwords import HashBusy
+from apps.accounts.recovery import (
+    ACCEPTED_DETAIL as RESET_ACCEPTED,
+)
+from apps.accounts.recovery import (
+    InvalidReset,
+    ResetMailError,
+    ResetRejected,
+    request_reset,
+    reset_password,
+)
 from apps.accounts.registration import (
     ACCEPTED_DETAIL,
     PASSWORD_MISMATCH,
@@ -42,6 +54,7 @@ api = FastAPI(
     openapi_url="/api/openapi.json" if settings.DEBUG else None,
 )
 api.add_middleware(AccountGuard)
+api.add_middleware(RequestIdMiddleware)
 api.include_router(player_session_router)
 api.include_router(profile_router)
 api.include_router(campaign_router)
@@ -50,6 +63,7 @@ api.include_router(events_router)
 
 INVALID_LINK = "El enlace no es válido o ha caducado."
 CONFIRMED = "Correo confirmado."
+_BUSY = "Demasiados intentos. Prueba de nuevo en unos minutos."
 
 
 class Accepted(BaseModel):
@@ -120,6 +134,11 @@ def register_user(payload: RegisterPayload, request: Request) -> JSONResponse | 
         )
     except RegistrationError as exc:
         return JSONResponse(status_code=422, content={"errors": exc.errors})
+    except HashBusy:
+        return JSONResponse(
+            status_code=429,
+            content={"errors": {"email": [_BUSY]}},
+        )
     except MailDeliveryError:
         return JSONResponse(
             status_code=503,
@@ -177,9 +196,91 @@ async def verify_email(request: Request) -> HTMLResponse | Accepted | JSONRespon
             status_code=400,
             content={"errors": {"password": [PASSWORD_MISMATCH]}},
         )
+    except HashBusy:
+        return JSONResponse(
+            status_code=429,
+            content={"errors": {"password": [_BUSY]}},
+        )
     if as_html:
         return HTMLResponse(result_page(CONFIRMED, language))
     return Accepted(detail=CONFIRMED)
+
+
+class ResetPayload(BaseModel):
+    email: str
+
+
+@api.post(
+    "/api/password-reset",
+    status_code=202,
+    response_model=Accepted,
+    summary="Pedir un enlace para restablecer la contraseña",
+    responses={403: {"model": ErrorBody}, 503: {"model": ErrorBody}},
+)
+@django_sync
+def post_password_reset(payload: ResetPayload, request: Request) -> JSONResponse | Accepted:
+    if not same_origin(request):
+        return JSONResponse(status_code=403, content={"errors": {"origin": [ORIGIN_MESSAGE]}})
+    try:
+        request_reset(payload.email, normalize(request.cookies.get("hex_lang")))
+    except ResetMailError:
+        return JSONResponse(
+            status_code=503,
+            content={"errors": {"email": ["No se ha podido enviar el correo."]}},
+        )
+    return Accepted(detail=RESET_ACCEPTED)
+
+
+@api.get("/api/password-reset/confirm", summary="Página para elegir una contraseña nueva")
+def reset_password_page(request: Request, token: str = "", lang: str = "") -> HTMLResponse:
+    language = normalize(lang or request.cookies.get("hex_lang"))
+    if not token:
+        response = HTMLResponse(result_page(INVALID_LINK, language), status_code=400)
+    else:
+        response = HTMLResponse(reset_page(token, language=language))
+    return response
+
+
+def _apply_reset(raw_token: str, password: str) -> None:
+    close_old_connections()
+    try:
+        reset_password(raw_token, password)
+    finally:
+        close_old_connections()
+
+
+@api.post(
+    "/api/password-reset/confirm",
+    response_model=None,
+    summary="Guardar la contraseña nueva",
+)
+async def post_password_reset_confirm(request: Request) -> HTMLResponse | Accepted | JSONResponse:
+    token, password, as_html, language = await _posted_credentials(request)
+    if as_html and not same_origin(request):
+        return HTMLResponse(result_page(ORIGIN_MESSAGE, language), status_code=403)
+    if not as_html and not same_origin(request):
+        return JSONResponse(status_code=403, content={"errors": {"origin": [ORIGIN_MESSAGE]}})
+    try:
+        await sync_to_async(_apply_reset)(token, password)
+    except InvalidReset:
+        if as_html:
+            return HTMLResponse(result_page(INVALID_LINK, language), status_code=400)
+        return JSONResponse(status_code=400, content={"errors": {"token": [INVALID_LINK]}})
+    except ResetRejected as exc:
+        message = exc.errors.get("password", ["La contraseña no es válida."])[0]
+        if as_html:
+            return HTMLResponse(
+                reset_page(token, "La contraseña no es válida.", language),
+                status_code=400,
+            )
+        return JSONResponse(status_code=400, content={"errors": {"password": [message]}})
+    except HashBusy:
+        if as_html:
+            return HTMLResponse(reset_page(token, _BUSY, language), status_code=429)
+        return JSONResponse(status_code=429, content={"errors": {"password": [_BUSY]}})
+    if as_html:
+        return HTMLResponse(result_page("Contraseña actualizada. Ya puedes entrar.", language))
+    return Accepted(detail=RESET_ACCEPTED)
 
 
 async def _posted_credentials(request: Request) -> tuple[str, str, bool, str]:

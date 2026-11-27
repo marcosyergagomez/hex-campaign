@@ -12,7 +12,6 @@ from apps.campaigns.models import Seat
 from config.asgi import application
 from hexcampaign.domain.game import from_dict
 
-
 PASSWORD = "una-clave-larga"
 
 
@@ -145,6 +144,8 @@ def test_profile_mirrors_alias_into_campaign_seats(client) -> None:
         "missed_turns": 2,
     }
     campaign, _game = create_campaign(user, "Mesa", rules)
+    campaign.refresh_from_db()
+    revision_before = campaign.revision
     _login(client)
     csrf = client.cookies.get(CSRF_COOKIE)
 
@@ -160,3 +161,4 @@ def test_profile_mirrors_alias_into_campaign_seats(client) -> None:
     campaign.refresh_from_db()
     member = next(m for m in from_dict(campaign.state).members if m.player_id == str(user.pk))
     assert member.alias == "ada_nueva"
+    assert campaign.revision == revision_before + 1

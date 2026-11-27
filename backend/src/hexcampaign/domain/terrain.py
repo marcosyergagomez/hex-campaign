@@ -1,47 +1,68 @@
 """What a hex costs to leave, and how far an army looks while standing on it."""
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex, neighbors
 
+
+def _contract() -> dict:
+    """The exit table lives once, in shared/terrain.json, and the client reads it too."""
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        path = parent / "shared" / "terrain.json"
+        if path.is_file():
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                return loaded
+            break
+    raise RuntimeError("shared/terrain.json is missing or unreadable")
+
+
+def _names(value: object, label: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value:
+        raise RuntimeError(f"shared/terrain.json {label} must list names")
+    names: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item or item in names:
+            raise RuntimeError(f"shared/terrain.json {label} has a bad name")
+        names.append(item)
+    return tuple(names)
+
+
+def _whole(value: object, label: str, *, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise RuntimeError(f"shared/terrain.json {label} must be a whole number")
+    return value
+
+
+def _table(value: object, label: str, *, minimum: int) -> dict[str, int]:
+    if not isinstance(value, dict) or not value:
+        raise RuntimeError(f"shared/terrain.json {label} is missing")
+    table: dict[str, int] = {}
+    for name, cost in value.items():
+        if not isinstance(name, str) or not name:
+            raise RuntimeError(f"shared/terrain.json {label} has a bad name")
+        table[name] = _whole(cost, label, minimum=minimum)
+    return table
+
+
+_RAW = _contract()
 # Stable names. The battle rules do not care about the spelling on the map.
-GROUNDS = frozenset(
-    {
-        "llanura",
-        "colina",
-        "bosque",
-        "bosque_profundo",
-        "montana",
-        "montana_rocosa",
-        "desierto",
-        "tundra",
-        "rio",
-        "pantano",
-        "lago",
-        "playa",
-        "acantilado",
-        "mina",
-        "campo",
-    }
-)
-IMPASSABLE = frozenset({"montana_rocosa", "lago", "acantilado"})
-_EXIT = {
-    "llanura": 1,
-    "colina": 2,
-    "bosque": 2,
-    "bosque_profundo": 3,
-    "montana": 3,
-    "desierto": 1,
-    "tundra": 2,
-    "rio": 3,
-    "pantano": 3,
-    "playa": 1,
-    "mina": 1,
-    "campo": 1,
-}
-_GAZE = {"colina": 3, "montana": 4, "bosque_profundo": 0}
-_BASE_GAZE = 2
+GROUNDS = frozenset(_names(_RAW.get("grounds"), "grounds"))
+IMPASSABLE = frozenset(_names(_RAW.get("impassable"), "impassable"))
+_EXIT = _table(_RAW.get("exit"), "exit", minimum=1)
+_GAZE = _table(_RAW.get("gaze"), "gaze", minimum=0)
+_BASE_GAZE = _whole(_RAW.get("base_gaze"), "base_gaze", minimum=0)
+OPEN_GROUNDS = frozenset(_names(_RAW.get("open_grounds"), "open_grounds"))
+EXPLORER_MOVE_BONUS = _whole(_RAW.get("explorer_move_bonus"), "explorer_move_bonus", minimum=0)
+EXPLORER_GAZE_BONUS = _whole(_RAW.get("explorer_gaze_bonus"), "explorer_gaze_bonus", minimum=0)
+if not IMPASSABLE <= GROUNDS or not OPEN_GROUNDS <= GROUNDS or not set(_GAZE) <= GROUNDS:
+    raise RuntimeError("shared/terrain.json names a ground outside grounds")
+if set(_EXIT) != GROUNDS - IMPASSABLE:
+    raise RuntimeError("shared/terrain.json exit table must cover every passable ground")
 HOME_RADIUS = {19: 1, 37: 1, 61: 2, 271: 2, 397: 2, 547: 3, 817: 4}
 
 
@@ -76,6 +97,13 @@ def exit_cost(plot: Plot) -> int:
     if plot.road or plot.bridge:
         return 1
     return _EXIT[plot.ground]
+
+
+def road_refund(plot: Plot) -> int:
+    """A road on rough ground returns one point after the exit is paid."""
+    if plot.road and plot.ground not in OPEN_GROUNDS:
+        return 1
+    return 0
 
 
 def gaze_from(plot: Plot | None) -> int:

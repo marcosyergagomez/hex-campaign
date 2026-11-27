@@ -1,0 +1,285 @@
+.app-shell {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse at top, rgba(141, 44, 42, 0.18), transparent 55%),
+    linear-gradient(180deg, #120e0b 0%, #0c0907 100%);
+}
+
+.app-loading {
+  padding: 48px 24px;
+}
+
+.app-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 28px;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 28px 40px 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(16, 12, 9, 0.72);
+}
+
+.app-brand {
+  display: grid;
+  gap: 12px;
+}
+
+.app-nav {
+  display: flex;
+  gap: 18px;
+}
+
+.app-nav a {
+  color: var(--muted);
+  text-decoration: none;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  padding-bottom: 6px;
+  border-bottom: 1px solid transparent;
+}
+
+.app-nav a[aria-current="page"] {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+.app-user {
+  position: relative;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.app-user .language {
+  position: relative;
+  top: auto;
+  right: auto;
+}
+
+.notification-trigger {
+  position: relative;
+  width: auto;
+  height: 2.5rem;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--gold);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.notification-trigger:hover:not(:disabled),
+.notification-trigger[aria-expanded="true"] {
+  background: transparent;
+  color: color-mix(in srgb, var(--gold) 82%, #fff);
+}
+
+.notification-icon {
+  display: grid;
+  place-items: center;
+  color: inherit;
+}
+
+.notification-dot {
+  position: absolute;
+  top: 2px;
+  right: -2px;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--blood-hot);
+  color: #f7e7d2;
+  font-size: 0.65rem;
+  line-height: 1.05rem;
+  text-align: center;
+}
+
+.notification-panel {
+  width: min(320px, 78vw);
+  right: 0;
+  left: auto;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.notification-panel-title {
+  margin: 0;
+  font-family: Cinzel, Palatino, serif;
+  color: var(--gold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+}
+
+.notification-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.notification-list li {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: rgba(18, 14, 11, 0.72);
+}
+
+.notification-list li.is-unread {
+  border-color: color-mix(in srgb, var(--gold) 70%, var(--line));
+}
+
+.notification-item-title {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.notification-new {
+  margin-left: 8px;
+  color: var(--gold);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.notification-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notification-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+.invite-status {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.invite-status li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.invite-status-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.invite-status button {
+  width: auto;
+}
+
+.invite-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.invite-form {
+  display: grid;
+  gap: 10px;
+}
+
+.invite-suggestions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--line);
+}
+
+.invite-suggestions button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.invite-suggestions button:hover,
+.invite-suggestions button.is-selected {
+  background: color-mix(in srgb, var(--gold) 16%, transparent);
+}
+
+.invite-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.app-body {
+  width: min(960px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 28px 0 56px;
+  display: grid;
+  gap: 18px;
+}
+
+.field-note {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  color: var(--ink-muted, #cbb892);
+  font-size: 0.92rem;
+}
+
+.field-note strong {
+  color: var(--gold, #d6c08a);
+  font-family: Cinzel, Palatino, serif;
+  font-weight: 600;
+}
+
+.app-shell:has(.campaign-detail.is-playing) {
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell:has(.campaign-detail.is-playing) .app-bar {
+  flex: 0 0 auto;
+  padding: 10px 20px 8px;
+}
+
+.app-body:has(.campaign-detail.is-playing) {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0 16px 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

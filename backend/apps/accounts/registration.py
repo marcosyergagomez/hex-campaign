@@ -7,6 +7,7 @@ The mailbox is the only place that receives the raw token.
 """
 
 import hashlib
+import logging
 import secrets
 from datetime import date, timedelta
 from smtplib import SMTPException
@@ -30,9 +31,11 @@ from .validation import (
     registration_errors,
 )
 
+log = logging.getLogger("hexcampaign.mail")
+
 ACCEPTED_DETAIL = "Te enviaremos un enlace para confirmar el correo."
 ALIAS_TAKEN = "Ese alias ya está en uso."
-PASSWORD_MISMATCH = "La contraseña no coincide."
+PASSWORD_MISMATCH = "La contraseña no coincide."  # noqa: S105
 TOKEN_TTL = timedelta(hours=24)
 _EMAIL_CONSTRAINT = "accounts_user_email_key"
 _ALIAS_CONSTRAINT = "accounts_user_alias_ci"
@@ -102,7 +105,7 @@ def _constraint_name(exc: IntegrityError) -> str:
 
 def _error_codes(exc: ValidationError) -> set[str]:
     if hasattr(exc, "error_dict"):
-        groups = exc.error_dict.values()
+        groups = list(exc.error_dict.values())
     else:
         groups = [exc.error_list]
     return {item.code for group in groups for item in group if item.code}
@@ -159,7 +162,7 @@ def register_account(
             )
         except _NoPendingAccount:
             if _alias_taken(cleaned_alias):
-                raise RegistrationError({"alias": [ALIAS_TAKEN]})
+                raise RegistrationError({"alias": [ALIAS_TAKEN]}) from None
             _store_new_account(
                 email=normalized_email,
                 password=password,
@@ -315,6 +318,7 @@ def _send_confirmation(email: str, raw_token: str, language: str) -> None:
             fail_silently=False,
         )
     except (OSError, SMTPException) as exc:
+        log.exception("confirmation mail was not accepted")
         raise MailDeliveryError from exc
 
 

@@ -42,7 +42,8 @@ def check_order(game: Game, player_id: str, paths: dict[str, tuple[Hex, ...]]) -
         if len(path) > move_budget(game.rules.movement, army):
             raise DomainError("order_illegal")
         previous = army.at()
-        assert previous is not None
+        if previous is None:
+            raise DomainError("order_illegal")
         for step in path:
             if step not in board or distance(previous, step) != 1:
                 raise DomainError("order_illegal")
@@ -58,14 +59,17 @@ def check_order(game: Game, player_id: str, paths: dict[str, tuple[Hex, ...]]) -
                 continue
             sequence = sequences[army.id]
             cell = sequence[index] if index < len(sequence) else sequence[-1]
-            assert cell is not None
+            if cell is None:
+                raise DomainError("order_illegal")
             if cell in seen:
                 raise DomainError("order_illegal")
             seen[cell] = army.id
     blocked = {
         Hex(army.q, army.r)
         for army in game.armies
-        if army.player_id != player_id
+        if army.q is not None
+        and army.r is not None
+        and army.player_id != player_id
         and army.kind == "army"
         and sees_army(game, player_id, army)
     }
@@ -87,7 +91,7 @@ def march(
     trails: dict[str, list[Hex]] = {army_id: [] for army_id in starts}
     stopped: set[str] = set()
     contacts: list[Contact] = []
-    kinds = kinds or {army_id: "army" for army_id in starts}
+    kinds = kinds or dict.fromkeys(starts, "army")
 
     for _ in range(max((len(path) for path in paths.values()), default=0)):
         intended = {

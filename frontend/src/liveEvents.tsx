@@ -163,6 +163,10 @@ export function LiveConnection({ active }: { active: boolean }): ReactNode {
   return null
 }
 
+export function liveIsOpen(): boolean {
+  return scope().source?.readyState === EventSource.OPEN
+}
+
 const openStream = scope().source
 if (openStream) {
   openStream.onmessage = (message) => {

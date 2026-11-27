@@ -17,6 +17,7 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
     staff = member is not None and member.role in {"owner", "admin"} and member.status == "active"
     board = set(game.hexes)
     # Keep the starting disk fixed while the fortress can still be moved.
+    homes: dict[str, set[Hex]] | None
     if game.plots is not None and (game.phase == "placing" or game.fort_open):
         homes = assigned_homes(game, board=board)
         for fort in game.fortresses:
@@ -92,8 +93,8 @@ def project(game: Game, viewer: str, now: datetime) -> dict[str, object]:
     return body
 
 
-def project_fort_delta(game: Game) -> dict[str, object]:
-    """The fortress moved. The atlas did not, so the client only needs the new spots."""
+def project_fort_delta(game: Game, viewer: str) -> dict[str, object]:
+    """The mover's own pieces. Other seats stay out of this shortcut."""
     return {
         "kind": "fort_delta",
         "revision": game.revision,
@@ -101,10 +102,12 @@ def project_fort_delta(game: Game) -> dict[str, object]:
         "fortresses": [
             {"player_id": fort.player_id, "q": fort.q, "r": fort.r}
             for fort in game.fortresses
+            if fort.player_id == viewer
         ],
         "armies": [
             {"id": army.id, "q": army.q, "r": army.r}
             for army in game.armies
+            if army.player_id == viewer and army.q is not None and army.r is not None
         ],
     }
 
@@ -259,11 +262,12 @@ def _visible_march(
         return None
     own = event.get("player_id") == viewer
     lost = False
+    offset = 0
     if not own:
         window = _watched_window(game, viewer, sequence, sequences, home=home)
         if window is None:
             return None
-        sequence, lost = window
+        sequence, lost, offset = window
     if len(sequence) < 2 and not lost:
         return None
     shown: dict[str, object] = {
@@ -271,6 +275,9 @@ def _visible_march(
         "from": {"q": sequence[0].q, "r": sequence[0].r},
         "steps": [{"q": cell.q, "r": cell.r} for cell in sequence[1:]],
     }
+    costs = _hop_costs(event.get("costs"), len(sequence) - 1, offset)
+    if costs is not None:
+        shown["costs"] = costs
     if not shown["steps"] and lost:
         shown["steps"] = [{"q": sequence[0].q, "r": sequence[0].r}]
     if lost:
@@ -278,10 +285,21 @@ def _visible_march(
         member = None if army is None else find_member(game, army.player_id)
         shown["lost"] = True
         shown["kind"] = army.kind if army is not None else "army"
-        shown["name"] = "" if army is None or game.rules.visibility == "anonymous" else army.name
-        shown["faction"] = "" if member is None or game.rules.visibility == "anonymous" else member.faction
-        shown["color"] = "" if member is None or game.rules.visibility == "anonymous" else member.color
+        anonymous = game.rules.visibility == "anonymous"
+        shown["name"] = "" if army is None or anonymous else army.name
+        shown["faction"] = "" if member is None or anonymous else member.faction
+        shown["color"] = "" if member is None or anonymous else member.color
     return shown
+
+
+def _hop_costs(raw: object, hops: int, offset: int) -> list[int] | None:
+    """Points spent on each visible hop. Missing on marches saved before this field."""
+    if hops <= 0 or not isinstance(raw, list):
+        return None
+    sliced = raw[offset:offset + hops]
+    if len(sliced) != hops or any(type(item) is not int or item < 1 for item in sliced):
+        return None
+    return sliced
 
 
 def _watched_window(
@@ -291,11 +309,18 @@ def _watched_window(
     sequences: dict[str, list[Hex]],
     *,
     home: set[Hex] | None,
-) -> tuple[list[Hex], bool] | None:
+) -> tuple[list[Hex], bool, int] | None:
     """The part of an enemy march this player could see, and whether sight broke."""
     span = max((len(path) for path in sequences.values()), default=len(sequence))
     seen = [
-        _seen_during(game, viewer, sequence[min(frame, len(sequence) - 1)], frame, sequences, home=home)
+        _seen_during(
+            game,
+            viewer,
+            sequence[min(frame, len(sequence) - 1)],
+            frame,
+            sequences,
+            home=home,
+        )
         for frame in range(span)
     ]
     if not any(seen):
@@ -305,14 +330,15 @@ def _watched_window(
         start = end
         while start > 0 and seen[start - 1]:
             start -= 1
-        return sequence[min(start, len(sequence) - 1) :], False
+        start_index = min(start, len(sequence) - 1)
+        return sequence[start_index:], False, start_index
     start = seen.index(True)
     end = start
     while end + 1 < len(seen) and seen[end + 1]:
         end += 1
     last = min(end, len(sequence) - 1)
     first = min(start, last)
-    return sequence[first : last + 1], True
+    return sequence[first : last + 1], True, first
 
 
 def _seen_during(
@@ -462,20 +488,21 @@ def _armies(
                 }
             )
             continue
+        owned = army.player_id == viewer
         shown.append(
             {
                 "id": army.id,
                 "player_id": army.player_id,
-                "name": army.name,
-                "commander": army.commander,
-                "race": army.race,
-                "roster": army.roster,
+                "name": army.name if owned else "",
+                "commander": army.commander if owned else "",
+                "race": army.race if owned else "",
+                "roster": army.roster if owned else "",
                 "q": q,
                 "r": r,
                 "destroyed": army.destroyed,
                 "kind": army.kind,
                 "anonymous": False,
-                "paid": army.paid if army.player_id == viewer else 0,
+                "paid": army.paid if owned else 0,
             }
         )
     return shown

@@ -1,5 +1,6 @@
 import type { CampaignDetail, CampaignHex, MapCell } from "../api"
 import { clearRoad, finishRoads, placeRoad } from "../api"
+import { isImpassable } from "../game/hex/terrainContract"
 import { useI18n } from "../i18n/language"
 
 type KnownHex = Extract<CampaignHex, { known: true }>
@@ -8,7 +9,6 @@ type RoadSpot = Pick<MapCell, "q" | "r" | "road"> & {
   ground?: string
 }
 
-const IMPASSABLE = new Set(["montana_rocosa", "lago", "acantilado"])
 const STEPS = [
   [1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1],
 ] as const
@@ -27,13 +27,28 @@ function touchesOwnNetwork(campaign: CampaignDetail, cell: RoadSpot): boolean {
   })
 }
 
+export function roadEdit(
+  campaign: CampaignDetail,
+  cell: RoadSpot,
+): "add" | "clear" | null {
+  if (!campaign.roads || campaign.roads.ready || !campaign.you) return null
+  if (cell.owner_id !== campaign.you.player_id) return null
+  if (campaign.fortresses.some((fort) => fort.q === cell.q && fort.r === cell.r)) return null
+  if (isImpassable(cell.ground)) return null
+  if (cell.road) return "clear"
+  if (campaign.roads.left <= 0 || !touchesOwnNetwork(campaign, cell)) return null
+  return "add"
+}
+
 export function RoadPreparation({
   campaign,
   busy = false,
+  buttonOnly = false,
   onChange,
 }: {
   campaign: CampaignDetail
   busy?: boolean
+  buttonOnly?: boolean
   onChange: (action: () => Promise<CampaignDetail>) => void
 }) {
   const { t } = useI18n()
@@ -45,6 +60,19 @@ export function RoadPreparation({
     .map(member => member.alias)
     .join(", ")
 
+  const button = (
+      <button
+        type="button"
+        disabled={roads.ready || busy}
+        onClick={() => {
+          const { id, revision } = campaign
+          onChange(() => finishRoads(id, revision, campaign))
+        }}
+      >
+        {roads.ready ? t("roadsWaiting") : t("roadsFinish")}
+      </button>
+  )
+  if (buttonOnly) return button
   return (
     <div className="roads-prep">
       <p>
@@ -56,16 +84,7 @@ export function RoadPreparation({
       {readyNames ? (
         <p className="quiet">{t("roadsReadyList", { names: readyNames })}</p>
       ) : null}
-      <button
-        type="button"
-        disabled={roads.ready || busy}
-        onClick={() => {
-          const { id, revision } = campaign
-          onChange(() => finishRoads(id, revision, campaign))
-        }}
-      >
-        {roads.ready ? t("roadsWaiting") : t("roadsFinish")}
-      </button>
+      {button}
     </div>
   )
 }
@@ -78,7 +97,7 @@ export function toggleOwnRoad(
   if (!campaign.roads || campaign.roads.ready || !campaign.you) return
   if (cell.owner_id !== campaign.you.player_id) return
   if (campaign.fortresses.some(fort => fort.q === cell.q && fort.r === cell.r)) return
-  if (cell.ground && IMPASSABLE.has(cell.ground)) return
+  if (isImpassable(cell.ground)) return
   const { id, revision } = campaign
   if (cell.road) {
     onChange(() => clearRoad(id, revision, cell.q, cell.r, campaign))

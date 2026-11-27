@@ -35,6 +35,9 @@ async def _lifespan(receive, send):
     while True:
         message = await receive()
         if message["type"] == "lifespan.startup":
+            from apps.campaigns.live import live_bus
+
+            live_bus.start()
             await send({"type": "lifespan.startup.complete"})
         elif message["type"] == "lifespan.shutdown":
             await send({"type": "lifespan.shutdown.complete"})

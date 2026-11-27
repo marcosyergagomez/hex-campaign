@@ -11,11 +11,10 @@ import pytest
 from hexcampaign.domain.balance import arrival_times, balance_problems
 from hexcampaign.domain.clock_march import Walker, walk
 from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.game import from_dict, to_dict
+from hexcampaign.domain.game import from_dict, seated, to_dict
 from hexcampaign.domain.hexes import Hex, angle, disk, distance, neighbors
 from hexcampaign.domain.land import home_radius, owned, rotate
 from hexcampaign.domain.landscape import _problems, _spread
-from hexcampaign.domain.game import seated
 from hexcampaign.domain.lobby import accept_seat, begin, change_rules, create_game, mark_ready
 from hexcampaign.domain.map_document import dump_template, load_template
 from hexcampaign.domain.maps import Template, generate, lay
@@ -565,7 +564,7 @@ def test_a_drawn_map_rejects_a_lone_fortress_or_cells_outside_the_disk() -> None
     with pytest.raises(DomainError):
         drawn(
             271,
-            cells + [{"q": 60, "r": 0, "ground": "llanura", "road": False, "bridge": False}],
+            [*cells, {"q": 60, "r": 0, "ground": "llanura", "road": False, "bridge": False}],
             [],
         )
 
@@ -610,7 +609,7 @@ def test_old_map_and_campaign_documents_keep_their_original_territory() -> None:
 
 
 def test_preparation_lets_each_player_lay_roads_from_their_fortress() -> None:
-    from hexcampaign.domain.roads import clear_road, finish_roads, place_road, road_budget
+    from hexcampaign.domain.roads import clear_road, finish_roads, place_road
 
     game = create_game("Norte", _table(map_size=271, visibility="total"), "ana", "Ana")
     lay(game, generate(271, 2, random.Random(2)), surveyor="ana")
@@ -622,7 +621,9 @@ def test_preparation_lets_each_player_lay_roads_from_their_fortress() -> None:
     fort = next(item.at() for item in game.fortresses if item.player_id == "ana")
     home = owned(fort, home_radius(271), set(game.hexes), count=game.home_size)
     assert road_budget(game, "ana") == 2 * max(distance(cell, fort) for cell in home)
-    first = next(cell for cell in neighbors(fort) if cell in game.plots and passable(game.plots[cell]))
+    first = next(
+        cell for cell in neighbors(fort) if cell in game.plots and passable(game.plots[cell])
+    )
     place_road(game, "ana", first)
     assert game.plots[first].road
     with pytest.raises(DomainError):
@@ -655,7 +656,9 @@ def test_roads_delta_ships_only_the_changed_hex_and_road_counters() -> None:
     begin(_ready_table(game), "ana", [], NOW)
     _leave_forts(game)
     fort = next(item.at() for item in game.fortresses if item.player_id == "ana")
-    first = next(cell for cell in neighbors(fort) if cell in game.plots and passable(game.plots[cell]))
+    first = next(
+        cell for cell in neighbors(fort) if cell in game.plots and passable(game.plots[cell])
+    )
     place_road(game, "ana", first)
 
     full = project(game, "ana", NOW)
@@ -727,9 +730,11 @@ def test_two_fighting_armies_of_one_player_cannot_lock_the_same_hex() -> None:
     begin(_ready_table(game), "ana", [], NOW)
     _finish_prep(game)
     fighters = [army for army in game.armies if army.player_id == "ana" and army.kind == "army"]
-    scout = next(army for army in game.armies if army.player_id == "ana" and army.kind == "explorer")
+    scout = next(
+        army for army in game.armies if army.player_id == "ana" and army.kind == "explorer"
+    )
     scout.kind = "army"
-    own = fighters + [scout]
+    own = [*fighters, scout]
     fort = next(item for item in game.fortresses if item.player_id == "ana").at()
     assert game.plots is not None
     side = next(cell for cell in neighbors(fort) if exit_cost(game.plots[cell]) == 1)
@@ -815,7 +820,9 @@ def _turns(plots: dict[Hex, Plot], start: Hex, goal: Hex) -> int:
                     heapq.heappush(queue, (turn + 1, cell, budget, paid + left))
                 continue
             remain = left - need + (
-                1 if plots[cell].road and plots[cell].ground not in {"llanura", "playa", "rio"} else 0
+                1
+                if plots[cell].road and plots[cell].ground not in {"llanura", "playa", "rio"}
+                else 0
             )
             state = (nxt, remain, 0, turn)
             if state not in seen:

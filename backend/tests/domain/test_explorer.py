@@ -2,10 +2,15 @@
 
 from datetime import UTC, datetime
 
-from hexcampaign.domain.hexes import Hex, distance, neighbors
+from hexcampaign.domain.hexes import distance
 from hexcampaign.domain.lobby import accept_seat, begin, create_game, mark_ready
 from hexcampaign.domain.rules import rules_from
-from hexcampaign.domain.units import EXPLORER_GAZE_BONUS, EXPLORER_MOVE_BONUS, move_budget, unit_gaze
+from hexcampaign.domain.units import (
+    EXPLORER_GAZE_BONUS,
+    EXPLORER_MOVE_BONUS,
+    move_budget,
+    unit_gaze,
+)
 from hexcampaign.domain.view import project
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)

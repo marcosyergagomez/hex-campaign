@@ -30,3 +30,21 @@ ACCOUNT_POST_LIMIT = 10_000
 PLAY_POST_LIMIT = 10_000
 LOGIN_IP_LIMIT = 10_000
 LOGIN_EMAIL_LIMIT = 10_000
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "request_id": {"()": "api.request_id.RequestIdFilter"},
+    },
+    "formatters": {
+        "plain": {"()": "api.request_id.RequestIdFormatter"},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "plain",
+            "filters": ["request_id"],
+        },
+    },
+    "root": {"handlers": ["console"], "level": "WARNING"},
+}

@@ -14,25 +14,23 @@ from hexcampaign.domain.lobby import (
     accept_seat,
     army_sheets_ready,
     begin,
-    clear_ready,
     choose_identity,
     claim_color,
+    clear_ready,
     close_placement,
     confirm_placement,
     create_game,
     describe_army,
-    stand_token,
     invite_player,
     mark_ready,
     place_armies,
+    stand_token,
 )
-from hexcampaign.domain.roads import finish_roads, place_road
 from hexcampaign.domain.march import march
+from hexcampaign.domain.roads import finish_roads, place_road
 from hexcampaign.domain.rules import campaign_description, campaign_name, roster_text, rules_from
 from hexcampaign.domain.sight import known_hex
 from hexcampaign.domain.terrain import Plot
-from hexcampaign.domain.view import project, project_fort_delta
-from hexcampaign.domain.units import unit_gaze
 from hexcampaign.domain.turn import (
     close_orders,
     deactivate_player,
@@ -41,6 +39,8 @@ from hexcampaign.domain.turn import (
     report_battle,
     revert_turn,
 )
+from hexcampaign.domain.units import unit_gaze
+from hexcampaign.domain.view import project, project_fort_delta
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -199,6 +199,7 @@ def test_the_chronicle_hides_a_march_until_the_campaign_ends() -> None:
     ]
     assert marched[-1]["origin"] == origin
     assert marched[-1]["destination"] == {"q": step.q, "r": step.r}
+    assert marched[-1]["costs"] == [1]
     assert project(game, "1", NOW)["chronicle"] == []
 
     game = revert_turn(game, "1")
@@ -245,7 +246,10 @@ def test_explorer_may_share_a_hex_with_the_army() -> None:
     game = _opened()
     army = _army(game, "1")
     explorer = _explorer(game, "1")
-    shared = next(cell for cell in neighbors(army.at()) if cell != explorer.at() and cell in set(game.hexes))
+    board = set(game.hexes)
+    shared = next(
+        cell for cell in neighbors(army.at()) if cell != explorer.at() and cell in board
+    )
     lock_orders(game, "1", _orders(game, "1", {army.id: [shared], explorer.id: [shared]}), NOW)
     assert game.orders["1"][army.id] == (shared,)
     assert game.orders["1"][explorer.id] == (shared,)
@@ -621,9 +625,11 @@ def test_players_place_forts_inside_pre_marked_home_land() -> None:
     army_spot = next(cell for cell in home_one if cell != fort)
     game = place_armies(game, "1", fort, {own.id: army_spot, scout.id: army_spot})
     assert next(item for item in game.fortresses if item.player_id == "1").at() == fort
-    delta = project_fort_delta(game)
+    delta = project_fort_delta(game, "1")
     assert delta["kind"] == "fort_delta"
     assert "hexes" not in delta
+    assert {item["player_id"] for item in delta["fortresses"]} == {"1"}
+    assert {item["id"] for item in delta["armies"]} <= {own.id, scout.id}
     assert {"player_id": "1", "q": fort.q, "r": fort.r} in delta["fortresses"]
     again = project(game, "1", NOW)
     still = {Hex(cell["q"], cell["r"]) for cell in again["hexes"] if cell.get("owner_id") == "1"}
@@ -756,7 +762,10 @@ def test_an_enemy_who_walks_out_of_sight_leaves_a_trace_and_far_hexes_stay_dim()
         (
             [Hex(cell.q + step, cell.r) for step in range(4)]
             for cell in board
-            if all(Hex(cell.q + step, cell.r) in board and Hex(cell.q + step, cell.r) not in home for step in range(4))
+            if all(
+                Hex(cell.q + step, cell.r) in board and Hex(cell.q + step, cell.r) not in home
+                for step in range(4)
+            )
         ),
         None,
     )
@@ -788,8 +797,12 @@ def test_an_enemy_who_walks_out_of_sight_leaves_a_trace_and_far_hexes_stay_dim()
     seen.extend(Hex(step["q"], step["r"]) for step in move["steps"])
     assert line[1] in seen
     assert line[-1] not in seen
-    lit = next(cell for cell in view["hexes"] if cell["q"] == line[0].q and cell["r"] == line[0].r)
-    dark = next(cell for cell in view["hexes"] if cell["q"] == line[-1].q and cell["r"] == line[-1].r)
+    lit = next(
+        cell for cell in view["hexes"] if cell["q"] == line[0].q and cell["r"] == line[0].r
+    )
+    dark = next(
+        cell for cell in view["hexes"] if cell["q"] == line[-1].q and cell["r"] == line[-1].r
+    )
     assert lit["known"] is True and lit["sight"] is True
     assert dark["known"] is True and dark["sight"] is False
 

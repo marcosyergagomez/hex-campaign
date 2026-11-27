@@ -20,7 +20,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from .models import PlayerSession, User
-from .passwords import check_encoded_password, check_user_password, dummy_password_hash
+from .passwords import HashBusy, check_encoded_password, check_user_password, dummy_password_hash
 from .throttle import login_emails, login_ips
 from .validation import MAX_PASSWORD_LENGTH, canonical_email
 
@@ -60,7 +60,10 @@ def login(email: object, password: object, host: str = "-") -> OpenedSession:
         raise LoginThrottled
     if not _email_attempt_allowed(email):
         raise LoginThrottled
-    user = _authenticated_user(email, password)
+    try:
+        user = _authenticated_user(email, password)
+    except HashBusy:
+        raise LoginThrottled from None
     if user is None:
         raise LoginRejected
     return open_session(user)

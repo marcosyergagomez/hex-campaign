@@ -135,17 +135,84 @@ def _preparing(ana, boa, *, blind: bool, map_id: str, size: int = 271) -> dict:
     return view
 
 
+def _act(client, path: str, view: dict, **extra) -> dict:
+    response = _write(client, path, {"revision": view["revision"], **extra})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _seen_by(client, view: dict) -> dict:
+    response = _read(client, f"/api/campaigns/{view['id']}")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _finish_seat(client, view: dict) -> dict:
+    """Lock the keep, close roads, stand the tokens and name them. Then the seat is done."""
+    from hexcampaign.domain.hexes import Hex, distance
+    from hexcampaign.domain.terrain import IMPASSABLE
+
+    view = _seen_by(client, view)
+    campaign_id = view["id"]
+    player_id = view["you"]["player_id"]
+    view = _act(client, f"/api/campaigns/{campaign_id}/placement/ready", view)
+    view = _act(client, f"/api/campaigns/{campaign_id}/roads/ready", view)
+    fort = next(item for item in view["fortresses"] if item["player_id"] == player_id)
+    fort_hex = Hex(fort["q"], fort["r"])
+    armies = [
+        army
+        for army in view["armies"]
+        if army["player_id"] == player_id and not army.get("destroyed")
+    ]
+    spots = sorted(
+        (
+            Hex(cell["q"], cell["r"])
+            for cell in view["hexes"]
+            if cell.get("known") and cell.get("ground") not in IMPASSABLE
+        ),
+        key=lambda spot: distance(spot, fort_hex),
+    )
+    commanders = ["Primero", "Segundo", "Tercero", "Cuarto"]
+    named = 0
+    used: set[tuple[int, int]] = set()
+    for army in armies:
+        stood = False
+        for spot in spots:
+            if (spot.q, spot.r) in used:
+                continue
+            response = _write(
+                client,
+                f"/api/campaigns/{campaign_id}/armies/{army['id']}/stand",
+                {"revision": view["revision"], "q": spot.q, "r": spot.r},
+            )
+            if response.status_code != 200:
+                continue
+            view = response.json()
+            used.add((spot.q, spot.r))
+            stood = True
+            break
+        assert stood, army["id"]
+        if army.get("kind", "army") != "army":
+            continue
+        view = _act(
+            client,
+            f"/api/campaigns/{campaign_id}/armies/{army['id']}",
+            view,
+            name=commanders[named],
+            commander=commanders[named],
+            race="",
+            roster="",
+        )
+        named += 1
+    return view
+
+
 def _table(ana, boa, *, blind: bool, map_id: str, size: int = 271) -> dict:
     view = _preparing(ana, boa, blind=blind, map_id=map_id, size=size)
-    campaign_id = view["id"]
-    for client in (ana, boa):
-        view = _write(
-            client,
-            f"/api/campaigns/{campaign_id}/roads/ready",
-            {"revision": view["revision"]},
-        ).json()
+    view = _finish_seat(ana, view)
+    view = _finish_seat(boa, view)
     assert view["phase"] == "orders"
-    return _read(ana, f"/api/campaigns/{campaign_id}").json()
+    return _read(ana, f"/api/campaigns/{view['id']}").json()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -201,6 +268,7 @@ def test_road_mutations_return_a_delta_until_preparation_ends(clients) -> None:
     created = _write(ana, "/api/maps", {"name": "Caminos", "size": 271, "seats": 2})
     assert created.status_code == 201, created.text
     view = _preparing(ana, boa, blind=False, map_id=created.json()["id"])
+    view = _act(ana, f"/api/campaigns/{view['id']}/placement/ready", view)
     full_size = len(json.dumps(view, sort_keys=True))
     fort = next(item for item in view["fortresses"] if item["player_id"] == str(owner.pk))
     near = {(cell.q, cell.r) for cell in neighbors(Hex(fort["q"], fort["r"]))}
@@ -247,24 +315,17 @@ def test_road_mutations_return_a_delta_until_preparation_ends(clients) -> None:
         {"revision": cleared_body["revision"]},
     )
     assert ready.status_code == 200, ready.text
+    # Closing roads returns the whole seat: the armies have to be stood next.
     waiting = ready.json()
-    assert waiting["kind"] == "roads_delta"
+    assert waiting.get("kind") != "roads_delta"
     assert waiting["phase"] == "preparing"
-    assert waiting["roads"]["ready"] is True
-    assert waiting["hexes"] == []
+    assert "armies" in waiting
 
-    done = _write(
-        boa,
-        f"/api/campaigns/{view['id']}/roads/ready",
-        {"revision": waiting["revision"]},
-    )
-    assert done.status_code == 200, done.text
-    opened = done.json()
-    assert opened.get("kind") != "roads_delta"
-    assert opened["phase"] == "orders"
-    assert opened["turn"] == 1
-    assert "members" in opened
-    assert len(opened["hexes"]) == 271
+    boa_view = _seen_by(boa, waiting)
+    boa_view = _act(boa, f"/api/campaigns/{view['id']}/placement/ready", boa_view)
+    done = _act(boa, f"/api/campaigns/{view['id']}/roads/ready", boa_view)
+    assert done["phase"] == "preparing"
+    assert "armies" in done
 
 
 @pytest.mark.django_db(transaction=True)

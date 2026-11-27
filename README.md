@@ -40,6 +40,8 @@ py -3 -m venv .venv
 .venv\Scripts\activate
 python -m pip install -e ".[dev]"
 python manage.py migrate
+ruff check .
+mypy
 pytest
 uvicorn config.asgi:application --reload
 ```
@@ -67,6 +69,8 @@ On macOS or Linux, activate the virtual environment with `source .venv/bin/activ
 Mapa de campaña en el navegador para partidas de miniaturas. Los jugadores cierran órdenes en secreto. El servidor las resuelve cuando todos han cerrado. La batalla se juega en la mesa y después se anota el resultado. La primera versión es una mesa de 2 a 4 jugadores. Esas reglas están en `docs/reglas-de-campana.md`. El contrato del backend está en `docs/requisitos-tecnicos-backend.md`.
 
 Las reglas de campaña son propias. No hay arte oficial ni texto de reglamento copiado.
+
+El listado de partidas no abre el documento: fase, revisión, turno, plazas y ocupación están en columnas. Desde `backend/`, `ruff check .`, `mypy` y `pytest` comprueban el servidor.
 
 En el navegador ya están las campañas, el estudio de mapas, el editor a mano alzada, los estandartes y el tablero con terrenos. Un mapa dibujado puede usar solo parte del disco del tamaño elegido. Con mapa de terrenos, al empezar se abre una preparación en la que cada asiento pone caminos en su territorio antes del turno 1; cada clic de camino responde un delta hasta que esa fase termina. Órdenes y batallas siguen solo en el dominio.
 

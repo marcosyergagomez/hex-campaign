@@ -4,6 +4,8 @@ This model has to exist before the first migration. Django builds the
 permission tables against whatever AUTH_USER_MODEL is at that moment.
 """
 
+from typing import Any, cast
+
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -22,15 +24,15 @@ from .validation import (
 
 
 class UserManager(BaseUserManager):
-    def create_user(self, email: str, password: str | None = None, **extra_fields: object):
+    def create_user(self, email: str, password: str | None = None, **extra_fields: Any):
         if not email or not str(email).strip():
             raise ValueError("An email is required.")
-        user = self.model(email=email, **extra_fields)
+        user = cast(User, self.model(email=email, **extra_fields))
         user.set_password(password)
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, email: str, password: str | None = None, **extra_fields: object):
+    def create_superuser(self, email: str, password: str | None = None, **extra_fields: Any):
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
         if extra_fields.get("is_staff") is not True or extra_fields.get("is_superuser") is not True:
@@ -63,12 +65,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     objects = UserManager()
 
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["alias", "birth_date", "sex"]
+    REQUIRED_FIELDS = ["alias", "birth_date", "sex"]  # noqa: RUF012
 
     class Meta:
         verbose_name = "usuario"
         verbose_name_plural = "usuarios"
-        constraints = [
+        constraints = (
             models.UniqueConstraint(
                 Lower("alias"),
                 name="accounts_user_alias_ci",
@@ -83,7 +85,7 @@ class User(AbstractBaseUser, PermissionsMixin):
                 condition=models.Q(alias__regex=r"^[A-Za-z0-9_]{3,24}$"),
                 name="accounts_user_alias_shape",
             ),
-        ]
+        )
 
     def clean(self) -> None:
         super().clean()
@@ -114,19 +116,20 @@ class User(AbstractBaseUser, PermissionsMixin):
                 previous, self, kwargs.get("update_fields")
             ):
                 # Same transaction as the account. Every current seat becomes inactive.
-                from apps.campaigns.records import deactivate_account
+                from apps.campaigns.match import deactivate_account
 
                 deactivate_account(self.pk)
 
-    def _locked_credentials(self) -> dict[str, object] | None:
+    def _locked_credentials(self) -> dict[str, Any] | None:
         if not self.pk:
             return None
-        return (
+        found = (
             User.objects.select_for_update()
             .filter(pk=self.pk)
             .values("password", "is_active")
             .first()
         )
+        return cast(dict[str, Any] | None, found)
 
     def _canonicalize(self) -> None:
         if isinstance(self.email, str):
@@ -154,6 +157,27 @@ class EmailVerification(models.Model):
     class Meta:
         verbose_name = "confirmación de correo"
         verbose_name_plural = "confirmaciones de correo"
+
+    def __str__(self) -> str:
+        return f"{self.user_id} {self.expires_at:%Y-%m-%d}"
+
+
+class PasswordReset(models.Model):
+    """One password-reset secret. Only its SHA-256 digest is stored."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="password_resets",
+    )
+    token_hash = models.CharField(max_length=64, unique=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "restablecimiento de contraseña"
+        verbose_name_plural = "restablecimientos de contraseña"
 
     def __str__(self) -> str:
         return f"{self.user_id} {self.expires_at:%Y-%m-%d}"
@@ -206,9 +230,9 @@ class PlayerSession(models.Model):
     class Meta:
         verbose_name = "sesión"
         verbose_name_plural = "sesiones"
-        indexes = [
+        indexes = (
             models.Index(fields=["user", "last_seen_at"], name="accounts_ps_user_seen"),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.user_id} {self.expires_at:%Y-%m-%d}"

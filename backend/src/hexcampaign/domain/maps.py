@@ -70,6 +70,7 @@ def fortress_sites(size: int, seats: int) -> tuple[Hex, ...]:
         raise DomainError("rules_invalid")
     area = initial_area(size)
     radius = DISK_RADIUS[size]
+    sites: tuple[Hex, ...]
     for ring in range(max(1, radius - core_radius(area)), radius):
         if seats == 2:
             sites = (Hex(ring, 0), Hex(-ring, 0))
