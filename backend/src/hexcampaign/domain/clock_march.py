@@ -55,7 +55,12 @@ def walk(
     )
 
 
-def _paying(walkers, plots, board, stopped) -> list[Walker]:
+def _paying(
+    walkers: list[Walker],
+    plots: dict[Hex, Plot],
+    board: set[Hex],
+    stopped: set[str],
+) -> list[Walker]:
     spending: list[Walker] = []
     for walker in walkers:
         if walker.army_id in stopped or not walker.path or walker.budget <= 0:
@@ -71,7 +76,13 @@ def _paying(walkers, plots, board, stopped) -> list[Walker]:
     return spending
 
 
-def _step(ready, by_id, plots, stopped, contacts) -> None:
+def _step(
+    ready: list[Walker],
+    by_id: dict[str, Walker],
+    plots: dict[Hex, Plot],
+    stopped: set[str],
+    contacts: list[Contact],
+) -> None:
     position = {army_id: walker.at for army_id, walker in by_id.items()}
     owners = {army_id: walker.player_id for army_id, walker in by_id.items()}
     kinds = {army_id: walker.kind for army_id, walker in by_id.items()}
@@ -109,7 +120,14 @@ def _step(ready, by_id, plots, stopped, contacts) -> None:
                     _halt(by_id[other], stopped)
 
 
-def _arrive(walker: Walker, plots, dest: Hex, stopped: set[str], *, fight: bool) -> None:
+def _arrive(
+    walker: Walker,
+    plots: dict[Hex, Plot],
+    dest: Hex,
+    stopped: set[str],
+    *,
+    fight: bool,
+) -> None:
     left = plots[walker.at]
     walker.at = dest
     walker.trail.append(dest)

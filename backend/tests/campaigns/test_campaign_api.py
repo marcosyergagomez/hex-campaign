@@ -380,8 +380,9 @@ def test_owner_can_delete_a_prepared_campaign(clients, settings) -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_owner_leaving_a_running_campaign_hands_over_and_hides_it() -> None:
+    from apps.campaigns.document import from_dict, to_dict
     from apps.campaigns.records import _sync, scrap_campaign
-    from hexcampaign.domain.game import find_member, from_dict, to_dict
+    from hexcampaign.domain.game import find_member
     from hexcampaign.domain.lobby import accept_seat, invite_player
 
     owner = _player("correr@example.com", "correr")
@@ -416,9 +417,10 @@ def test_owner_leaving_a_running_campaign_hands_over_and_hides_it() -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_player_leaving_becomes_inactive_and_can_be_restored() -> None:
+    from apps.campaigns.document import from_dict, to_dict
     from apps.campaigns.models import Seat
     from apps.campaigns.records import play, scrap_campaign
-    from hexcampaign.domain.game import find_member, from_dict, to_dict
+    from hexcampaign.domain.game import find_member
     from hexcampaign.domain.lobby import accept_seat, invite_player
     from hexcampaign.domain.turn import restore_player
 

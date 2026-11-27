@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from django.db import transaction
 
-from hexcampaign.domain.game import Game, to_dict
+from hexcampaign.domain.game import Game
 
 from .access import _push_after_commit
+from .document import to_dict
 from .models import Campaign, Seat
 from .notices import notify_battles, record_promotions
 

@@ -7,6 +7,7 @@ from api.campaigns.bodies import AliasBody, RevisionBody
 from api.campaigns.http import _MESSAGES, _errors, _failure, _run, _view
 from api.django_db import django_sync
 from api.player_gate import reader as _reader
+from apps.accounts.models import User
 from apps.campaigns.errors import CampaignError
 from apps.campaigns.invitations import (
     accept_alias,
@@ -62,8 +63,8 @@ def get_notifications(request: Request) -> JSONResponse:
 
 @router.post("/api/notifications/{notification_id}/read")
 @django_sync
-def post_notification_read(notification_id: str, request: Request) -> JSONResponse:
-    def action(user):
+def post_notification_read(notification_id: str, request: Request) -> Response:
+    def action(user: User) -> Response:
         return JSONResponse(mark_notification_read(user, notification_id))
 
     return _run(request, action)
@@ -83,8 +84,8 @@ def get_invitation(token: str, request: Request) -> JSONResponse:
 
 @router.post("/api/campaigns/{campaign_id}/invitations")
 @django_sync
-def post_invitation(campaign_id: str, payload: AliasBody, request: Request) -> JSONResponse:
-    def action(user):
+def post_invitation(campaign_id: str, payload: AliasBody, request: Request) -> Response:
+    def action(user: User) -> Response:
         saved = invite_alias(user, campaign_id, payload.revision, payload.alias)
         return _view(user, *saved)
 
@@ -106,7 +107,7 @@ def get_campaign_invitations(campaign_id: str, request: Request) -> JSONResponse
 @router.post("/api/campaigns/{campaign_id}/invitations/{invitation_id}/revoke")
 @django_sync
 def post_revoke_invitation(campaign_id: str, invitation_id: str, request: Request) -> Response:
-    def action(user):
+    def action(user: User) -> Response:
         revoke_invitation(user, campaign_id, invitation_id)
         return Response(status_code=204)
 
@@ -116,7 +117,7 @@ def post_revoke_invitation(campaign_id: str, invitation_id: str, request: Reques
 @router.post("/api/campaigns/{campaign_id}/invitations/{invitation_id}/resend")
 @django_sync
 def post_resend_invitation(campaign_id: str, invitation_id: str, request: Request) -> Response:
-    def action(user):
+    def action(user: User) -> Response:
         resend_invitation(user, campaign_id, invitation_id)
         return Response(status_code=204)
 
@@ -126,7 +127,7 @@ def post_resend_invitation(campaign_id: str, invitation_id: str, request: Reques
 @router.post("/api/campaigns/{campaign_id}/invitations/decline")
 @django_sync
 def post_decline_invitation(campaign_id: str, request: Request) -> Response:
-    def action(user):
+    def action(user: User) -> Response:
         decline_invitation(user, campaign_id)
         return Response(status_code=204)
 
@@ -135,8 +136,8 @@ def post_decline_invitation(campaign_id: str, request: Request) -> Response:
 
 @router.post("/api/campaigns/{campaign_id}/links", status_code=201)
 @django_sync
-def post_link(campaign_id: str, request: Request) -> JSONResponse:
-    def action(user):
+def post_link(campaign_id: str, request: Request) -> Response:
+    def action(user: User) -> Response:
         return JSONResponse({"token": invite_link(user, campaign_id)}, status_code=201)
 
     return _run(request, action)
@@ -144,8 +145,8 @@ def post_link(campaign_id: str, request: Request) -> JSONResponse:
 
 @router.post("/api/invitations/{token}/accept")
 @django_sync
-def post_accept(token: str, payload: RevisionBody, request: Request) -> JSONResponse:
-    def action(user):
+def post_accept(token: str, payload: RevisionBody, request: Request) -> Response:
+    def action(user: User) -> Response:
         return _view(user, *accept_link(user, token, payload.revision))
 
     return _run(request, action)
@@ -153,8 +154,8 @@ def post_accept(token: str, payload: RevisionBody, request: Request) -> JSONResp
 
 @router.post("/api/campaigns/{campaign_id}/join")
 @django_sync
-def post_join(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
-    def action(user):
+def post_join(campaign_id: str, payload: RevisionBody, request: Request) -> Response:
+    def action(user: User) -> Response:
         return _view(user, *accept_alias(user, campaign_id, payload.revision))
 
     return _run(request, action)

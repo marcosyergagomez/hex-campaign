@@ -9,8 +9,9 @@ import uuid
 from django.db import transaction
 
 from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.game import Game, from_dict
+from hexcampaign.domain.game import Game
 
+from .document import from_dict
 from .errors import CampaignError
 from .live import live_bus
 from .models import Campaign, Seat

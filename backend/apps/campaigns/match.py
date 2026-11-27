@@ -11,14 +11,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.game import (
-    Game,
-    bump,
-    find_member,
-    from_dict,
-    require_owner,
-    to_dict,
-)
+from hexcampaign.domain.game import Game, bump, find_member, require_owner
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.lobby import create_game
 from hexcampaign.domain.rules import campaign_name, rules_from
@@ -35,6 +28,7 @@ from .access import (
     _require_account,
     _seat_user_ids,
 )
+from .document import from_dict, to_dict
 from .errors import (
     PREPARED_PHASES,
     RUNNING_CAMPAIGN_LIMIT,

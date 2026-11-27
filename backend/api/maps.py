@@ -1,6 +1,7 @@
 """Saved maps. The picture belongs to one player and is copied into a campaign."""
 
 import random
+from collections.abc import Callable
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field
 from api.django_db import django_sync
 from api.player_gate import reader, writer
 from api.player_session import SESSION_MESSAGE
+from apps.accounts.models import User
 from apps.campaigns.atlases import (
     copy_for_edit,
     drop_map,
@@ -19,6 +21,7 @@ from apps.campaigns.atlases import (
     update_drawn,
 )
 from apps.campaigns.errors import CampaignError
+from apps.campaigns.models import CampaignMap
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.maps import table_presets
 
@@ -50,7 +53,7 @@ def _failure(exc: CampaignError) -> JSONResponse:
     return JSONResponse(status_code=status, content={"errors": {field: [message]}})
 
 
-def _run(request: Request, action) -> Response:
+def _run(request: Request, action: Callable[[User], Response]) -> Response:
     user = writer(request)
     if isinstance(user, JSONResponse):
         return user
@@ -60,7 +63,7 @@ def _run(request: Request, action) -> Response:
         return _failure(exc)
 
 
-def _summary(row) -> dict[str, object]:
+def _summary(row: CampaignMap) -> dict[str, object]:
     return {
         "id": str(row.id),
         "name": row.name,
@@ -131,7 +134,7 @@ def get_map(map_id: str, request: Request) -> JSONResponse:
 @router.delete("/api/maps/{map_id}", status_code=204)
 @django_sync
 def delete_map(map_id: str, request: Request) -> Response:
-    def action(user):
+    def action(user: User) -> Response:
         drop_map(user, map_id)
         return Response(status_code=204)
 
@@ -140,8 +143,8 @@ def delete_map(map_id: str, request: Request) -> Response:
 
 @router.post("/api/maps", status_code=201)
 @django_sync
-def post_map(payload: MapBody, request: Request) -> JSONResponse:
-    def action(user):
+def post_map(payload: MapBody, request: Request) -> Response:
+    def action(user: User) -> Response:
         try:
             if payload.cells is None:
                 sizes = {row["size"] for row in table_presets()}
@@ -162,13 +165,13 @@ def post_map(payload: MapBody, request: Request) -> JSONResponse:
             return _failure(CampaignError(exc.code))
         return JSONResponse(_summary(row), status_code=201)
 
-    return _run(request, action)  # type: ignore[return-value]
+    return _run(request, action)
 
 
 @router.put("/api/maps/{map_id}")
 @django_sync
-def put_map(map_id: str, payload: MapBody, request: Request) -> JSONResponse:
-    def action(user):
+def put_map(map_id: str, payload: MapBody, request: Request) -> Response:
+    def action(user: User) -> Response:
         if payload.cells is None:
             raise CampaignError("rules_invalid")
         cells = [item.model_dump() for item in payload.cells]
@@ -179,14 +182,14 @@ def put_map(map_id: str, payload: MapBody, request: Request) -> JSONResponse:
             raise CampaignError(exc.code) from exc
         return JSONResponse(_summary(row))
 
-    return _run(request, action)  # type: ignore[return-value]
+    return _run(request, action)
 
 
 @router.post("/api/maps/{map_id}/copy", status_code=201)
 @django_sync
-def post_map_copy(map_id: str, payload: CopyBody, request: Request) -> JSONResponse:
-    def action(user):
+def post_map_copy(map_id: str, payload: CopyBody, request: Request) -> Response:
+    def action(user: User) -> Response:
         row = copy_for_edit(user, map_id, payload.name)
         return JSONResponse(_summary(row), status_code=201)
 
-    return _run(request, action)  # type: ignore[return-value]
+    return _run(request, action)

@@ -15,9 +15,11 @@ from api.campaigns.bodies import (
 from api.campaigns.http import _failure, _rules, _run, _view
 from api.django_db import django_sync
 from api.player_gate import reader as _reader
+from apps.accounts.models import User
 from apps.campaigns.errors import CampaignError
 from apps.campaigns.match import create_campaign, play, read_campaign, scrap_campaign
 from apps.campaigns.queries import campaign_pulse, list_campaigns
+from hexcampaign.domain.game import Game
 from hexcampaign.domain.identity import COLORS, FACTIONS, LEGACY
 from hexcampaign.domain.lobby import (
     change_rules,
@@ -55,9 +57,9 @@ def get_identity_options(request: Request) -> JSONResponse:
 
 @router.post("/api/campaigns/{campaign_id}/identity")
 @django_sync
-def post_identity(campaign_id: str, payload: IdentityBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_identity(campaign_id: str, payload: IdentityBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return choose_identity(game, str(user.pk), payload.faction, payload.color)
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -67,9 +69,9 @@ def post_identity(campaign_id: str, payload: IdentityBody, request: Request) -> 
 
 @router.post("/api/campaigns/{campaign_id}/color")
 @django_sync
-def post_color(campaign_id: str, payload: ColorBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_color(campaign_id: str, payload: ColorBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return claim_color(game, str(user.pk), payload.color)
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -79,9 +81,9 @@ def post_color(campaign_id: str, payload: ColorBody, request: Request) -> JSONRe
 
 @router.post("/api/campaigns/{campaign_id}/ready")
 @django_sync
-def post_ready(campaign_id: str, payload: ReadyBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_ready(campaign_id: str, payload: ReadyBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             if payload.ready:
                 return mark_ready(game, str(user.pk))
             return clear_ready(game, str(user.pk))
@@ -93,8 +95,8 @@ def post_ready(campaign_id: str, payload: ReadyBody, request: Request) -> JSONRe
 
 @router.post("/api/campaigns", status_code=201)
 @django_sync
-def post_campaign(payload: CreateBody, request: Request) -> JSONResponse:
-    def action(user):
+def post_campaign(payload: CreateBody, request: Request) -> Response:
+    def action(user: User) -> Response:
         template = None
         if payload.map_id:
             from apps.campaigns.atlases import take_template
@@ -115,10 +117,10 @@ def post_campaign(payload: CreateBody, request: Request) -> JSONResponse:
 
 @router.post("/api/campaigns/{campaign_id}/scrap", response_model=None)
 @django_sync
-def post_scrap_campaign(campaign_id: str, payload: ScrapBody, request: Request):
+def post_scrap_campaign(campaign_id: str, payload: ScrapBody, request: Request) -> Response:
     """Leave or destroy a campaign after the player types its name."""
 
-    def action(user):
+    def action(user: User) -> Response:
         scrap_campaign(user, campaign_id, payload.confirm_name)
         return Response(status_code=204)
 
@@ -151,11 +153,11 @@ def get_campaign_pulse(campaign_id: str, request: Request) -> JSONResponse:
 
 @router.post("/api/campaigns/{campaign_id}/rules")
 @django_sync
-def post_rules(campaign_id: str, payload: RulesChange, request: Request) -> JSONResponse:
-    def action(user):
+def post_rules(campaign_id: str, payload: RulesChange, request: Request) -> Response:
+    def action(user: User) -> Response:
         rules = _rules(payload.rules)
 
-        def command(game):
+        def command(game: Game) -> Game:
             return change_rules(game, str(user.pk), payload.name, rules, payload.description)
 
         return _view(user, *play(user, campaign_id, payload.revision, command))

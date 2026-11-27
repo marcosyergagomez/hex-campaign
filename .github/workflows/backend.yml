@@ -39,6 +39,6 @@ jobs:
       - name: Ruff
         run: ruff check .
       - name: Mypy
-        run: mypy
+        run: mypy --strict
       - name: Pytest
-        run: pytest
+        run: pytest --cov=hexcampaign --cov=api --cov=apps --cov-report=term-missing --cov-fail-under=86

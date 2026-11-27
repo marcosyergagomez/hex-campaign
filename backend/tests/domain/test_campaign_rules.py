@@ -6,8 +6,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from apps.campaigns.document import from_dict, to_dict
 from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.game import Army, find_member, from_dict, to_dict
+from hexcampaign.domain.game import Army, find_member
 from hexcampaign.domain.hexes import Hex, deploy_reach, disk, distance, neighbors
 from hexcampaign.domain.identity import COLORS
 from hexcampaign.domain.lobby import (

@@ -231,4 +231,12 @@ Desierto, mina y campo se salen y se ven como una llanura. Están en el catálog
 
 ## Fuera de esta versión
 
-Queda para más adelante: comprar ejércitos con puntos, movimiento según unidades y raza, bajas que no sean destrucción total, y pueblos o puestos avanzados. El catálogo de terrenos ya rige las campañas con mapa; quedan por cerrar en pantalla el lobby completo, las órdenes y las batallas. Cuando existan pueblos o puestos, una expulsión también los borra si pertenecen al jugador expulsado.
+Queda para más adelante: comprar ejércitos con puntos, movimiento según unidades y raza, bajas que no sean destrucción total, y pueblos o puestos avanzados. Cuando existan pueblos o puestos, una expulsión también los borra si pertenecen al jugador expulsado. Borrar una cuenta no entra en esta versión: desactivar una cuenta, desde el admin, sí marca inactivas sus plazas.
+
+## Lo que la pantalla aún no cierra
+
+El catálogo de terrenos ya rige las campañas con mapa. En la mesa ya están el reclutamiento, el estandarte, la invitación por alias, la preparación, las órdenes secretas y su resolución. Un administrador ya puede cerrar un turno con órdenes pendientes, juzgar una batalla si los informes no coinciden o si el plazo se ha cumplido, expulsar, restaurar, promover y revertir el último turno. Al terminar, la crónica enseña el desenlace.
+
+Para cerrar una partida el mismo día falta que cada luchador anote vencedor o empate. El servidor guarda ese informe y aplica el resultado cuando coinciden. La pantalla todavía no lo pide, así que no hay desacuerdo que un administrador pueda juzgar antes de que venza el plazo de la batalla.
+
+El servidor también aplica, y la pantalla todavía no ofrece: cambiar las reglas y bajar plazas antes de empezar, nombrar administradores en el arranque, generar el enlace de invitación, buscar una campaña por su id, revocar, reenviar o rechazar una invitación, y abandonar la mesa. Durante la guerra no se ve el contador de retención de una fortaleza, ni los plazos, ni el silencio, ni los avisos de inactividad. Esas reglas siguen escritas arriba y no cambian.

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
+from typing import Any
 
 from asgiref.sync import sync_to_async
 from django.db import close_old_connections
@@ -22,8 +24,8 @@ _HEADERS = {
 }
 
 
-@router.get("/api/events")
-async def get_events(request: Request):
+@router.get("/api/events", response_model=None)
+async def get_events(request: Request) -> JSONResponse | StreamingResponse:
     close_old_connections()
     try:
         user = await sync_to_async(_reader, thread_sensitive=True)(request)
@@ -41,7 +43,7 @@ async def get_events(request: Request):
             status_code=429,
         )
 
-    async def stream():
+    async def stream() -> AsyncIterator[str]:
         try:
             yield _frame({"type": "ready"})
             while True:
@@ -59,5 +61,5 @@ async def get_events(request: Request):
     return StreamingResponse(stream(), media_type="text/event-stream", headers=_HEADERS)
 
 
-def _frame(event: dict) -> str:
+def _frame(event: dict[str, Any]) -> str:
     return f"data: {json.dumps(event, separators=(',', ':'))}\n\n"

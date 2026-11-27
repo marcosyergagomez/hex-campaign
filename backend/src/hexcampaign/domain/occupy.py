@@ -25,8 +25,8 @@ class StepPlan:
 
 def who_can_leave(
     intended: dict[str, Hex],
-    position,
-    owners,
+    position: dict[str, Hex],
+    owners: dict[str, str],
     stopped: set[str],
     kinds: dict[str, str] | None = None,
 ) -> set[str]:
@@ -44,11 +44,11 @@ def who_can_leave(
 
 
 def hex_stays_blocked(
-    army_id,
-    dest,
-    active,
-    position,
-    owners,
+    army_id: str,
+    dest: Hex,
+    active: set[str],
+    position: dict[str, Hex],
+    owners: dict[str, str],
     stopped: set[str],
     kinds: dict[str, str] | None = None,
 ) -> bool:

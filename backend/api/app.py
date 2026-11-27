@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from api.campaigns import router as campaign_router
 from api.django_db import django_sync
 from api.events import router as events_router
+from api.faults import install as install_faults
 from api.guard import AccountGuard
 from api.maps import router as map_router
 from api.pages import confirm_page, reset_page, result_page
@@ -55,6 +56,7 @@ api = FastAPI(
 )
 api.add_middleware(AccountGuard)
 api.add_middleware(RequestIdMiddleware)
+install_faults(api)
 api.include_router(player_session_router)
 api.include_router(profile_router)
 api.include_router(campaign_router)

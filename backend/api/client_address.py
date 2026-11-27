@@ -33,7 +33,13 @@ def _peer(scope: Mapping[str, Any]) -> str:
 
 
 def _header(scope: Mapping[str, Any], name: bytes) -> str:
-    for key, value in scope.get("headers", []):
-        if key == name:
+    headers = scope.get("headers", [])
+    if not isinstance(headers, list):
+        return ""
+    for item in headers:
+        if not (isinstance(item, tuple) and len(item) == 2):
+            continue
+        key, value = item
+        if key == name and isinstance(value, bytes):
             return value.decode("latin-1")
     return ""

@@ -6,7 +6,7 @@ Las reglas de juego están en `docs/reglas-de-campana.md`. Aquí queda cómo las
 
 Las reglas puras viven en `hexcampaign.domain` y no importan Django ni FastAPI. Django guarda. FastAPI adapta. Cada comando de juego comprueba la sesión de jugador, el origen y `X-CSRF-Token`, igual que el cierre de sesión.
 
-El reglamento y la partida siguen en el JSON de la campaña: el dominio lee y escribe ese documento, y la fila se bloquea en cada comando. Lo que se consulta sin abrir el tablero no entra en el JSON. La tabla de plazas responde qué campañas tiene una cuenta (cuenta, papel, estado y alias). La fila de la campaña copia fase, revisión, turno, plazas (`seat_limit`) y ocupación; el listado, el pulso y la vista previa de una invitación leen solo esas columnas. Una consulta nueva de listado añade el campo en `apps/campaigns/projection.py` y se rellena en el mismo `save`, en vez de recorrer documentos.
+El reglamento y la partida siguen en el JSON de la campaña: `apps/campaigns/document.py` lee y escribe ese documento, el dominio trabaja con los tipos, y la fila se bloquea en cada comando. Lo que se consulta sin abrir el tablero no entra en el JSON. La tabla de plazas responde qué campañas tiene una cuenta (cuenta, papel, estado y alias). La fila de la campaña copia fase, revisión, turno, plazas (`seat_limit`) y ocupación; el listado, el pulso y la vista previa de una invitación leen solo esas columnas. Una consulta nueva de listado añade el campo en `apps/campaigns/projection.py` y se rellena en el mismo `save`, en vez de recorrer documentos.
 
 La partida, las invitaciones y los avisos viven en módulos distintos (`match`, `invitations`, `notices`). FastAPI parte los endpoints en lobby, invitaciones y mesa.
 
@@ -48,6 +48,8 @@ Si hay que pasar el propietario, el dominio sortea entre quien sigue y no está 
 
 El dominio devuelve un código. La API lo traduce a una frase española fija y el frontend la pasa por el catálogo.
 
+Una excepción que nadie atrapó se registra con la traza completa y el `request_id` de la petición. El cliente recibe 500 y el cuerpo `{"detail": "Error interno."}`. Ese registro es el punto donde más adelante se puede enganchar Sentry u OpenTelemetry.
+
 Nombre de ejército, comandante y raza: 40 caracteres. Lista: 2000. Una petición de campaña no pasa de 8 KB. Las de cuentas siguen en 4 KB.
 
-Las pruebas del dominio no usan base de datos. Las de la API usan Postgres y cubren la orden que el rival no puede leer, la versión que responde 409 y la cuenta desactivada que deja la plaza inactiva. Si Redis no puede publicar, el proceso lo deja en el log y entrega el aviso en local. El flujo de comprobación del backend es `ruff check .`, `mypy` y `pytest`.
+Las pruebas del dominio no usan base de datos. Las de la API usan Postgres y cubren la orden que el rival no puede leer, la versión que responde 409 y la cuenta desactivada que deja la plaza inactiva. Si Redis no puede publicar, el proceso lo deja en el log y entrega el aviso en local. El flujo de comprobación del backend es `ruff check .`, `mypy --strict` y `pytest --cov=hexcampaign --cov=api --cov=apps --cov-report=term-missing --cov-fail-under=86`. El modo estricto cubre el dominio y la API. El suelo de cobertura es 86.

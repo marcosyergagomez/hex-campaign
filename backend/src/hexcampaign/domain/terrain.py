@@ -3,12 +3,13 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.hexes import Hex, neighbors
 
 
-def _contract() -> dict:
+def _contract() -> dict[str, Any]:
     """The exit table lives once, in shared/terrain.json, and the client reads it too."""
     here = Path(__file__).resolve()
     for parent in here.parents:
@@ -112,7 +113,7 @@ def gaze_from(plot: Plot | None) -> int:
     return _GAZE.get(plot.ground, _BASE_GAZE)
 
 
-def has_terrain(game) -> bool:
+def has_terrain(game: object) -> bool:
     """True when the campaign document carries a terrain atlas."""
     return getattr(game, "plots", None) is not None
 

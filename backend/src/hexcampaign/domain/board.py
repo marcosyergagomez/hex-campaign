@@ -4,12 +4,13 @@ Revert puts the board back. An expulsion that happened later stays.
 """
 
 import copy
+from typing import Any
 
 from hexcampaign.domain.game import Game, find_member
 from hexcampaign.domain.hexes import Hex
 
 
-def capture(game: Game) -> dict[str, object]:
+def capture(game: Game) -> dict[str, Any]:
     return {
         "phase": game.phase,
         "turn": game.turn,
@@ -57,7 +58,7 @@ def capture(game: Game) -> dict[str, object]:
     }
 
 
-def restore(game: Game, board: dict) -> None:
+def restore(game: Game, board: dict[str, Any]) -> None:
     """Put positions, orders and turn-caused status back. An account closure stays inactive."""
     saved_armies = {item["id"]: item for item in board["armies"]}
     for army in game.armies:

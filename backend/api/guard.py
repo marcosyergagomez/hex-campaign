@@ -9,6 +9,7 @@ password hasher.
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from django.conf import settings
 from starlette.datastructures import MutableHeaders
@@ -56,9 +57,9 @@ _SECURITY_HEADERS = {
     ),
 }
 
-Scope = dict
-Receive = Callable[[], Awaitable[dict]]
-Send = Callable[[dict], Awaitable[None]]
+Scope = dict[str, Any]
+Receive = Callable[[], Awaitable[dict[str, Any]]]
+Send = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 def clear_account_limits() -> None:
@@ -66,8 +67,14 @@ def clear_account_limits() -> None:
 
 
 def _header(scope: Scope, name: bytes) -> str:
-    for key, value in scope.get("headers", []):
-        if key == name:
+    headers = scope.get("headers", [])
+    if not isinstance(headers, list):
+        return ""
+    for item in headers:
+        if not (isinstance(item, tuple) and len(item) == 2):
+            continue
+        key, value = item
+        if key == name and isinstance(value, bytes):
             return value.decode("latin-1")
     return ""
 
@@ -160,7 +167,7 @@ def _body_limit(path: str) -> int | None:
 class AccountGuard:
     """Limits posts and keeps confirmation pages out of caches and referrers."""
 
-    def __init__(self, app) -> None:
+    def __init__(self, app: Callable[[Scope, Receive, Send], Awaitable[None]]) -> None:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -183,7 +190,7 @@ class AccountGuard:
             await self.app(scope, receive, send)
             return
 
-        async def send_hardened(message: dict) -> None:
+        async def send_hardened(message: dict[str, Any]) -> None:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
                 for key, value in _SECURITY_HEADERS.items():
@@ -223,9 +230,9 @@ class AccountGuard:
             log.warning("request rejected status=413 path=%s", path)
             await _reject(send, scope, 413, _TOO_LARGE)
             return
-        pending: dict | None = {"type": "http.request", "body": body, "more_body": False}
+        pending: dict[str, Any] | None = {"type": "http.request", "body": body, "more_body": False}
 
-        async def replay() -> dict:
+        async def replay() -> dict[str, Any]:
             nonlocal pending
             if pending is not None:
                 message = pending

@@ -5,7 +5,7 @@ from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import Army, Game, living
 from hexcampaign.domain.hexes import Hex, distance
 from hexcampaign.domain.sight import sees_army
-from hexcampaign.domain.terrain import passable
+from hexcampaign.domain.terrain import Plot, passable
 from hexcampaign.domain.units import is_explorer, move_budget
 
 
@@ -19,12 +19,19 @@ def check_terrain_order(game: Game, player_id: str, paths: dict[str, tuple[Hex, 
     _reject_allies_in_the_way(game, own, paths, board, plots)
 
 
-def _reject_illegal_steps(game, player_id, own, paths, board, plots) -> None:
-    blocked = {
-        Hex(army.q, army.r)
-        for army in game.armies
-        if army.kind == "army" and sees_army(game, player_id, army)
-    }
+def _reject_illegal_steps(
+    game: Game,
+    player_id: str,
+    own: list[Army],
+    paths: dict[str, tuple[Hex, ...]],
+    board: set[Hex],
+    plots: dict[Hex, Plot],
+) -> None:
+    blocked: set[Hex] = set()
+    for army in game.armies:
+        spot = army.at()
+        if army.kind == "army" and spot is not None and sees_army(game, player_id, army):
+            blocked.add(spot)
     blocked.difference_update(army.at() for army in own if army.at() is not None)
     forts = {fort.at() for fort in game.fortresses}
     for army in own:
@@ -48,7 +55,13 @@ def _reject_illegal_steps(game, player_id, own, paths, board, plots) -> None:
             previous = step
 
 
-def _reject_allies_in_the_way(game, own, paths, board, plots) -> None:
+def _reject_allies_in_the_way(
+    game: Game,
+    own: list[Army],
+    paths: dict[str, tuple[Hex, ...]],
+    board: set[Hex],
+    plots: dict[Hex, Plot],
+) -> None:
     moved = walk([_walker(game, army, paths[army.id]) for army in own], plots, board)
     for army in own:
         solo = walk([_walker(game, army, paths[army.id])], plots, board)

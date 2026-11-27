@@ -4,7 +4,7 @@ import random
 
 from django.utils import timezone
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from api.campaigns.bodies import (
     ArmyBody,
@@ -18,7 +18,9 @@ from api.campaigns.bodies import (
 )
 from api.campaigns.http import _hexes, _road_play, _run, _view
 from api.django_db import django_sync
+from apps.accounts.models import User
 from apps.campaigns.match import play, present_fort_delta
+from hexcampaign.domain.game import Game
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.lobby import (
     begin,
@@ -46,9 +48,9 @@ router = APIRouter()
 
 @router.post("/api/campaigns/{campaign_id}/start")
 @django_sync
-def post_start(campaign_id: str, payload: StartBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_start(campaign_id: str, payload: StartBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return begin(game, str(user.pk), payload.admins, timezone.now())
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -58,9 +60,9 @@ def post_start(campaign_id: str, payload: StartBody, request: Request) -> JSONRe
 
 @router.post("/api/campaigns/{campaign_id}/placement/ready")
 @django_sync
-def post_placement_ready(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_placement_ready(campaign_id: str, payload: RevisionBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return confirm_placement(game, str(user.pk), timezone.now())
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -70,11 +72,11 @@ def post_placement_ready(campaign_id: str, payload: RevisionBody, request: Reque
 
 @router.post("/api/campaigns/{campaign_id}/placement")
 @django_sync
-def post_placement(campaign_id: str, payload: PlaceBody, request: Request) -> JSONResponse:
-    def action(user):
+def post_placement(campaign_id: str, payload: PlaceBody, request: Request) -> Response:
+    def action(user: User) -> Response:
         spots = {army_id: Hex(spot.q, spot.r) for army_id, spot in payload.armies.items()}
 
-        def command(game):
+        def command(game: Game) -> Game:
             fortress = Hex(payload.fortress.q, payload.fortress.r)
             return place_armies(game, str(user.pk), fortress, spots)
 
@@ -86,9 +88,9 @@ def post_placement(campaign_id: str, payload: PlaceBody, request: Request) -> JS
 
 @router.post("/api/campaigns/{campaign_id}/placement/close")
 @django_sync
-def post_close_placement(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_close_placement(campaign_id: str, payload: RevisionBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return close_placement(game, str(user.pk), timezone.now())
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -98,10 +100,10 @@ def post_close_placement(campaign_id: str, payload: RevisionBody, request: Reque
 
 @router.post("/api/campaigns/{campaign_id}/roads")
 @django_sync
-def post_road(campaign_id: str, payload: RoadBody, request: Request) -> JSONResponse:
+def post_road(campaign_id: str, payload: RoadBody, request: Request) -> Response:
     cell = Hex(payload.q, payload.r)
 
-    def action(user):
+    def action(user: User) -> Response:
         return _road_play(
             user,
             campaign_id,
@@ -115,10 +117,10 @@ def post_road(campaign_id: str, payload: RoadBody, request: Request) -> JSONResp
 
 @router.post("/api/campaigns/{campaign_id}/roads/clear")
 @django_sync
-def post_clear_road(campaign_id: str, payload: RoadBody, request: Request) -> JSONResponse:
+def post_clear_road(campaign_id: str, payload: RoadBody, request: Request) -> Response:
     cell = Hex(payload.q, payload.r)
 
-    def action(user):
+    def action(user: User) -> Response:
         return _road_play(
             user,
             campaign_id,
@@ -132,8 +134,8 @@ def post_clear_road(campaign_id: str, payload: RoadBody, request: Request) -> JS
 
 @router.post("/api/campaigns/{campaign_id}/roads/ready")
 @django_sync
-def post_roads_ready(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
-    def action(user):
+def post_roads_ready(campaign_id: str, payload: RevisionBody, request: Request) -> Response:
+    def action(user: User) -> Response:
         return _road_play(
             user,
             campaign_id,
@@ -147,9 +149,9 @@ def post_roads_ready(campaign_id: str, payload: RevisionBody, request: Request) 
 
 @router.post("/api/campaigns/{campaign_id}/armies/{army_id}/stand")
 @django_sync
-def post_stand(campaign_id: str, army_id: str, payload: RoadBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_stand(campaign_id: str, army_id: str, payload: RoadBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return stand_token(
                 game,
                 str(user.pk),
@@ -165,9 +167,9 @@ def post_stand(campaign_id: str, army_id: str, payload: RoadBody, request: Reque
 
 @router.post("/api/campaigns/{campaign_id}/armies/{army_id}")
 @django_sync
-def post_army(campaign_id: str, army_id: str, payload: ArmyBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_army(campaign_id: str, army_id: str, payload: ArmyBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return describe_army(
                 game,
                 str(user.pk),
@@ -185,11 +187,11 @@ def post_army(campaign_id: str, army_id: str, payload: ArmyBody, request: Reques
 
 @router.post("/api/campaigns/{campaign_id}/orders")
 @django_sync
-def post_orders(campaign_id: str, payload: OrdersBody, request: Request) -> JSONResponse:
-    def action(user):
+def post_orders(campaign_id: str, payload: OrdersBody, request: Request) -> Response:
+    def action(user: User) -> Response:
         paths = {army_id: _hexes(steps) for army_id, steps in payload.orders.items()}
 
-        def command(game):
+        def command(game: Game) -> Game:
             return lock_orders(game, str(user.pk), paths, timezone.now())
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -199,9 +201,9 @@ def post_orders(campaign_id: str, payload: OrdersBody, request: Request) -> JSON
 
 @router.post("/api/campaigns/{campaign_id}/orders/close")
 @django_sync
-def post_close_orders(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_close_orders(campaign_id: str, payload: RevisionBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return close_orders(game, str(user.pk), timezone.now())
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -216,9 +218,9 @@ def post_battle(
     battle_id: str,
     payload: BattleBody,
     request: Request,
-) -> JSONResponse:
-    def action(user):
-        def command(game):
+) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return report_battle(game, str(user.pk), battle_id, payload.result, timezone.now())
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -233,9 +235,9 @@ def post_judge(
     battle_id: str,
     payload: BattleBody,
     request: Request,
-) -> JSONResponse:
-    def action(user):
-        def command(game):
+) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return judge_battle(game, str(user.pk), battle_id, payload.result, timezone.now())
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -245,9 +247,9 @@ def post_judge(
 
 @router.post("/api/campaigns/{campaign_id}/expel")
 @django_sync
-def post_expel(campaign_id: str, payload: PlayerBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_expel(campaign_id: str, payload: PlayerBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return expel_player(
                 game,
                 str(user.pk),
@@ -263,9 +265,9 @@ def post_expel(campaign_id: str, payload: PlayerBody, request: Request) -> JSONR
 
 @router.post("/api/campaigns/{campaign_id}/leave")
 @django_sync
-def post_leave(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_leave(campaign_id: str, payload: RevisionBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return leave_campaign(game, str(user.pk), random.Random(), timezone.now())
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -275,9 +277,9 @@ def post_leave(campaign_id: str, payload: RevisionBody, request: Request) -> JSO
 
 @router.post("/api/campaigns/{campaign_id}/admins")
 @django_sync
-def post_admin(campaign_id: str, payload: PlayerBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_admin(campaign_id: str, payload: PlayerBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return promote_player(game, str(user.pk), payload.player_id)
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -287,9 +289,9 @@ def post_admin(campaign_id: str, payload: PlayerBody, request: Request) -> JSONR
 
 @router.post("/api/campaigns/{campaign_id}/restore")
 @django_sync
-def post_restore(campaign_id: str, payload: PlayerBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_restore(campaign_id: str, payload: PlayerBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return restore_player(game, str(user.pk), payload.player_id)
 
         return _view(user, *play(user, campaign_id, payload.revision, command))
@@ -299,9 +301,9 @@ def post_restore(campaign_id: str, payload: PlayerBody, request: Request) -> JSO
 
 @router.post("/api/campaigns/{campaign_id}/revert")
 @django_sync
-def post_revert(campaign_id: str, payload: RevisionBody, request: Request) -> JSONResponse:
-    def action(user):
-        def command(game):
+def post_revert(campaign_id: str, payload: RevisionBody, request: Request) -> Response:
+    def action(user: User) -> Response:
+        def command(game: Game) -> Game:
             return revert_turn(game, str(user.pk))
 
         return _view(user, *play(user, campaign_id, payload.revision, command))

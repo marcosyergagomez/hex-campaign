@@ -12,6 +12,7 @@ from api.player_session import (
     SESSION_MESSAGE,
     same_origin,
 )
+from apps.accounts.models import User
 from apps.accounts.sessions import csrf_matches, load_session
 
 
@@ -19,14 +20,14 @@ def _errors(status: int, field: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"errors": {field: [message]}})
 
 
-def reader(request: Request):
+def reader(request: Request) -> User | JSONResponse:
     session = load_session(request.cookies.get(SESSION_COOKIE, ""))
     if session is None:
         return _errors(401, "session", SESSION_MESSAGE)
     return session.user
 
 
-def writer(request: Request):
+def writer(request: Request) -> User | JSONResponse:
     if not same_origin(request):
         return _errors(403, "origin", ORIGIN_MESSAGE)
     session = load_session(request.cookies.get(SESSION_COOKIE, ""))

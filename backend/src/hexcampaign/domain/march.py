@@ -110,7 +110,16 @@ def march(
     )
 
 
-def _step_all(intended, position, remaining, trails, owners, stopped, contacts, kinds) -> None:
+def _step_all(
+    intended: dict[str, Hex],
+    position: dict[str, Hex],
+    remaining: dict[str, list[Hex]],
+    trails: dict[str, list[Hex]],
+    owners: dict[str, str],
+    stopped: set[str],
+    contacts: list[Contact],
+    kinds: dict[str, str],
+) -> None:
     """One simultaneous step. Someone who leaves a hex does not block it."""
     plan = plan_step(intended, position, owners, stopped, kinds)
     moving_intended = {army_id: intended[army_id] for army_id in plan.moving}
@@ -150,7 +159,16 @@ def _step_all(intended, position, remaining, trails, owners, stopped, contacts, 
                     stopped.add(other)
 
 
-def _arrive(position, trails, remaining, stopped, army_id, dest, *, fight: bool) -> None:
+def _arrive(
+    position: dict[str, Hex],
+    trails: dict[str, list[Hex]],
+    remaining: dict[str, list[Hex]],
+    stopped: set[str],
+    army_id: str,
+    dest: Hex,
+    *,
+    fight: bool,
+) -> None:
     position[army_id] = dest
     trails[army_id].append(dest)
     if remaining[army_id]:

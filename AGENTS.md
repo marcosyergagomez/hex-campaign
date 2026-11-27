@@ -43,10 +43,10 @@ La respuesta de juego es la vista de ese jugador. Las órdenes ajenas permanecen
 
 El dominio ya está partido por trabajo. Un caso nuevo entra en el módulo de ese trabajo. No vuelve a `game.py` ni se pega al final de un vecino porque el archivo ya estaba abierto.
 
-- `game.py` — tipos del documento y su serialización (`to_dict`, `from_dict`). Sin reglas de turno, lobby ni marcha.
-- `lobby.py` — reclutamiento, identidad, despliegue y preparación del asiento.
-- `turn.py` — cerrar órdenes, batallas y salida de jugadores (expulsar, abandonar, promover).
-- `view.py` — la vista de un jugador, niebla incluida.
+- `game.py` — tipos del documento (`Game`, `Member`, `Army`, `Fortress`, `Battle`) y las consultas (`find_*`, `require_*`, `bump`, `notice`). Sin reglas de turno, lobby ni marcha. `to_dict` y `from_dict` viven en `apps/campaigns/document.py`.
+- `lobby.py` — fachada. Reclutamiento e identidad en `recruit.py`, colocación en `placement.py`, hojas y fichas en `muster.py`, casas y terreno donde se planta en `homes.py`.
+- `turn.py` — fachada. Cerrar órdenes y simular el turno en `resolution.py`, anotar y juzgar batallas en `battle_report.py`, salida de jugadores en `departure.py`.
+- `view.py` — fachada. Casillas, fichas y fortalezas visibles en `view_map.py`. Película de la marcha y batallas de la vista en `view_playback.py`.
 - `march.py`, `clock_march.py`, `terrain_order.py`, `occupy.py` — resolución del movimiento. El plan que ve el jugador está en `frontend/src/game/hex/orders.ts` y tiene que coincidir. Lo vigilan `backend/tests/domain/test_movement_contract.py` y `frontend/tests/terrain-parity.test.ts`.
 - `sight.py` — niebla y mirada.
 - `roads.py` — caminos de la preparación.
@@ -61,10 +61,18 @@ En el navegador el tablero está partido igual:
 - `courses.ts` — contornos (ríos, orillas, territorio).
 - `geometry.ts` y `disk.ts` — geometría axial.
 - `TerrainArt.tsx`, `tokens.tsx`, `useHexPaint.ts`, `useMarchFilm.ts`, `boardTokens.ts` — pintura, fichas y película.
+- `boardTypes.ts` — tipos del tablero, medida y tinte de marca.
+- `useBoardCamera.ts` y `BoardTools.tsx` — zoom, recentrado y desplazamiento de la cámara.
+- `useBoardPointer.ts` — puntero a hexágono, `spotAtRef` y arrastre de ficha.
+- `useBoardCaption.ts` — pie con el terreno o la nota de la ficha.
+- `HexTerrainLayer.tsx` — terreno, ríos, lagos, caminos, puentes y niebla.
+- `TokenLayer.tsx` — fichas, cruces de colocación, velo de mirada y selección.
+- `useMarchGlide.ts` — deslizamiento de la marcha ya resuelta. No entra en `useMarchFilm.ts`.
+- `OrderLayer.tsx` — trazos, rutas de órdenes y espadas del choque.
 - `HexBoard.tsx` — compone el tablero y el puntero. No recupera la pintura, los contornos ni el plan de ruta.
 - `frontend/src/pages/campaign/` — sesión, órdenes, preparación, selección y paneles. `CampaignDetailPage.tsx` solo los compone.
 
-`lobby.py`, `view.py`, `turn.py`, `game.py`, `landscape.py`, `HexBoard.tsx`, `courses.ts`, `readCampaign.ts`, `MapEditorPage.tsx` y `CreateCampaignPage.tsx` ya están en el techo de su trabajo. Un arreglo de ese mismo trabajo puede añadir unas líneas. Otro trabajo es un archivo hermano en la misma carpeta, con la prueba de ese comportamiento. No se fusiona un hermano de vuelta para dejarlo junto.
+`game.py`, `landscape.py`, `HexBoard.tsx`, `courses.ts`, `readCampaign.ts`, `MapEditorPage.tsx` y `CreateCampaignPage.tsx` ya están en el techo de su trabajo. `lobby.py`, `view.py` y `turn.py` solo reexportan: el trabajo nuevo entra en el hermano de esa tarea (`recruit`, `placement`, `muster`, `homes`, `view_map`, `view_playback`, `resolution`, `battle_report`, `departure`). Un arreglo de ese mismo trabajo puede añadir unas líneas. No se fusiona un hermano de vuelta para dejarlo junto.
 
 ## Terreno
 
@@ -113,9 +121,11 @@ Desde `backend/`, con el entorno activo (en Windows, `.venv\Scripts\activate`):
 
 ```bash
 ruff check .
-mypy
-pytest
+mypy --strict
+pytest --cov=hexcampaign --cov=api --cov=apps --cov-report=term-missing --cov-fail-under=86
 ```
+
+`mypy --strict` exige tipos estrictos en `hexcampaign` y en `api`. `apps` y `config` conservan el nivel anterior, declarado en `backend/pyproject.toml`, para que Django no entre en ese modo. El suelo de cobertura es 86.
 
 Las pruebas de dominio no usan base de datos. Las de la API usan PostgreSQL, levantado desde la raíz con `docker compose up -d postgres`.
 

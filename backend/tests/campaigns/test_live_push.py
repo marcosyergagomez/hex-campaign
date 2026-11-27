@@ -156,8 +156,8 @@ def test_taking_a_color_pushes_the_campaign_to_the_other_seat(monkeypatch) -> No
 
 @pytest.mark.django_db(transaction=True)
 def test_promoting_a_player_notifies_only_that_player(monkeypatch) -> None:
+    from apps.campaigns.document import to_dict
     from apps.campaigns.records import _sync
-    from hexcampaign.domain.game import to_dict
     from hexcampaign.domain.turn import promote_player
 
     seen: list[dict] = []

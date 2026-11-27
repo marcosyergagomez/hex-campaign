@@ -8,9 +8,9 @@ from fastapi.testclient import TestClient
 
 from api.player_session import CSRF_COOKIE
 from apps.accounts.models import User
+from apps.campaigns.document import from_dict
 from apps.campaigns.models import Seat
 from config.asgi import application
-from hexcampaign.domain.game import from_dict
 
 PASSWORD = "una-clave-larga"
 

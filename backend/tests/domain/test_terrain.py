@@ -8,10 +8,11 @@ from datetime import UTC, datetime
 
 import pytest
 
+from apps.campaigns.document import from_dict, to_dict
 from hexcampaign.domain.balance import arrival_times, balance_problems
 from hexcampaign.domain.clock_march import Walker, walk
 from hexcampaign.domain.errors import DomainError
-from hexcampaign.domain.game import from_dict, seated, to_dict
+from hexcampaign.domain.game import seated
 from hexcampaign.domain.hexes import Hex, angle, disk, distance, neighbors
 from hexcampaign.domain.land import home_radius, owned, rotate
 from hexcampaign.domain.landscape import _problems, _spread

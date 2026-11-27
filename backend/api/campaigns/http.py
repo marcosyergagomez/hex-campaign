@@ -1,15 +1,20 @@
 """Shared HTTP translation for campaign routes."""
 
+from collections.abc import Callable
+
 from django.utils import timezone
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from api.campaigns.bodies import HexBody, RulesBody
 from api.player_gate import writer as _writer
 from api.player_session import SESSION_MESSAGE
+from apps.accounts.models import User
 from apps.campaigns.errors import CampaignError, RevisionConflict
 from apps.campaigns.match import play, present, present_roads_delta
+from apps.campaigns.models import Campaign
 from hexcampaign.domain.errors import DomainError
+from hexcampaign.domain.game import Game
 from hexcampaign.domain.hexes import Hex
 from hexcampaign.domain.rules import Rules, rules_from
 
@@ -63,7 +68,7 @@ def _failure(exc: CampaignError) -> JSONResponse:
     return _errors(status, "campaign", message)
 
 
-def _run(request: Request, action):
+def _run(request: Request, action: Callable[[User], Response]) -> Response:
     user = _writer(request)
     if isinstance(user, JSONResponse):
         return user
@@ -75,11 +80,17 @@ def _run(request: Request, action):
         return _failure(exc)
 
 
-def _view(user, campaign, game, status: int = 200) -> JSONResponse:
+def _view(user: User, campaign: Campaign, game: Game, status: int = 200) -> JSONResponse:
     return JSONResponse(present(campaign, game, user, timezone.now()), status_code=status)
 
 
-def _road_play(user, campaign_id: str, revision: int, command, changed: list[Hex]) -> JSONResponse:
+def _road_play(
+    user: User,
+    campaign_id: str,
+    revision: int,
+    command: Callable[[Game], Game],
+    changed: list[Hex],
+) -> JSONResponse:
     """Preparing stays on a delta; leaving preparation returns the full table view."""
     campaign, game = play(user, campaign_id, revision, command)
     # Finishing roads moves this seat on to its armies, so the token list has to come back whole.

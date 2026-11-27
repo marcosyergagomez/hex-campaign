@@ -126,10 +126,11 @@ def _mirror_alias(user: User) -> None:
     Campaigns are locked in id order after the user row, matching deactivate_account.
     The revision moves so the other seats refetch instead of keeping the old name.
     """
+    from apps.campaigns.document import from_dict
     from apps.campaigns.models import Campaign, Seat
     from apps.campaigns.store import _save
     from hexcampaign.domain.errors import DomainError
-    from hexcampaign.domain.game import bump, from_dict
+    from hexcampaign.domain.game import bump
 
     Seat.objects.filter(user=user).exclude(alias=user.alias).update(alias=user.alias)
     campaign_ids = sorted(

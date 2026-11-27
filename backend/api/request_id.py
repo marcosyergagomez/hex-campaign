@@ -7,7 +7,7 @@ import re
 import uuid
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import cast
+from typing import Any, cast
 
 from starlette.datastructures import MutableHeaders
 
@@ -16,9 +16,9 @@ request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 HEADER = "x-request-id"
 
-Scope = dict
-Receive = Callable[[], Awaitable[dict]]
-Send = Callable[[dict], Awaitable[None]]
+Scope = dict[str, Any]
+Receive = Callable[[], Awaitable[dict[str, Any]]]
+Send = Callable[[dict[str, Any]], Awaitable[None]]
 
 log = logging.getLogger("hexcampaign.http")
 
@@ -28,13 +28,20 @@ def current_request_id() -> str:
 
 
 def _incoming(scope: Scope) -> str:
-    for key, value in scope.get("headers", []):
-        if key != b"x-request-id":
-            continue
-        raw = value.decode("latin-1", errors="replace").strip()
-        if _REQUEST_ID.fullmatch(raw):
-            return raw
-        break
+    headers = scope.get("headers", [])
+    if isinstance(headers, list):
+        for item in headers:
+            if not (isinstance(item, tuple) and len(item) == 2):
+                continue
+            key, value = item
+            if key != b"x-request-id":
+                continue
+            if not isinstance(value, bytes):
+                break
+            raw = value.decode("latin-1", errors="replace").strip()
+            if _REQUEST_ID.fullmatch(raw):
+                return raw
+            break
     return uuid.uuid4().hex
 
 
@@ -67,7 +74,7 @@ class RequestIdFormatter(logging.Formatter):
 class RequestIdMiddleware:
     """Read X-Request-ID or mint one, then return it on the response."""
 
-    def __init__(self, app) -> None:
+    def __init__(self, app: Callable[[Scope, Receive, Send], Awaitable[None]]) -> None:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -75,9 +82,10 @@ class RequestIdMiddleware:
             await self.app(scope, receive, send)
             return
         request_id = _incoming(scope)
+        scope["hexcampaign.request_id"] = request_id
         token = request_id_var.set(request_id)
 
-        async def send_with_id(message: dict) -> None:
+        async def send_with_id(message: dict[str, Any]) -> None:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
                 headers[HEADER] = request_id
