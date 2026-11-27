@@ -38,6 +38,7 @@ from .errors import (
 )
 from .models import Campaign, Seat
 from .store import _save, _sync
+from .telemetry import note_turn_resolved
 
 log = logging.getLogger("hexcampaign.campaigns")
 
@@ -178,12 +179,16 @@ def _mutate(
     if game.revision != revision:
         raise RevisionConflict()
     before = game.revision
+    phase_before = game.phase
+    turn_before = game.turn
     was_running = campaign.phase in RUNNING_PHASES
     active_before = {member.player_id for member in game.members if member.status == "active"}
     try:
         updated = command(game)
     except DomainError as exc:
         raise CampaignError(exc.code) from exc
+    if phase_before == "orders" and (updated.phase != "orders" or updated.turn > turn_before):
+        note_turn_resolved()
     if updated.revision != before:
         if updated.phase in RUNNING_PHASES and not was_running:
             _assert_members_running_capacity(updated, campaign.pk)

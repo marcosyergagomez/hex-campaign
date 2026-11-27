@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from api.request_id import HEADER, current_request_id, request_id_var
+from apps.campaigns.telemetry import note_unhandled
 
 log = logging.getLogger("hexcampaign.http")
 
@@ -37,6 +38,7 @@ def install(api: FastAPI) -> None:
                 request.url.path,
                 exc_info=exc,
             )
+            note_unhandled(request_id)
         finally:
             request_id_var.reset(token)
         response = JSONResponse(status_code=500, content={"detail": INTERNAL})

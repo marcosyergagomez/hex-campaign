@@ -13,6 +13,7 @@ from apps.accounts.models import User
 from apps.campaigns.errors import CampaignError, RevisionConflict
 from apps.campaigns.match import play, present, present_roads_delta
 from apps.campaigns.models import Campaign
+from apps.campaigns.telemetry import note_revision_conflict
 from hexcampaign.domain.errors import DomainError
 from hexcampaign.domain.game import Game
 from hexcampaign.domain.hexes import Hex
@@ -27,6 +28,8 @@ _MESSAGES = {
     "expelled": "No puedes volver a esta campaña.",
     "order_illegal": "Esa orden no es legal.",
     "text_invalid": "Ese texto no es válido.",
+    "sheet_incomplete": "Falta el comandante o la lista obligatoria de un ejército.",
+    "commander_taken": "Ese comandante ya está en otro ejército tuyo.",
     "battle_closed": "Esa batalla ya está cerrada.",
     "battle_unknown": "Esa batalla no existe.",
     "cannot_expel_owner": "El propietario activo no se puede expulsar.",
@@ -75,6 +78,7 @@ def _run(request: Request, action: Callable[[User], Response]) -> Response:
     try:
         return action(user)
     except RevisionConflict as exc:
+        note_revision_conflict()
         return _failure(exc)
     except CampaignError as exc:
         return _failure(exc)

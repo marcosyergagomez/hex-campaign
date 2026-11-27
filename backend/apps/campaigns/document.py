@@ -1,5 +1,6 @@
 """Read and write the campaign JSON. Rules stay in the domain; this module only stores them."""
 
+from collections.abc import Callable
 from typing import Any
 
 from hexcampaign.domain.errors import DomainError
@@ -12,11 +13,13 @@ from hexcampaign.domain.terrain import Plot, checked_plot
 from hexcampaign.domain.units import checked_kind
 
 VERSION = 2
+SCHEMA_VERSION = 1
 
 
 def to_dict(game: Game) -> dict[str, object]:
     return {
         "version": VERSION,
+        "schema_version": SCHEMA_VERSION,
         "revision": game.revision,
         "name": game.name,
         "description": game.description,
@@ -64,7 +67,10 @@ def to_dict(game: Game) -> dict[str, object]:
 
 
 def from_dict(data: object) -> Game:
-    if not isinstance(data, dict) or data.get("version") != VERSION:
+    if not isinstance(data, dict):
+        raise DomainError("rules_invalid")
+    data = _migrate(data)
+    if data.get("version") != VERSION:
         raise DomainError("rules_invalid")
     phase = data["phase"]
     if phase not in PHASES:
@@ -144,6 +150,44 @@ def from_dict(data: object) -> Game:
     game.prep_done = set(done)
     _absorb_preparation(game)
     return game
+
+
+def _migrate(data: dict[Any, Any]) -> dict[Any, Any]:
+    """Bring a stored document up to SCHEMA_VERSION. Missing means the legacy shape."""
+    current = _schema_number(data.get("schema_version"))
+    if current is None:
+        data = _from_legacy(data)
+        current = SCHEMA_VERSION
+    while current < SCHEMA_VERSION:
+        step = _STEPS.get(current)
+        if step is None:
+            raise DomainError("rules_invalid")
+        data = step(data)
+        current += 1
+    if current != SCHEMA_VERSION:
+        raise DomainError("rules_invalid")
+    return data
+
+
+def _from_legacy(data: dict[Any, Any]) -> dict[Any, Any]:
+    """Documents saved before schema_version already carry version 2. Keep every key."""
+    if data.get("version") != VERSION:
+        raise DomainError("rules_invalid")
+    migrated = dict(data)
+    migrated["schema_version"] = SCHEMA_VERSION
+    return migrated
+
+
+def _schema_number(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise DomainError("rules_invalid")
+    return value
+
+
+# The next schema adds _STEPS[SCHEMA_VERSION] and raises SCHEMA_VERSION by one.
+_STEPS: dict[int, Callable[[dict[Any, Any]], dict[Any, Any]]] = {}
 
 
 def _absorb_preparation(game: Game) -> None:

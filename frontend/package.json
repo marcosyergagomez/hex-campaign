@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit --pretty false && vite build",
     "lint": "eslint .",
-    "test": "vitest run && node --test tests/courses.test.mjs",
+    "test": "vitest run --coverage && node --test tests/courses.test.mjs",
     "test:e2e": "playwright test",
     "test:maps": "vitest run tests/orders.test.ts tests/terrain-parity.test.ts && node --test tests/courses.test.mjs",
     "preview": "vite preview"
@@ -26,6 +26,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^4.7.0",
+    "@vitest/coverage-v8": "^4.1.12",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "happy-dom": "^21.0.4",

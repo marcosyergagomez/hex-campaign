@@ -58,6 +58,8 @@ const fromSpanish = [
   "mailFailed",
   "acceptedDetail",
   "rulesInvalid",
+  "sheetIncomplete",
+  "commanderTaken",
   "campaignNotFound",
   "campaignRevisionConflict",
   "campaignOpenLimit",

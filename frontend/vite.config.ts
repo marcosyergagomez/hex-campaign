@@ -74,6 +74,25 @@ export default defineConfig({
     environment: "happy-dom",
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text"],
+      include: ["src/game/hex/**", "src/api/**"],
+      thresholds: {
+        "src/game/hex/**": {
+          statements: 42,
+          branches: 34,
+          functions: 47,
+          lines: 45,
+        },
+        "src/api/**": {
+          statements: 1,
+          branches: 0,
+          functions: 0,
+          lines: 1,
+        },
+      },
+    },
   },
   server: {
     port: 5173,

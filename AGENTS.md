@@ -43,7 +43,7 @@ La respuesta de juego es la vista de ese jugador. Las órdenes ajenas permanecen
 
 El dominio ya está partido por trabajo. Un caso nuevo entra en el módulo de ese trabajo. No vuelve a `game.py` ni se pega al final de un vecino porque el archivo ya estaba abierto.
 
-- `game.py` — tipos del documento (`Game`, `Member`, `Army`, `Fortress`, `Battle`) y las consultas (`find_*`, `require_*`, `bump`, `notice`). Sin reglas de turno, lobby ni marcha. `to_dict` y `from_dict` viven en `apps/campaigns/document.py`.
+- `game.py` — tipos del documento (`Game`, `Member`, `Army`, `Fortress`, `Battle`) y las consultas (`find_*`, `require_*`, `bump`, `notice`). Sin reglas de turno, lobby ni marcha. `to_dict` y `from_dict` viven en `apps/campaigns/document.py`, que escribe `schema_version`. `apps/campaigns/telemetry.py` cuenta turnos resueltos, conflictos 409 y errores 500. No lo metas en `match.py`.
 - `lobby.py` — fachada. Reclutamiento e identidad en `recruit.py`, colocación en `placement.py`, hojas y fichas en `muster.py`, casas y terreno donde se planta en `homes.py`.
 - `turn.py` — fachada. Cerrar órdenes y simular el turno en `resolution.py`, anotar y juzgar batallas en `battle_report.py`, salida de jugadores en `departure.py`.
 - `view.py` — fachada. Casillas, fichas y fortalezas visibles en `view_map.py`. Película de la marcha y batallas de la vista en `view_playback.py`.
@@ -135,6 +135,8 @@ Desde `frontend/`:
 npm run lint
 npm test
 ```
+
+`npm test` también comprueba el suelo de cobertura de `src/game/hex/` (sentencias 42, ramas 34, funciones 47, líneas 45) y de `src/api/` (sentencias 1, ramas 0, funciones 0, líneas 1).
 
 `npm run build` ejecuta el comprobador de TypeScript y el empaquetado. Ejecuta el comprobador del lado que modificaste y deja el resultado verde antes de dar el cambio por hecho.
 

@@ -137,7 +137,7 @@ Quien ya conoce una casilla infranqueable no puede cerrar una orden que entre en
 
 Mientras le faltan puntos para salir, el ejército sigue ocupando su casilla. Quien termina antes de pagar sale antes. Llegar a una casilla compara los puntos gastados en esa salida, no los hexágonos cruzados. Si dos enemigos completan la salida hacia la misma casilla con el mismo coste, hay batalla ahí. Un ejército que todavía está pagando no ha entrado.
 
-El camino y el puente no sustituyen al suelo. Van encima. Salir de una casilla con camino cuesta 1, aunque el suelo cueste más, y la visión sigue siendo la del suelo. Completar un movimiento por camino da +1 movimiento ese turno. El camino no abre una montaña rocosa, un acantilado ni un lago. El puente o el vado solo puede ir sobre un río completo, y salir de ahí cuesta 1. Camino y puente pueden compartir casilla: salir cuesta 1 y, por el camino, se obtiene el +1 de movimiento.
+El camino y el puente no sustituyen al suelo. Van encima. Salir de una casilla con camino o con puente cuesta 1, aunque el suelo cueste más, y la visión sigue siendo la del suelo. Si el suelo no es llanura, playa ni río, al completar esa salida el camino devuelve el punto que se acaba de pagar: el neto de esa casilla es cero. En llanura, playa o río no se devuelve nada y el neto sigue siendo 1. Esas tres casillas son `open_grounds` en `shared/terrain.json`. El camino no abre una montaña rocosa, un acantilado ni un lago. El puente o el vado solo puede ir sobre un río completo. Camino y puente pueden compartir casilla: salir cuesta 1 y, como el río no recibe el punto devuelto, no hay +1.
 
 Hay dos velos, y no hacen lo mismo.
 
@@ -153,7 +153,7 @@ En las dos con niebla, un ejército mira a 2 casillas. La distancia cuenta la pr
 
 Mientras las órdenes están abiertas, cada cual ve lo que conoce y lo que la niebla le deja en las posiciones de salida. Cerrar la orden no descubre nada. Cuando las órdenes se ejecutan a la vez, cada paso que entra en una casilla descubre lo que se miraría desde ahí y actualiza la niebla. Al cerrar el turno, la niebla queda en las posiciones finales, más el territorio propio. El terreno descubierto por el camino se queda. Un enemigo que solo estuvo a la vista a mitad del camino deja de verse si al final no cae en la mirada ni en el territorio propio.
 
-Al generar un mapa, el propietario puede no mirarlo. Si no lo mira, no se lleva un conocimiento de más: al empezar sabe lo que diga la visibilidad elegida. Si lo mira, conoce todo el terreno desde ese momento. Quien dibujó un mapa propio ya lo conoce. Un mapa oculto lo coloca la aplicación. Si van a colocar los jugadores, el terreno se ve durante la colocación y, al empezar el primer turno, se aplica la visibilidad elegida.
+Mirar o no mirar el mapa al crearlo no cambia lo que se conoce: el campo `blind` se ignora y nadie nace con el atlas de quien lo dibujó. Al empezar, cada jugador sabe lo que diga la visibilidad elegida (`total`, `charted` o `home`). Durante el reclutamiento el tablero no se envía. En la colocación ya rige esa misma visibilidad: con «solo el territorio propio» se ve el disco de casa, no el mapa entero.
 
 El conocimiento de cada jugador, y el abono de salida de cada ejército, forman parte del turno. Revertir el último turno olvida lo descubierto en ese turno y devuelve los abonos a como estaban. Expulsar borra el conocimiento de ese jugador. Los demás conservan el suyo. Ni el propietario ve a través de la niebla por serlo. Quien lucha una batalla, y el administrador que la juzga, conocen esa casilla. Una fortaleza ya vista sigue en el recuerdo hasta que la mirada vuelve a pasar por ella.
 
@@ -169,7 +169,9 @@ Si colocan los jugadores, al empezar cada asiento recibe un territorio de casa y
 
 En un mapa hecho a mano, si coloca la aplicación, reparte las fortalezas junto al borde, lo más lejos posible unas de otras, cumpliendo lo de arriba. El mapa en sí es libre: puede tener un río suelto, una cordillera partida o el transitable cortado en dos.
 
-En un mapa generado, las fortalezas salen solas, lejos unas de otras, y cada semilla dibuja un país distinto. No es una copia girada del mismo reino: es un solo paisaje. El lago, el río y la sierra caen donde caigan, y el otro jugador no nace con el mismo dibujo, pero sí con una fortaleza transitable, un territorio que no pisa el del vecino y un viaje de al menos cinco turnos hasta cualquier fortaleza rival. No basta con contar trece casillas: el generador calcula el viaje más rápido con 3 puntos por turno, el coste al salir y el +1 de movimiento de los caminos. El viaje puede rodear el lago: esa es la frontera, no una recta de llanura vacía. El centro del tablero queda fuera de los territorios. Nadie nace sobre el agua ni encerrado por una barrera que no se pueda rodear.
+## Cómo se acepta un mapa generado
+
+En un mapa generado, las fortalezas salen solas, lejos unas de otras, y cada semilla dibuja un país distinto. No es una copia girada del mismo reino: es un solo paisaje. El lago, el río y la sierra caen donde caigan, y el otro jugador no nace con el mismo dibujo, pero sí con una fortaleza transitable, un territorio que no pisa el del vecino y un viaje de al menos cinco turnos hasta cualquier fortaleza rival. No basta con contar trece casillas: el generador calcula el viaje más rápido con 3 puntos por turno, el coste al salir y los vados del río. No suma el +1 de los caminos, porque el generado no los pinta. El viaje puede rodear el lago: esa es la frontera, no una recta de llanura vacía. El centro del tablero queda fuera de los territorios. Nadie nace sobre el agua ni encerrado por una barrera que no se pueda rodear.
 
 El generado conecta las fortalezas por terreno transitable. Cada masa de terreno es contigua, pero puede haber muchas separadas por claros y valles; no tiene por qué usar todos los terrenos:
 
@@ -182,7 +184,9 @@ El generado conecta las fortalezas por terreno transitable. Cada masa de terreno
 - El pantano, si sale, toca un río completo o un lago.
 - El puente o el vado está sobre un río completo y une dos casillas en las que se puede entrar.
 
-Los mapas generados no pintan caminos ni puentes: salen limpios para la preparación. Conservan terreno transitable, frontera y miradores. La fortaleza conserva su salida normal. El puente, cuando lo pone un jugador o un mapa a mano, iguala el río a la llanura y, sin camino encima, no da el +1 de movimiento. Un camino sobre río lleva puente. Salir por camino cuesta 1 y completar ese movimiento da +1 movimiento ese turno. No cambian la visión del terreno ni abren casillas infranqueables.
+Para aceptar el bosquejo hacen falta, como mínimo, un lago de 6 casillas, un curso de río de 6, una masa de bosque de 8 y una sierra de 5.
+
+Los mapas generados no pintan caminos de jugador. Sí colocan un vado sobre el río cada pocas casillas. Conservan terreno transitable, frontera y miradores. La fortaleza conserva su salida normal. Un puente o vado, lo ponga el generador, un jugador o un mapa a mano, deja la salida del río en 1 y, sin camino encima, no da el +1 de movimiento. Un camino sobre río lleva puente: salir cuesta 1 y, como el río está entre los suelos abiertos, no hay +1. El punto devuelto solo aparece al completar la salida de un camino sobre un suelo que no sea llanura, playa ni río. No cambian la visión del terreno ni abren casillas infranqueables.
 
 En el editor de mapas el jugador parte de un disco de llanura del tamaño elegido, puede quitar o recuperar hexágonos dentro de ese disco, pintar terreno, caminos y puentes a pincel, y colocar de 0 o de 2 a 4 fortalezas. Un mapa generado se abre como copia editable; el original no se sobrescribe. Al guardar solo se exige que haya casillas y que las fortalezas, si las hay, sean transitables.
 
@@ -204,6 +208,8 @@ La vegetación, las piedras y las cumbres se dibujan más pequeñas y mezcladas 
 
 En el visor se puede ampliar hasta el 300 %, desplazarse por el mapa y volver al 100 %. La cuadrícula puede ocultarse para contemplar el paisaje; las fortalezas y la identificación del terreno al pasar el puntero siguen disponibles. Estos controles solo cambian la vista.
 
+## Catálogo de terrenos
+
 | Terreno | Al salir | Mirada del ejército que está encima |
 | --- | --- | --- |
 | Llanura | 1 | 2, la de partida |
@@ -224,7 +230,7 @@ En el visor se puede ampliar hasta el 300 %, desplazarse por el mapa y volver al
 
 | Vía | Dónde puede ir | Qué cambia |
 | --- | --- | --- |
-| Camino | Encima de un terreno en el que se puede salir | Salir cuesta 1. Completar un movimiento por camino: +1 movimiento. |
+| Camino | Encima de un terreno en el que se puede salir | Salir cuesta 1. Fuera de llanura, playa y río, completar la salida devuelve ese punto. |
 | Puente o vado | Encima de un río completo | Salir cuesta 1. |
 
 Desierto, mina y campo se salen y se ven como una llanura. Están en el catálogo porque el desgaste y la producción vendrán después, y el mapa no tendrá que cambiar de terreno. La playa es la costa por la que se puede entrar. El acantilado no se escala. No hay desembarco. Salir de la montaña cuesta 3 y, mientras se está encima, la visión llega a 4. La montaña rocosa es la barrera.
